@@ -107,6 +107,14 @@ class RunManifest(EvidenceRecord):
             raise ValueError("completed_at_utc cannot precede created_at_utc")
         if len({artifact.path for artifact in self.artifacts}) != len(self.artifacts):
             raise ValueError("artifact paths must be unique")
+        artifact_hashes = {artifact.path: artifact.sha256 for artifact in self.artifacts}
+        for capability in self.probe_capabilities:
+            if capability.status is CapabilityStatus.PASS and artifact_hashes.get(
+                capability.evidence_path or ""
+            ) != capability.sha256:
+                raise ValueError(
+                    "passed capability evidence must match a manifest artifact and SHA-256"
+                )
         if self.status is RunStatus.FAILED and not (self.error_code and self.safe_message):
             raise ValueError("failed manifests require an error code and safe message")
         return self

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from debugmate.contracts import CapabilityStatus
 from debugmate.evidence import (
     MANIFEST_VERSION,
     ArtifactEntry,
+    CapabilityEvidence,
     EvidenceBundle,
     RunManifest,
     RunStatus,
@@ -277,3 +279,34 @@ def test_artifact_entry_rejects_nonportable_path() -> None:
             bytes=1,
             sha256="0" * 64,
         )
+
+
+@pytest.mark.parametrize(
+    ("evidence_path", "evidence_sha"),
+    [("missing.json", "1" * 64), ("artifact.json", "2" * 64)],
+)
+def test_passed_capability_must_link_to_matching_manifest_artifact(
+    evidence_path: str, evidence_sha: str
+) -> None:
+    case_id = "case_dddddddddddddddddddddddddddddddd"
+    manifest = make_manifest(case_id)
+    payload = manifest.model_dump()
+    payload["artifacts"] = [
+        ArtifactEntry(
+            path="artifact.json",
+            mime_type="application/json",
+            bytes=2,
+            sha256="1" * 64,
+        )
+    ]
+    payload["probe_capabilities"] = [
+        CapabilityEvidence(
+            capability_id="C01",
+            status=CapabilityStatus.PASS,
+            evidence_path=evidence_path,
+            sha256=evidence_sha,
+        )
+    ]
+
+    with pytest.raises(ValueError):
+        RunManifest.model_validate(payload)
