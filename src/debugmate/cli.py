@@ -25,7 +25,6 @@ def _print_outcome(outcome: ProbeOutcome) -> None:
                 "backend": outcome.report.backend,
                 "status_counts": dict(sorted(counts.items())),
             },
-            ensure_ascii=False,
             sort_keys=True,
         )
     )
@@ -61,7 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "export-schema":
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(canonical_json_bytes(diagnosis_schema()) + b"\n")
-        print(json.dumps({"schema_path": str(args.output.resolve())}, ensure_ascii=False))
+        print(json.dumps({"schema_path": str(args.output.resolve())}, sort_keys=True))
         return 0
     raise AssertionError("unreachable command")
 

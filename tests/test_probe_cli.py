@@ -186,6 +186,19 @@ def test_cli_fixture_probe_and_bundle_verification(
     assert verified["ok"] is True
 
 
+def test_cli_machine_json_is_ascii_safe_for_chinese_windows_paths(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "中文证据"
+
+    assert main(["fixture-probe", "--output", str(root)]) == 0
+    raw = capsys.readouterr().out
+    parsed = json.loads(raw)
+
+    assert raw.isascii()
+    assert "中文证据" in parsed["bundle_path"]
+
+
 def test_schema_export_is_deterministic(tmp_path: Path) -> None:
     first = tmp_path / "first.json"
     second = tmp_path / "second.json"
