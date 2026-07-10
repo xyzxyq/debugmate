@@ -12,7 +12,10 @@ from debugmate.adapters.dify import (
     DifyContractError,
     DifyQuotaError,
 )
+from debugmate.cli import main
 from debugmate.contracts import new_case_id
+from debugmate.evidence import RunStatus, verify_bundle
+from debugmate.probe import CAPABILITY_IDS, run_cloud_probe, run_fixture_probe
 from debugmate.settings import DebugMateSettings
 
 SENTINEL = "SECRET_SENTINEL_DO_NOT_LOG"
@@ -113,3 +116,58 @@ def test_dify_tts_rejects_non_mp3_bytes() -> None:
 
     with pytest.raises(DifyContractError):
         backend.synthesize_audio("fictional recap", user="debugmate-test")
+
+
+def test_fixture_probe_writes_truthful_seven_capability_bundle(tmp_path: Path) -> None:
+    outcome = run_fixture_probe(tmp_path / "evidence")
+    verification = verify_bundle(outcome.bundle_path)
+    report = json.loads((outcome.bundle_path / "probe-results.json").read_text(encoding="utf-8"))
+
+    assert verification.ok is True
+    assert verification.manifest is not None
+    assert verification.manifest.backend == "fixture"
+    assert verification.manifest.status is RunStatus.PASSED
+    assert tuple(item["capability_id"] for item in report["capabilities"]) == CAPABILITY_IDS
+    assert {item["status"] for item in report["capabilities"]} == {"not-tested"}
+    assert (outcome.bundle_path / "diagnosis.json").is_file()
+    assert (outcome.bundle_path / "input.redacted.json").is_file()
+
+
+def test_cloud_probe_without_credentials_is_blocked_not_failed(tmp_path: Path) -> None:
+    outcome = run_cloud_probe(DebugMateSettings.from_env({}), tmp_path / "evidence")
+    report = json.loads((outcome.bundle_path / "probe-results.json").read_text(encoding="utf-8"))
+    verification = verify_bundle(outcome.bundle_path)
+
+    assert outcome.exit_code == 2
+    assert {item["status"] for item in report["capabilities"]} == {"blocked"}
+    assert verification.ok is True
+    assert verification.manifest is not None
+    assert verification.manifest.status is RunStatus.BLOCKED
+
+
+def test_cli_fixture_probe_and_bundle_verification(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "cli-evidence"
+
+    assert main(["fixture-probe", "--output", str(root)]) == 0
+    output = json.loads(capsys.readouterr().out)
+    bundle_path = Path(output["bundle_path"])
+    assert output["backend"] == "fixture"
+    assert output["status_counts"] == {"not-tested": 7}
+
+    assert main(["verify-bundle", str(bundle_path)]) == 0
+    verified = json.loads(capsys.readouterr().out)
+    assert verified["ok"] is True
+
+
+def test_schema_export_is_deterministic(tmp_path: Path) -> None:
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+
+    assert main(["export-schema", "--output", str(first)]) == 0
+    assert main(["export-schema", "--output", str(second)]) == 0
+
+    assert first.read_bytes() == second.read_bytes()
+    schema = json.loads(first.read_text(encoding="utf-8"))
+    assert schema["title"] == "DiagnosisRecord"

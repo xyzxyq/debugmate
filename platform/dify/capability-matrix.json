@@ -1,0 +1,12 @@
+{
+  "matrix_version": "1.0.0",
+  "capabilities": [
+    {"capability_id": "C01", "description": "Authentication/API", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C02", "description": "File upload", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C03", "description": "Vision extraction", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C04", "description": "Knowledge retrieval", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C05", "description": "Structured DiagnosisRecord JSON", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C06", "description": "DSL export/import", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C07", "description": "TTS MP3", "status": "not-tested", "evidence_path": null, "sha256": null}
+  ]
+}
