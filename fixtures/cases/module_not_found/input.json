@@ -1,0 +1,7 @@
+{
+  "error_type": "ModuleNotFoundError",
+  "error_text": "ModuleNotFoundError: No module named 'demo_missing_pkg'",
+  "path": "C:\\Users\\student\\demo\\main.py",
+  "python_version": "3.13.5",
+  "platform": "Windows"
+}
