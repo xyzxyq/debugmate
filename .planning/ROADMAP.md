@@ -97,7 +97,7 @@ DebugMate v1 按“契约与证据先行、可信诊断成链、三模态统一�
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 工程骨架与平台能力闸门 | 0/TBD | Not started | - |
+| 1. 工程骨架与平台能力闸门 | 1/3 | In Progress|  |
 | 2. 知识库与输入安全 | 0/TBD | Not started | - |
 | 3. 可追溯诊断工作流 | 0/TBD | Not started | - |
 | 4. 三模态产物与统一结果页 | 0/TBD | Not started | - |
