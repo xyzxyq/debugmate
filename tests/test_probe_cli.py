@@ -146,6 +146,30 @@ def test_cloud_probe_without_credentials_is_blocked_not_failed(tmp_path: Path) -
     assert verification.manifest.status is RunStatus.BLOCKED
 
 
+def test_cloud_contract_failure_publishes_failed_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FailingBackend:
+        def __init__(self, configured: DebugMateSettings) -> None:
+            del configured
+
+        def upload_file(self, path: Path, user: str) -> None:
+            del path, user
+            raise DifyContractError("safe contract failure")
+
+    monkeypatch.setattr("debugmate.probe.DifyBackend", FailingBackend)
+    configured = DebugMateSettings.from_env({"DIFY_API_KEY": SENTINEL})
+
+    outcome = run_cloud_probe(configured, tmp_path / "evidence")
+    verification = verify_bundle(outcome.bundle_path)
+
+    assert outcome.exit_code == 1
+    assert verification.ok is True
+    assert verification.manifest is not None
+    assert verification.manifest.status is RunStatus.FAILED
+    assert verification.manifest.error_code == "E_DIFY_PROBE"
+
+
 def test_cli_fixture_probe_and_bundle_verification(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

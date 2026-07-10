@@ -118,6 +118,12 @@ def _manifest(
             )
             for item in capabilities
         ],
+        error_code="E_DIFY_PROBE" if status is RunStatus.FAILED else None,
+        safe_message=(
+            "Dify capability probe failed contract or transport validation"
+            if status is RunStatus.FAILED
+            else None
+        ),
     )
 
 
