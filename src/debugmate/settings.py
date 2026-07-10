@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import os
+import secrets
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+
+
+def _random_approval_key() -> SecretStr:
+    return SecretStr(secrets.token_urlsafe(32))
 
 
 class DebugMateSettings(BaseModel):
@@ -16,18 +21,32 @@ class DebugMateSettings(BaseModel):
     dify_api_key: SecretStr | None = None
     dify_dataset_api_key: SecretStr | None = None
     dify_user: str = "debugmate-local"
+    approval_key: SecretStr = Field(default_factory=_random_approval_key)
+
+    @field_validator("approval_key")
+    @classmethod
+    def require_strong_approval_key(cls, value: SecretStr) -> SecretStr:
+        if len(value.get_secret_value().encode("utf-8")) < 32:
+            raise ValueError("approval key is too short")
+        return value
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> DebugMateSettings:
         source = os.environ if environ is None else environ
         api_key = source.get("DIFY_API_KEY") or None
         dataset_key = source.get("DIFY_DATASET_API_KEY") or None
+        approval_key = source.get("DEBUGMATE_APPROVAL_KEY") or secrets.token_urlsafe(32)
         return cls(
             dify_base_url=source.get("DIFY_BASE_URL") or "https://api.dify.ai/v1",
             dify_api_key=SecretStr(api_key) if api_key else None,
             dify_dataset_api_key=SecretStr(dataset_key) if dataset_key else None,
             dify_user=source.get("DIFY_USER") or "debugmate-local",
+            approval_key=SecretStr(approval_key),
         )
+
+    @property
+    def approval_key_bytes(self) -> bytes:
+        return self.approval_key.get_secret_value().encode("utf-8")
 
     @property
     def cloud_configured(self) -> bool:
