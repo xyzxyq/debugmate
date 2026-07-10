@@ -18,6 +18,7 @@ from debugmate.hashing import (
     canonical_json_bytes,
     resolve_artifact_path,
 )
+from debugmate.privacy.output_scan import UnsafeExport, assert_export_safe
 
 MANIFEST_VERSION = "1.0.0"
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -150,6 +151,7 @@ class EvidenceBundle:
         return cls(root, case_id, temp_path, final_path)
 
     def write_json(self, relative_path: str | Path, value: Any) -> Path:
+        _assert_safe_export(value)
         return self.write_bytes(relative_path, canonical_json_bytes(value), "application/json")
 
     def write_bytes(self, relative_path: str | Path, value: bytes, mime_type: str) -> Path:
@@ -191,6 +193,7 @@ class EvidenceBundle:
         final_manifest = RunManifest.model_validate(
             {**manifest.model_dump(), "artifacts": artifacts}
         )
+        _assert_safe_export(final_manifest.model_dump(mode="json"))
         if _unsafe_manifest_value(final_manifest.model_dump(mode="json")):
             raise UnsafeEvidenceContent("manifest contains a forbidden sensitive marker or path")
         manifest_path = self.temp_path / "manifest.json"
@@ -286,3 +289,10 @@ def _unsafe_manifest_value(value: Any) -> bool:
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
         return any(_unsafe_manifest_value(nested) for nested in value)
     return False
+
+
+def _assert_safe_export(value: Any) -> None:
+    try:
+        assert_export_safe(value)
+    except UnsafeExport as error:
+        raise UnsafeEvidenceContent(str(error)) from None

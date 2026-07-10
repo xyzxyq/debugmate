@@ -49,13 +49,13 @@ def test_fixture_content_is_stable_apart_from_case_id() -> None:
     assert first == second
 
 
-def test_fixture_input_uses_only_fictional_windows_identity() -> None:
+def test_fixture_input_uses_explicit_redacted_windows_path() -> None:
     payload = json.loads(
         (FIXTURES_ROOT / "module_not_found" / "input.json").read_text(encoding="utf-8")
     )
 
     assert payload["error_type"] == "ModuleNotFoundError"
-    assert payload["path"] == r"C:\Users\student\demo\main.py"
+    assert payload["path"] == "[REDACTED:WINDOWS_PATH]"
     assert "demo_missing_pkg" in payload["error_text"]
 
 
