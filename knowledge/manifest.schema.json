@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DebugMate Knowledge Source Manifest",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "url",
+      "product",
+      "version_scope",
+      "platform",
+      "retrieved_at",
+      "sha256",
+      "license_or_terms_note"
+    ],
+    "properties": {
+      "title": {"type": "string", "minLength": 1},
+      "url": {"type": "string", "format": "uri"},
+      "product": {"type": "string", "minLength": 1},
+      "version_scope": {"type": "string", "minLength": 1},
+      "platform": {"type": "string", "minLength": 1},
+      "retrieved_at": {"type": "string", "format": "date-time"},
+      "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "license_or_terms_note": {"type": "string", "minLength": 1}
+    }
+  }
+}

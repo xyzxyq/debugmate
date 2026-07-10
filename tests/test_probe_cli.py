@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -171,3 +172,57 @@ def test_schema_export_is_deterministic(tmp_path: Path) -> None:
     assert first.read_bytes() == second.read_bytes()
     schema = json.loads(first.read_text(encoding="utf-8"))
     assert schema["title"] == "DiagnosisRecord"
+
+
+def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
+    matrix = json.loads(Path("platform/dify/capability-matrix.json").read_text(encoding="utf-8"))
+
+    assert tuple(item["capability_id"] for item in matrix["capabilities"]) == CAPABILITY_IDS
+    for item in matrix["capabilities"]:
+        if item["status"] == "pass":
+            assert item["evidence_path"]
+            assert item["sha256"]
+
+
+def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:
+    dify_readme = Path("platform/dify/README.md").read_text(encoding="utf-8")
+    root_readme = Path("README.md").read_text(encoding="utf-8")
+    dsl = Path("platform/dify/app.dsl.yml.example").read_text(encoding="utf-8")
+    prompts = Path("prompts/README.md").read_text(encoding="utf-8")
+    combined_examples = "\n".join([dsl, prompts])
+
+    for capability_id in CAPABILITY_IDS:
+        assert capability_id in dify_readme
+    assert "4 小时" in dify_readme
+    assert "重导入" in dify_readme
+    assert "不得充值" in dify_readme
+    assert "fixture-probe" in root_readme
+    assert "cloud-probe" in root_readme
+    for status in ("pass", "fail", "blocked", "not-tested"):
+        assert status in root_readme
+    assert all(version in prompts for version in ("V1", "V2", "V3", "V4"))
+    assert "不可运行" in dsl
+    for pattern in (r"api_key", r"authorization", r"token:", r"Bearer ", r"20795"):
+        assert re.search(pattern, combined_examples, re.I) is None
+
+
+def test_contract_and_knowledge_schemas_are_separate_and_strict() -> None:
+    diagnosis = json.loads(
+        Path("contracts/diagnosis-record-v1.schema.json").read_text(encoding="utf-8")
+    )
+    knowledge = json.loads(Path("knowledge/manifest.schema.json").read_text(encoding="utf-8"))
+
+    assert diagnosis["title"] == "DiagnosisRecord"
+    assert diagnosis["additionalProperties"] is False
+    required = {
+        "title",
+        "url",
+        "product",
+        "version_scope",
+        "platform",
+        "retrieved_at",
+        "sha256",
+        "license_or_terms_note",
+    }
+    assert set(knowledge["items"]["required"]) == required
+    assert knowledge["items"]["additionalProperties"] is False
