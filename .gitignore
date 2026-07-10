@@ -1,1 +1,15 @@
 .worktrees/
+.venv/
+.env
+.artifacts/
+evidence/*
+!evidence/.gitkeep
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
