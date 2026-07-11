@@ -34,6 +34,18 @@ def _query_hash(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()
 
 
+def _canonical_hash(value: object) -> str:
+    payload = (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
+        "utf-8"
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _trusted_identity(build_path: Path) -> tuple[str, str]:
+    manifest = json.loads((build_path / "manifest.json").read_text(encoding="utf-8"))
+    return manifest["build_id"], manifest["content_hash"]
+
+
 def _manifest(tmp_path: Path) -> Path:
     build_id = "b" * 64
     manifest = {
@@ -90,7 +102,7 @@ def _trace(case: EvaluationCase, *, hits: list[RetrievalHit]) -> RetrievalTrace:
 
 def _hit(
     *,
-    chunk_id: str = "python-errors#exceptions-0",
+    chunk_id: str = "python-errors:0",
     content_summary: str = "Traceback anatomy",
     source_id: str = "python-errors",
     source_url: str = "https://docs.python.org/3/tutorial/errors.html",
@@ -379,6 +391,10 @@ def test_offline_runner_rejects_tampered_note_before_trace_creation(
             [
                 "knowledge-retrieval-eval",
                 str(copied_build),
+                "--expected-build-id",
+                original_build_id,
+                "--expected-content-hash",
+                _trusted_identity(copied_build)[1],
                 "--eval-queries",
                 "knowledge/eval_queries.json",
                 "--output",
@@ -390,12 +406,129 @@ def test_offline_runner_rejects_tampered_note_before_trace_creation(
     assert not output.exists()
 
 
+def test_offline_runner_rejects_self_authorized_recomputed_build(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path / "source")
+    trusted_build_id, trusted_content_hash = _trusted_identity(build_path)
+    copied_build = tmp_path / "copied" / build_path.name
+    copied_build.parent.mkdir()
+    shutil.copytree(build_path, copied_build)
+
+    note_path = copied_build / "notes" / "python-errors.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8")
+        + "\n- #exceptions: attacker-authored but internally self-consistent.\n",
+        encoding="utf-8",
+    )
+    manifest_path = copied_build / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["notes"][0]["note_sha256"] = hashlib.sha256(note_path.read_bytes()).hexdigest()
+    source_fields = (
+        "source_id",
+        "title",
+        "url",
+        "product",
+        "version_scope",
+        "platform",
+        "allowed_domain",
+        "heading_patterns",
+        "error_categories",
+        "license_or_terms_note",
+        "selection_reason",
+        "sha256",
+        "final_url",
+        "status_code",
+    )
+    build_identity = {
+        "registry_version": manifest["registry_version"],
+        "source_hashes": [
+            {
+                "source_id": source["source_id"],
+                "sha256": _canonical_hash(
+                    {field: source[field] for field in source_fields}
+                ),
+            }
+            for source in manifest["sources"]
+        ],
+        "note_hashes": [
+            {"source_id": note["source_id"], "sha256": note["note_sha256"]}
+            for note in manifest["notes"]
+        ],
+        "failed_sources": manifest["failures"],
+        "extractor_version": manifest["extractor_version"],
+        "generator_version": manifest["generator_version"],
+        "chunk_settings": manifest["chunk_settings"],
+    }
+    manifest["build_id"] = _canonical_hash(build_identity)
+    manifest["content_hash"] = _canonical_hash(
+        {
+            "build_id": manifest["build_id"],
+            "status": manifest["status"],
+            "notes": [note["note_sha256"] for note in manifest["notes"]],
+            "failures": manifest["failures"],
+        }
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    renamed_build = copied_build.with_name(manifest["build_id"])
+    copied_build.rename(renamed_build)
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(ImmutableBuildCollision, match="trusted build identity"):
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(renamed_build),
+                "--expected-build-id",
+                trusted_build_id,
+                "--expected-content-hash",
+                trusted_content_hash,
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert not output.exists()
+
+
+def test_retrieval_eval_cli_rejects_path_only_invocation_before_artifacts(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path / "source")
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(build_path),
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert not output.exists()
+
+
 def test_retrieval_evidence_rejects_secret_before_creating_any_artifact(
     tmp_path: Path,
 ) -> None:
     build_path = _fixture_build(tmp_path / "build")
     cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
-    run = run_offline_retrieval(cases, build_path)
+    build_id, content_hash = _trusted_identity(build_path)
+    run = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+    )
     first_trace = next(trace for trace in run.traces if trace.hits)
     unsafe_hit = first_trace.hits[0].model_copy(
         update={"content_summary": "Contact leaked.student@example.com for access."}
@@ -417,8 +550,15 @@ def test_offline_runner_reads_published_notes_and_keeps_honest_misses(
 ) -> None:
     build_path = _fixture_build(tmp_path)
     cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    build_id, content_hash = _trusted_identity(build_path)
 
-    run = run_offline_retrieval(cases, build_path, top_k=3)
+    run = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+        top_k=3,
+    )
 
     assert run.backend == "offline_fixture"
     assert {trace.case_id for trace in run.traces} == {case.case_id for case in cases}
@@ -427,6 +567,7 @@ def test_offline_runner_reads_published_notes_and_keeps_honest_misses(
     python_trace = next(trace for trace in run.traces if trace.case_id == python_case.case_id)
     assert python_trace.hits
     assert python_trace.hits[0].source_id == "python-errors"
+    assert python_trace.hits[0].chunk_id == "python-errors:0"
     assert python_trace.hits[0].locator.startswith("#")
     assert len(python_trace.hits[0].content_summary) <= 500
     dependency_case = next(
@@ -448,8 +589,19 @@ def test_offline_retrieval_evidence_is_reproducible_and_contains_no_raw_notes(
 ) -> None:
     build_path = _fixture_build(tmp_path)
     cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
-    first = run_offline_retrieval(cases, build_path)
-    second = run_offline_retrieval(cases, build_path)
+    build_id, content_hash = _trusted_identity(build_path)
+    first = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+    )
+    second = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+    )
 
     first_paths = write_offline_retrieval_evidence(first, tmp_path / "one")
     second_paths = write_offline_retrieval_evidence(second, tmp_path / "two")
@@ -469,12 +621,17 @@ def test_retrieval_eval_cli_generates_actual_offline_evidence(
 ) -> None:
     build_path = _fixture_build(tmp_path)
     output = tmp_path / "retrieval-evidence"
+    build_id, content_hash = _trusted_identity(build_path)
 
     assert (
         main(
             [
                 "knowledge-retrieval-eval",
                 str(build_path),
+                "--expected-build-id",
+                build_id,
+                "--expected-content-hash",
+                content_hash,
                 "--eval-queries",
                 "knowledge/eval_queries.json",
                 "--output",
@@ -500,3 +657,5 @@ def test_default_knowledge_wrapper_runs_retrieval_before_coverage() -> None:
     assert "knowledge\\eval_queries.json" in script
     assert "--retrieval-traces" in script
     assert "offline_fixture" in script
+    assert "--expected-build-id $build.build_id" in script
+    assert "--expected-content-hash $build.content_hash" in script

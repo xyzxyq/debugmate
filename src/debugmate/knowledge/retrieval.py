@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 
 from debugmate.contracts import CaseId, ErrorCategory
-from debugmate.knowledge.build import validate_knowledge_build
+from debugmate.knowledge.build import ImmutableBuildCollision, validate_knowledge_build
 from debugmate.knowledge.models import SourceRegistry, StrictKnowledgeModel
 from debugmate.privacy.output_scan import assert_export_safe
 
@@ -439,6 +439,8 @@ def run_offline_retrieval(
     cases: list[EvaluationCase] | list[object],
     build: Path,
     *,
+    expected_build_id: str,
+    expected_content_hash: str,
     top_k: int = 3,
 ) -> OfflineRetrievalRun:
     """Retrieve from actual built notes using their audited category/anchor index.
@@ -454,8 +456,11 @@ def run_offline_retrieval(
     validated_build = validate_knowledge_build(build)
     manifest = validated_build.manifest
     build_id = manifest.get("build_id")
-    if not isinstance(build_id, str):
-        raise ValueError("knowledge build ID must be text")
+    content_hash = manifest.get("content_hash")
+    if build_id != expected_build_id or content_hash != expected_content_hash:
+        raise ImmutableBuildCollision(
+            "existing build manifest is invalid: trusted build identity mismatch"
+        )
     source_records = _manifest_sources(manifest)
     raw_notes = manifest.get("notes")
     if not isinstance(raw_notes, list):
@@ -501,7 +506,7 @@ def run_offline_retrieval(
             for index, locator in enumerate(locators):
                 hits.append(
                     RetrievalHit(
-                        chunk_id=f"{source_id}{locator}-{index}",
+                        chunk_id=f"{source_id}:{index}",
                         content_summary=_note_summary(note_text, locator, source_id),
                         source_id=source_id,
                         source_url=source_url,

@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_coverage.add_argument("--top-k", type=int, default=3)
     knowledge_retrieval = commands.add_parser("knowledge-retrieval-eval")
     knowledge_retrieval.add_argument("path", type=Path)
+    knowledge_retrieval.add_argument("--expected-build-id", required=True)
+    knowledge_retrieval.add_argument("--expected-content-hash", required=True)
     knowledge_retrieval.add_argument("--eval-queries", type=Path, required=True)
     knowledge_retrieval.add_argument("--output", type=Path, required=True)
     knowledge_retrieval.add_argument("--top-k", type=int, default=3)
@@ -118,6 +120,7 @@ def _run_knowledge_build(args: argparse.Namespace) -> int:
         _ascii_json(
             {
                 "build_id": build.build_id,
+                "content_hash": build.content_hash,
                 "build_path": str(build.path.resolve()),
                 "status": build.status,
                 "syncable": build.syncable,
@@ -167,6 +170,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         run = run_offline_retrieval(
             load_evaluation_cases(args.eval_queries),
             args.path,
+            expected_build_id=args.expected_build_id,
+            expected_content_hash=args.expected_content_hash,
             top_k=args.top_k,
         )
         paths = write_offline_retrieval_evidence(run, args.output)

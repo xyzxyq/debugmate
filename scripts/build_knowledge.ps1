@@ -49,6 +49,7 @@ try {
 
     $retrievalOutput = Join-Path $OutputRoot (Join-Path 'retrieval-evidence' $build.build_id)
     $retrievalJson = & $python -m debugmate.cli knowledge-retrieval-eval $buildPath `
+        --expected-build-id $build.build_id --expected-content-hash $build.content_hash `
         --eval-queries $evalQueries --output $retrievalOutput
     if ($LASTEXITCODE -ne 0) {
         throw "Offline retrieval evaluation failed with exit code $LASTEXITCODE"
