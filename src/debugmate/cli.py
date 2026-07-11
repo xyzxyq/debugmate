@@ -20,6 +20,8 @@ from debugmate.knowledge.retrieval import (
     evaluate_retrieval_cases,
     load_evaluation_cases,
     load_retrieval_traces,
+    run_offline_retrieval,
+    write_offline_retrieval_evidence,
 )
 from debugmate.knowledge.sync import create_sync_plan, execute_sync
 from debugmate.probe import ProbeOutcome, run_cloud_probe, run_fixture_probe
@@ -62,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_coverage.add_argument("--eval-queries", type=Path)
     knowledge_coverage.add_argument("--retrieval-traces", type=Path)
     knowledge_coverage.add_argument("--top-k", type=int, default=3)
+    knowledge_retrieval = commands.add_parser("knowledge-retrieval-eval")
+    knowledge_retrieval.add_argument("path", type=Path)
+    knowledge_retrieval.add_argument("--eval-queries", type=Path, required=True)
+    knowledge_retrieval.add_argument("--output", type=Path, required=True)
+    knowledge_retrieval.add_argument("--top-k", type=int, default=3)
     knowledge_sync = commands.add_parser("knowledge-sync")
     knowledge_sync.add_argument("path", type=Path)
     knowledge_sync.add_argument("--remote-manifest", type=Path)
@@ -146,9 +153,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         fixture_paths = (args.eval_queries, args.retrieval_traces)
         if any(path is not None for path in fixture_paths):
             if not all(path is not None for path in fixture_paths):
-                raise ValueError(
-                    "--eval-queries and --retrieval-traces must be provided together"
-                )
+                raise ValueError("--eval-queries and --retrieval-traces must be provided together")
             retrieval_evaluation = evaluate_retrieval_cases(
                 load_evaluation_cases(args.eval_queries),
                 load_retrieval_traces(args.retrieval_traces),
@@ -157,6 +162,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         report = coverage_report(args.path, retrieval_evaluation)
         print(_ascii_json(report.model_dump(mode="json", exclude_none=True)))
+        return 0
+    if args.command == "knowledge-retrieval-eval":
+        run = run_offline_retrieval(
+            load_evaluation_cases(args.eval_queries),
+            args.path,
+            top_k=args.top_k,
+        )
+        paths = write_offline_retrieval_evidence(run, args.output)
+        print(
+            _ascii_json(
+                {
+                    "backend": run.backend,
+                    "blind_spots": run.evaluation.blind_spots,
+                    "knowledge_build_id": run.knowledge_build_id,
+                    "run_path": str(paths.run.resolve()),
+                    "trace_count": len(run.traces),
+                    "traces_path": str(paths.traces.resolve()),
+                }
+            )
+        )
         return 0
     if args.command == "knowledge-sync":
         remote_manifest = (

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, NamedTuple, Self
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
@@ -76,8 +77,7 @@ class RetrievalTrace(StrictKnowledgeModel):
     def require_utc_unique_descending_hits(self) -> Self:
         if (
             self.retrieved_at_utc.tzinfo is None
-            or self.retrieved_at_utc.utcoffset()
-            != UTC.utcoffset(self.retrieved_at_utc)
+            or self.retrieved_at_utc.utcoffset() != UTC.utcoffset(self.retrieved_at_utc)
         ):
             raise ValueError("retrieved_at_utc must be timezone-aware UTC")
         chunk_ids = [hit.chunk_id for hit in self.hits]
@@ -140,17 +140,37 @@ class RetrievalEvaluation(StrictKnowledgeModel):
     blind_spots: list[str]
 
 
+class OfflineRetrievalRun(StrictKnowledgeModel):
+    """A reproducible local run over published structured notes."""
+
+    backend: Literal["offline_fixture"] = "offline_fixture"
+    knowledge_build_id: Sha256
+    traces: list[RetrievalTrace]
+    evaluation: RetrievalEvaluation
+
+    @model_validator(mode="after")
+    def bind_run_to_one_build(self) -> Self:
+        if self.evaluation.knowledge_build_id != self.knowledge_build_id:
+            raise ValueError("offline evaluation must match the run build")
+        if any(trace.knowledge_build_id != self.knowledge_build_id for trace in self.traces):
+            raise ValueError("offline traces must match the run build")
+        return self
+
+
+class RetrievalEvidencePaths(NamedTuple):
+    """Paths written for reuse by the coverage command and course evidence."""
+
+    traces: Path
+    run: Path
+
+
 def _query_sha256(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()
 
 
 def _load_manifest(build_manifest: Path | dict[str, object]) -> dict[str, object]:
     if isinstance(build_manifest, Path):
-        path = (
-            build_manifest / "manifest.json"
-            if build_manifest.is_dir()
-            else build_manifest
-        )
+        path = build_manifest / "manifest.json" if build_manifest.is_dir() else build_manifest
         value: Any = json.loads(path.read_text(encoding="utf-8"))
     else:
         value = build_manifest
@@ -168,13 +188,13 @@ def _manifest_sources(manifest: dict[str, object]) -> dict[str, dict[str, object
         if not isinstance(raw, dict):
             raise ValueError("knowledge build sources must be objects")
         source_id = raw.get("source_id")
-        source_url = raw.get("source_url")
+        source_url = raw.get("url")
         if not isinstance(source_id, str) or not source_id:
             raise ValueError("knowledge build source_id must be non-empty text")
         if source_id in by_id:
             raise ValueError("knowledge build contains duplicate source IDs")
         if not isinstance(source_url, str):
-            raise ValueError("knowledge build source_url must be text")
+            raise ValueError("knowledge build source url must be text")
         RetrievalHit.require_https_source_url(source_url)
         retrieved_at = raw.get("retrieved_at")
         if not isinstance(retrieved_at, str) or not retrieved_at.endswith("Z"):
@@ -242,26 +262,20 @@ def validate_retrieval_trace(
     build_sources = _manifest_sources(manifest)
     note_locators = _manifest_note_locators(manifest)
     registry_sources = (
-        {source.source_id: source for source in registry.sources}
-        if registry is not None
-        else None
+        {source.source_id: source for source in registry.sources} if registry is not None else None
     )
     for hit in trace.hits:
         built = build_sources.get(hit.source_id)
         if built is None:
             raise ValueError(f"retrieval source {hit.source_id!r} is absent from build")
-        if hit.source_url != built["source_url"]:
+        if hit.source_url != built["url"]:
             raise ValueError(f"retrieval source URL mismatch for {hit.source_id!r}")
         if hit.locator not in note_locators.get(hit.source_id, set()):
-            raise ValueError(
-                f"retrieval locator is not published for source {hit.source_id!r}"
-            )
+            raise ValueError(f"retrieval locator is not published for source {hit.source_id!r}")
         if registry_sources is not None:
             registered = registry_sources.get(hit.source_id)
             if registered is None:
-                raise ValueError(
-                    f"retrieval source {hit.source_id!r} is absent from registry"
-                )
+                raise ValueError(f"retrieval source {hit.source_id!r} is absent from registry")
             if hit.source_url != registered.url:
                 raise ValueError(f"registry URL mismatch for {hit.source_id!r}")
     if case is not None:
@@ -281,8 +295,7 @@ def load_evaluation_cases(path: Path) -> list[EvaluationCase]:
     if raw["version"] != "1.0.0" or not isinstance(raw["cases"], list):
         raise ValueError("evaluation query file has an unsupported contract")
     cases = [
-        EvaluationCase.model_validate_json(json.dumps(item), strict=True)
-        for item in raw["cases"]
+        EvaluationCase.model_validate_json(json.dumps(item), strict=True) for item in raw["cases"]
     ]
     case_ids = [case.case_id for case in cases]
     if len(case_ids) != len(set(case_ids)):
@@ -299,8 +312,7 @@ def load_retrieval_traces(path: Path) -> list[RetrievalTrace]:
     if not isinstance(raw["traces"], list):
         raise ValueError("retrieval traces must be a list")
     traces = [
-        RetrievalTrace.model_validate_json(json.dumps(item), strict=True)
-        for item in raw["traces"]
+        RetrievalTrace.model_validate_json(json.dumps(item), strict=True) for item in raw["traces"]
     ]
     case_ids = [trace.case_id for trace in traces]
     if len(case_ids) != len(set(case_ids)):
@@ -345,16 +357,6 @@ def evaluate_retrieval_cases(
             raise ValueError("retrieval trace query hash does not match evaluation query")
 
     source_records = _manifest_sources(manifest) if manifest is not None else {}
-    if manifest is not None:
-        expected_source_ids = {
-            anchor.source_id for case in cases for anchor in case.expected_anchors
-        }
-        absent_expected = sorted(expected_source_ids - set(source_records))
-        if absent_expected:
-            raise ValueError(
-                "evaluation expected sources are absent from build: "
-                + ", ".join(absent_expected)
-            )
     by_category: dict[ErrorCategory, CategoryRetrievalEvaluation] = {}
     for category in ErrorCategory:
         category_cases = sorted(
@@ -368,8 +370,7 @@ def evaluate_retrieval_cases(
         for case in category_cases:
             trace = trace_by_case[case.case_id]
             expected_pairs = {
-                (anchor.source_id, anchor.locator)
-                for anchor in case.expected_anchors
+                (anchor.source_id, anchor.locator) for anchor in case.expected_anchors
             }
             expected_sources.update(source_id for source_id, _ in expected_pairs)
             matched = {
@@ -406,15 +407,163 @@ def evaluate_retrieval_cases(
     )
 
 
+def _note_summary(note_text: str, locator: str, source_id: str) -> str:
+    """Return a bounded excerpt tied to a published locator, not a raw chunk."""
+
+    candidates = [
+        line.removeprefix(f"- {locator}").lstrip("：: ").strip()
+        for line in note_text.splitlines()
+        if line.startswith(f"- {locator}")
+    ]
+    summary = next((candidate for candidate in candidates if candidate), "")
+    if not summary:
+        summary = f"Structured diagnostic note for {source_id} at {locator}"
+    summary = re.sub(r"\s+", " ", summary).strip()
+    return summary[:500]
+
+
+def _offline_retrieved_at(manifest: dict[str, object]) -> datetime:
+    sources = _manifest_sources(manifest)
+    timestamps = [
+        datetime.fromisoformat(str(source["retrieved_at"]).removesuffix("Z") + "+00:00")
+        for source in sources.values()
+    ]
+    if not timestamps:
+        raise ValueError("offline retrieval requires at least one built source")
+    return max(timestamps)
+
+
+def run_offline_retrieval(
+    cases: list[EvaluationCase] | list[object],
+    build: Path,
+    *,
+    top_k: int = 3,
+) -> OfflineRetrievalRun:
+    """Retrieve from actual built notes using their audited category/anchor index.
+
+    This intentionally small fixture backend does not claim semantic similarity or
+    Dify behavior. A note is eligible only when its published category matches the
+    evaluation case; absent categories produce honest empty traces.
+    """
+
+    if type(top_k) is not int or top_k < 1:
+        raise ValueError("top_k must be a positive integer")
+    strict_cases = [_strict_case(case) for case in cases]
+    manifest = _load_manifest(build)
+    build_id = manifest.get("build_id")
+    if not isinstance(build_id, str):
+        raise ValueError("knowledge build ID must be text")
+    source_records = _manifest_sources(manifest)
+    raw_notes = manifest.get("notes")
+    if not isinstance(raw_notes, list):
+        raise ValueError("knowledge build manifest notes must be a list")
+    retrieved_at = _offline_retrieved_at(manifest)
+
+    indexed_notes: list[tuple[str, str, list[str], set[ErrorCategory], str]] = []
+    for raw_note in raw_notes:
+        if not isinstance(raw_note, dict):
+            raise ValueError("knowledge build notes must be objects")
+        source_id = raw_note.get("source_id")
+        relative_path = raw_note.get("path")
+        locators = raw_note.get("locators")
+        categories = raw_note.get("categories")
+        if (
+            not isinstance(source_id, str)
+            or relative_path != f"notes/{source_id}.md"
+            or not isinstance(locators, list)
+            or not all(isinstance(locator, str) for locator in locators)
+            or not isinstance(categories, list)
+        ):
+            raise ValueError("knowledge note index is invalid")
+        note_path = build / relative_path
+        if not note_path.is_file() or note_path.is_symlink():
+            raise ValueError(f"published note is missing: {relative_path}")
+        note_text = note_path.read_text(encoding="utf-8")
+        strict_categories = {
+            ErrorCategory(category) for category in categories if isinstance(category, str)
+        }
+        source_url = source_records[source_id]["url"]
+        if not isinstance(source_url, str):
+            raise ValueError("knowledge source URL must be text")
+        indexed_notes.append((source_id, source_url, list(locators), strict_categories, note_text))
+
+    traces: list[RetrievalTrace] = []
+    for case in strict_cases:
+        hits: list[RetrievalHit] = []
+        for source_id, source_url, locators, categories, note_text in indexed_notes:
+            if case.category not in categories:
+                continue
+            for index, locator in enumerate(locators):
+                hits.append(
+                    RetrievalHit(
+                        chunk_id=f"{source_id}{locator}-{index}",
+                        content_summary=_note_summary(note_text, locator, source_id),
+                        source_id=source_id,
+                        source_url=source_url,
+                        locator=locator,
+                        relevance_score=float(max(0.0, 0.9 - index * 0.01)),
+                    )
+                )
+        hits = sorted(
+            hits,
+            key=lambda hit: (-hit.relevance_score, hit.chunk_id),
+        )[:top_k]
+        trace = RetrievalTrace(
+            case_id=case.case_id,
+            query_sha256=_query_sha256(case.query),
+            knowledge_build_id=build_id,
+            retrieved_at_utc=retrieved_at,
+            hits=hits,
+        )
+        traces.append(validate_retrieval_trace(trace, manifest, case=case))
+
+    evaluation = evaluate_retrieval_cases(
+        strict_cases,
+        traces,
+        build_manifest=manifest,
+        top_k=top_k,
+    )
+    return OfflineRetrievalRun(
+        knowledge_build_id=build_id,
+        traces=traces,
+        evaluation=evaluation,
+    )
+
+
+def _canonical_json(value: object) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+
+
+def write_offline_retrieval_evidence(
+    run: OfflineRetrievalRun,
+    output: Path,
+) -> RetrievalEvidencePaths:
+    """Persist reproducible summary-only retrieval evidence outside the build."""
+
+    validated = OfflineRetrievalRun.model_validate(run.model_dump(), strict=True)
+    output.mkdir(parents=True, exist_ok=True)
+    traces_path = output / "retrieval-traces.json"
+    run_path = output / "retrieval-run.json"
+    traces_path.write_bytes(
+        _canonical_json({"traces": [trace.model_dump(mode="json") for trace in validated.traces]})
+    )
+    run_path.write_bytes(_canonical_json(validated.model_dump(mode="json")))
+    return RetrievalEvidencePaths(traces=traces_path, run=run_path)
+
+
 __all__ = [
     "CategoryRetrievalEvaluation",
     "EvaluationCase",
     "ExpectedAnchor",
+    "OfflineRetrievalRun",
     "RetrievalEvaluation",
     "RetrievalHit",
+    "RetrievalEvidencePaths",
     "RetrievalTrace",
     "evaluate_retrieval_cases",
     "load_evaluation_cases",
     "load_retrieval_traces",
+    "run_offline_retrieval",
     "validate_retrieval_trace",
+    "write_offline_retrieval_evidence",
 ]
