@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import httpx
+import pytest
+
+from debugmate.cli import main
+from debugmate.contracts import ErrorCategory
+from debugmate.knowledge.build import KnowledgeBuild, build_knowledge
+from debugmate.knowledge.coverage import coverage_report
+from debugmate.knowledge.models import KnowledgeSource, SourceRegistry
+from debugmate.knowledge.sync import (
+    KnowledgeSyncError,
+    MissingDatasetKey,
+    SyncConfirmationRequired,
+    create_sync_plan,
+    execute_sync,
+)
+
+FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "knowledge"
+    / "python-errors.html"
+)
+
+
+@pytest.fixture
+def build(tmp_path: Path) -> KnowledgeBuild:
+    source = KnowledgeSource(
+        source_id="python-errors",
+        title="Python Errors and Exceptions",
+        url="https://docs.python.org/3/tutorial/errors.html",
+        product="python",
+        version_scope="Python 3",
+        platform="cross-platform",
+        allowed_domain="docs.python.org",
+        heading_patterns=[r"^Exceptions$", r"^Handling Exceptions$"],
+        error_categories=[ErrorCategory.PYTHON_RUNTIME],
+        license_or_terms_note="Python documentation license applies.",
+        selection_reason="Canonical Python runtime error reference.",
+    )
+    registry = SourceRegistry(registry_version="1.0.0", sources=[source])
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Last-Modified": "Fri, 10 Jul 2026 08:00:00 GMT",
+            },
+            content=FIXTURE.read_bytes(),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        return build_knowledge(registry, tmp_path / "builds", client)
+
+
+def test_coverage_reports_all_categories_and_sorted_blind_spots(
+    build: KnowledgeBuild,
+) -> None:
+    report = coverage_report(build)
+
+    assert set(report.categories) == set(ErrorCategory)
+    assert report.blind_spots == sorted(report.blind_spots)
+    covered = report.categories[ErrorCategory.PYTHON_RUNTIME]
+    assert covered.source_count == 1
+    assert covered.note_count == 1
+    assert covered.locator_count == 2
+    assert covered.last_fetched_utc is not None
+    assert covered.current_build_hash == build.content_hash
+    assert report.categories[ErrorCategory.CUDA_MEMORY].source_count == 0
+    assert ErrorCategory.CUDA_MEMORY.value in report.blind_spots
+
+
+def test_sync_plan_is_deterministic_and_classifies_every_operation(
+    build: KnowledgeBuild,
+) -> None:
+    note_hash = build.notes[0].content_sha256
+    remote_manifest = {
+        "documents": [
+            {
+                "source_id": "python-errors",
+                "content_sha256": note_hash,
+                "document_id": "doc-python",
+            },
+            {
+                "source_id": "stale-source",
+                "content_sha256": "a" * 64,
+                "document_id": "doc-stale",
+            },
+        ]
+    }
+
+    unchanged = create_sync_plan(build, remote_manifest)
+    changed_manifest = {
+        "documents": [
+            {
+                "source_id": "python-errors",
+                "content_sha256": "b" * 64,
+                "document_id": "doc-python",
+            }
+        ]
+    }
+    update = create_sync_plan(build, changed_manifest)
+    create = create_sync_plan(build, {"documents": []})
+
+    assert [item.source_id for item in unchanged.unchanged] == ["python-errors"]
+    assert [item.source_id for item in unchanged.deletes] == ["stale-source"]
+    assert [item.source_id for item in update.updates] == ["python-errors"]
+    assert [item.source_id for item in create.creates] == ["python-errors"]
+    assert unchanged.model_dump(mode="json") == create_sync_plan(
+        build, remote_manifest
+    ).model_dump(mode="json")
+
+
+def test_sync_plan_rejects_noncanonical_local_note_path(build: KnowledgeBuild) -> None:
+    manifest_path = build.path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["notes"][0]["path"] = "../outside.md"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="canonical"):
+        create_sync_plan(build.path, {"documents": []})
+
+
+def test_dry_run_performs_zero_http_and_needs_no_key(build: KnowledgeBuild) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise AssertionError("dry-run must not make HTTP requests")
+
+    plan = create_sync_plan(build, {"documents": []})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = execute_sync(plan, client=client, dry_run=True)
+
+    assert result.executed is False
+    assert result.operation_count == 1
+    assert calls == []
+
+
+def test_sync_never_deletes_without_confirmation(build: KnowledgeBuild) -> None:
+    plan = create_sync_plan(
+        build,
+        {
+            "documents": [
+                {
+                    "source_id": "stale-source",
+                    "content_sha256": "a" * 64,
+                    "document_id": "doc-stale",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(SyncConfirmationRequired):
+        execute_sync(
+            plan,
+            client=httpx.Client(),
+            dataset_key="secret",
+            dataset_id="dataset",
+            confirm_delete=False,
+            dry_run=False,
+        )
+
+
+def test_real_sync_requires_dataset_key(build: KnowledgeBuild) -> None:
+    plan = create_sync_plan(build, {"documents": []})
+
+    with pytest.raises(MissingDatasetKey):
+        execute_sync(
+            plan,
+            client=httpx.Client(),
+            dataset_id="dataset",
+            dry_run=False,
+        )
+
+
+def test_real_sync_revalidates_note_bytes_before_upload(build: KnowledgeBuild) -> None:
+    requests: list[httpx.Request] = []
+    plan = create_sync_plan(build, {"documents": []})
+    (build.path / "notes" / "python-errors.md").write_text(
+        "changed after planning", encoding="utf-8"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(KnowledgeSyncError, match="changed"),
+    ):
+        execute_sync(
+            plan,
+            client=client,
+            dataset_key="dataset-key",
+            dataset_id="dataset",
+            dry_run=False,
+        )
+
+    assert requests == []
+
+
+def test_real_sync_rejects_unsafe_dataset_identifier(build: KnowledgeBuild) -> None:
+    plan = create_sync_plan(build, {"documents": []})
+
+    with pytest.raises(KnowledgeSyncError, match="dataset_id"):
+        execute_sync(
+            plan,
+            client=httpx.Client(),
+            dataset_key="dataset-key",
+            dataset_id="../another-dataset",
+            dry_run=False,
+        )
+
+
+@pytest.mark.cloud
+def test_cloud_marked_executor_sends_key_only_during_explicit_execution(
+    build: KnowledgeBuild,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "created"})
+
+    plan = create_sync_plan(build, {"documents": []})
+    with httpx.Client(
+        base_url="https://api.dify.ai/v1/",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        result = execute_sync(
+            plan,
+            client=client,
+            dataset_key="dataset-key",
+            dataset_id="dataset",
+            dry_run=False,
+        )
+
+    assert result.executed is True
+    assert len(requests) == 1
+    assert requests[0].headers["authorization"] == "Bearer dataset-key"
+    assert requests[0].url == (
+        "https://api.dify.ai/v1/datasets/dataset/document/create-by-text"
+    )
+
+
+def test_coverage_cli_emits_ascii_safe_json(
+    build: KnowledgeBuild,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["knowledge-coverage", str(build.path)]) == 0
+
+    output = capsys.readouterr().out.strip()
+    payload = json.loads(output)
+    assert payload["build_id"] == build.build_id
+    assert all(ord(character) < 128 for character in output)
