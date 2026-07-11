@@ -11,7 +11,7 @@ from debugmate.contracts import new_case_id
 from debugmate.gateway import CloudGateway
 from debugmate.hashing import sha256_file
 from debugmate.privacy.approval import ApprovalInvalid, approve_preview, verify_approval
-from debugmate.privacy.models import InputEnvelope, PreviewBundle
+from debugmate.privacy.models import InputEnvelope, PreviewBundle, RedactedFields
 from debugmate.privacy.text_redactor import redact_input
 from debugmate.settings import DebugMateSettings
 
@@ -138,12 +138,13 @@ def test_gateway_sends_only_allowlisted_redacted_fields() -> None:
 
 
 def test_gateway_uploads_verified_redacted_screenshot_first(tmp_path: Path) -> None:
-    image = tmp_path / "redacted.png"
+    image = tmp_path / "case" / "redacted.png"
+    image.parent.mkdir()
     image.write_bytes(b"\x89PNG\r\n\x1a\nredacted-fixture")
     source_preview = preview()
     redacted = source_preview.redacted.model_copy(
         update={
-            "redacted_screenshot_path": str(image),
+            "redacted_screenshot_path": "case/redacted.png",
             "redacted_screenshot_sha256": sha256_file(image),
         }
     )
@@ -153,7 +154,9 @@ def test_gateway_uploads_verified_redacted_screenshot_first(tmp_path: Path) -> N
     approved = approve_preview(with_image, KEY)
     backend = FakeBackend()
 
-    CloudGateway(backend, approval_key=KEY, user="course-demo").run(approved)
+    CloudGateway(
+        backend, approval_key=KEY, user="course-demo", redacted_root=tmp_path
+    ).run(approved)
 
     assert backend.calls[0] == ("upload", image, "course-demo")
     assert backend.calls[1][0] == "run"
@@ -164,14 +167,15 @@ def test_gateway_uploads_verified_redacted_screenshot_first(tmp_path: Path) -> N
 
 
 def test_changed_screenshot_is_rejected_before_backend_call(tmp_path: Path) -> None:
-    image = tmp_path / "redacted.png"
+    image = tmp_path / "case" / "redacted.png"
+    image.parent.mkdir()
     image.write_bytes(b"approved")
     source_preview = preview()
     with_image = source_preview.model_copy(
         update={
             "redacted": source_preview.redacted.model_copy(
                 update={
-                    "redacted_screenshot_path": str(image),
+                    "redacted_screenshot_path": "case/redacted.png",
                     "redacted_screenshot_sha256": sha256_file(image),
                 }
             ),
@@ -183,7 +187,65 @@ def test_changed_screenshot_is_rejected_before_backend_call(tmp_path: Path) -> N
     backend = FakeBackend()
 
     with pytest.raises(ApprovalInvalid):
+        CloudGateway(backend, approval_key=KEY, redacted_root=tmp_path).run(approved)
+    assert backend.calls == []
+
+
+def test_gateway_requires_root_for_screenshot_without_backend_calls(tmp_path: Path) -> None:
+    image = tmp_path / "case" / "redacted.png"
+    image.parent.mkdir()
+    image.write_bytes(b"approved")
+    source_preview = preview()
+    redacted = source_preview.redacted.model_validate(
+        {
+            **source_preview.redacted.model_dump(mode="json"),
+            "redacted_screenshot_path": "case/redacted.png",
+            "redacted_screenshot_sha256": sha256_file(image),
+        }
+    )
+    approved = approve_preview(
+        PreviewBundle.model_validate(
+            {**source_preview.model_dump(), "redacted": redacted, "preview_hash": "d" * 64}
+        ),
+        KEY,
+    )
+    backend = FakeBackend()
+
+    with pytest.raises(ApprovalInvalid):
         CloudGateway(backend, approval_key=KEY).run(approved)
+    assert backend.calls == []
+
+
+def test_gateway_rejects_redacted_root_symlink_escape(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    image = outside / "redacted.png"
+    image.write_bytes(b"approved")
+    try:
+        (root / "case").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory links are unavailable on this Windows host")
+
+    source_preview = preview()
+    redacted = RedactedFields.model_validate(
+        {
+            **source_preview.redacted.model_dump(mode="json"),
+            "redacted_screenshot_path": "case/redacted.png",
+            "redacted_screenshot_sha256": sha256_file(image),
+        }
+    )
+    approved = approve_preview(
+        PreviewBundle.model_validate(
+            {**source_preview.model_dump(), "redacted": redacted, "preview_hash": "c" * 64}
+        ),
+        KEY,
+    )
+    backend = FakeBackend()
+
+    with pytest.raises(ApprovalInvalid):
+        CloudGateway(backend, approval_key=KEY, redacted_root=root).run(approved)
     assert backend.calls == []
 
 

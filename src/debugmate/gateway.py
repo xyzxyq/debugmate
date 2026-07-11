@@ -6,7 +6,7 @@ import hmac
 from pathlib import Path
 
 from debugmate.adapters.base import DiagnosisBackend, WorkflowRunResult
-from debugmate.hashing import sha256_file
+from debugmate.hashing import UnsafeArtifactPath, resolve_artifact_path, sha256_file
 from debugmate.privacy.approval import ApprovalInvalid, verify_approval
 from debugmate.privacy.models import ApprovedRedactedInput
 
@@ -20,10 +20,12 @@ class CloudGateway:
         *,
         approval_key: bytes,
         user: str = "debugmate-local",
+        redacted_root: Path | None = None,
     ) -> None:
         self._backend = backend
         self._approval_key = approval_key
         self._user = user
+        self._redacted_root = None if redacted_root is None else Path(redacted_root)
 
     def run(self, approved: ApprovedRedactedInput) -> WorkflowRunResult:
         if not isinstance(approved, ApprovedRedactedInput):
@@ -40,7 +42,14 @@ class CloudGateway:
         if redacted.redacted_screenshot_path is not None:
             if redacted.redacted_screenshot_sha256 is None:
                 raise ApprovalInvalid("approved screenshot hash is missing")
-            path = Path(redacted.redacted_screenshot_path)
+            if self._redacted_root is None:
+                raise ApprovalInvalid("approved screenshot root is unavailable")
+            try:
+                path = resolve_artifact_path(
+                    self._redacted_root, Path(redacted.redacted_screenshot_path)
+                )
+            except UnsafeArtifactPath:
+                raise ApprovalInvalid("approved screenshot path is unsafe") from None
             if not path.is_file():
                 raise ApprovalInvalid("approved redacted screenshot is unavailable")
             actual_hash = sha256_file(path)
@@ -50,4 +59,3 @@ class CloudGateway:
             inputs["screenshot_file_id"] = uploaded.file_id
 
         return self._backend.run_workflow(inputs, self._user)
-

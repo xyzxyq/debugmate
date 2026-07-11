@@ -37,6 +37,23 @@ def redacted_fields() -> RedactedFields:
     )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"C:\\private\\redacted.png",
+        "/private/redacted.png",
+        r"case\\redacted.png",
+        "../redacted.png",
+    ],
+)
+def test_redacted_screenshot_path_must_be_relative_normalized_posix(path: str) -> None:
+    with pytest.raises(ValidationError):
+        RedactedFields(
+            redacted_screenshot_path=path,
+            redacted_screenshot_sha256="a" * 64,
+        )
+
+
 def preview_bundle() -> PreviewBundle:
     item = candidate()
     return PreviewBundle(

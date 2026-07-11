@@ -6,8 +6,14 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
-from debugmate.hashing import canonical_json_bytes, sha256_bytes
+from debugmate.hashing import (
+    UnsafeArtifactPath,
+    canonical_json_bytes,
+    resolve_artifact_path,
+    sha256_bytes,
+)
 from debugmate.privacy.models import (
     InputEnvelope,
     PreviewBundle,
@@ -16,6 +22,7 @@ from debugmate.privacy.models import (
     SecretCandidate,
     SecretKind,
 )
+from debugmate.privacy.ocr import OcrBackend
 from debugmate.privacy.patterns import REDACTION_RULES, field_kind_rule
 
 RULE_VERSION = "privacy-rules-v1"
@@ -182,4 +189,67 @@ def redact_input(value: InputEnvelope) -> PreviewBundle:
         preview_hash=preview_hash,
         rule_version=RULE_VERSION,
         created_at_utc=datetime.now(UTC),
+    )
+
+
+def build_preview(
+    value: InputEnvelope,
+    workspace: Path,
+    ocr_backend: OcrBackend,
+) -> PreviewBundle:
+    """Build a text preview and, when present, a locally redacted screenshot."""
+
+    value = InputEnvelope.model_validate(dict(value.__dict__))
+    preview = redact_input(value)
+    if value.screenshot_path is None:
+        return preview
+
+    from debugmate.privacy.image_redactor import (
+        RedactionWriteError,
+        UnsafeRedactionPath,
+        redact_screenshot,
+    )
+
+    workspace_path = Path(workspace).resolve()
+    relative_output = Path(str(value.case_id)) / "redacted.png"
+    try:
+        output = resolve_artifact_path(workspace_path, relative_output)
+    except UnsafeArtifactPath:
+        raise ValueError("redacted screenshot output escapes workspace") from None
+    source_path = Path(value.screenshot_path)
+    if source_path.resolve() == output:
+        raise UnsafeRedactionPath("redacted output must differ from the source screenshot")
+    try:
+        output.unlink(missing_ok=True)
+    except OSError:
+        raise RedactionWriteError("stale redacted screenshot could not be removed") from None
+    result = redact_screenshot(source_path, output, ocr_backend)
+    redacted = RedactedFields.model_validate(
+        {
+            **preview.redacted.model_dump(mode="json"),
+            "redacted_screenshot_path": relative_output.as_posix(),
+            "redacted_screenshot_sha256": result.output_sha256,
+        }
+    )
+    source_payload = value.model_dump(mode="json")
+    source_payload.pop("screenshot_path", None)
+    source_payload["screenshot_sha256"] = result.source_sha256
+    source_hash = sha256_bytes(canonical_json_bytes(source_payload))
+    preview_payload = {
+        "case_id": value.case_id,
+        "redacted": redacted.model_dump(mode="json"),
+        "candidates": [item.model_dump(mode="json") for item in preview.candidates],
+        "audit": preview.audit.model_dump(mode="json"),
+        "source_hash": source_hash,
+        "rule_version": RULE_VERSION,
+    }
+    return PreviewBundle(
+        case_id=value.case_id,
+        redacted=redacted,
+        candidates=preview.candidates,
+        audit=preview.audit,
+        source_hash=source_hash,
+        preview_hash=sha256_bytes(canonical_json_bytes(preview_payload)),
+        rule_version=RULE_VERSION,
+        created_at_utc=preview.created_at_utc,
     )

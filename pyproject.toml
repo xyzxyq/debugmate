@@ -28,10 +28,11 @@ dev = [
 where = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = '-ra -m "not cloud and not ocr"'
 testpaths = ["tests"]
 markers = [
   "cloud: tests that require real cloud credentials or network access",
+  "ocr: tests that initialize the real local OCR engine and may download models",
 ]
 
 [tool.ruff]

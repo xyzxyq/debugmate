@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -77,6 +79,32 @@ class RedactedFields(StrictPrivacyModel):
     environment: dict[str, str] = Field(default_factory=dict)
     redacted_screenshot_path: str | None = None
     redacted_screenshot_sha256: Sha256 | None = None
+
+    @field_validator("redacted_screenshot_path")
+    @classmethod
+    def require_portable_screenshot_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        path = PurePosixPath(value)
+        if (
+            not value
+            or "\\" in value
+            or path.is_absolute()
+            or re.match(r"^[A-Za-z]:", value)
+            or ".." in path.parts
+            or path.as_posix() != value
+            or value == "."
+        ):
+            raise ValueError("redacted screenshot path must be a relative POSIX path")
+        return value
+
+    @model_validator(mode="after")
+    def require_screenshot_path_and_hash_together(self) -> Self:
+        if (self.redacted_screenshot_path is None) != (
+            self.redacted_screenshot_sha256 is None
+        ):
+            raise ValueError("redacted screenshot path and hash must be provided together")
+        return self
 
 
 class RedactionAudit(StrictPrivacyModel):
