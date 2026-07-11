@@ -16,6 +16,11 @@ from debugmate.hashing import canonical_json_bytes
 from debugmate.knowledge.build import build_knowledge
 from debugmate.knowledge.coverage import coverage_report
 from debugmate.knowledge.models import SourceRegistry, load_registry
+from debugmate.knowledge.retrieval import (
+    evaluate_retrieval_cases,
+    load_evaluation_cases,
+    load_retrieval_traces,
+)
 from debugmate.knowledge.sync import create_sync_plan, execute_sync
 from debugmate.probe import ProbeOutcome, run_cloud_probe, run_fixture_probe
 from debugmate.settings import DebugMateSettings
@@ -54,6 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_build.add_argument("--online", action="store_true")
     knowledge_coverage = commands.add_parser("knowledge-coverage")
     knowledge_coverage.add_argument("path", type=Path)
+    knowledge_coverage.add_argument("--eval-queries", type=Path)
+    knowledge_coverage.add_argument("--retrieval-traces", type=Path)
+    knowledge_coverage.add_argument("--top-k", type=int, default=3)
     knowledge_sync = commands.add_parser("knowledge-sync")
     knowledge_sync.add_argument("path", type=Path)
     knowledge_sync.add_argument("--remote-manifest", type=Path)
@@ -134,8 +142,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "knowledge-build":
         return _run_knowledge_build(args)
     if args.command == "knowledge-coverage":
-        report = coverage_report(args.path)
-        print(_ascii_json(report.model_dump(mode="json")))
+        retrieval_evaluation = None
+        fixture_paths = (args.eval_queries, args.retrieval_traces)
+        if any(path is not None for path in fixture_paths):
+            if not all(path is not None for path in fixture_paths):
+                raise ValueError(
+                    "--eval-queries and --retrieval-traces must be provided together"
+                )
+            retrieval_evaluation = evaluate_retrieval_cases(
+                load_evaluation_cases(args.eval_queries),
+                load_retrieval_traces(args.retrieval_traces),
+                build_manifest=args.path,
+                top_k=args.top_k,
+            )
+        report = coverage_report(args.path, retrieval_evaluation)
+        print(_ascii_json(report.model_dump(mode="json", exclude_none=True)))
         return 0
     if args.command == "knowledge-sync":
         remote_manifest = (

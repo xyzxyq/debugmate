@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from debugmate.contracts import ErrorCategory
 from debugmate.knowledge.build import KnowledgeBuild
 from debugmate.knowledge.models import StrictKnowledgeModel
+from debugmate.knowledge.retrieval import RetrievalEvaluation
 
 
 class CategoryCoverage(StrictKnowledgeModel):
@@ -29,6 +30,16 @@ class CoverageReport(StrictKnowledgeModel):
     build_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     categories: dict[ErrorCategory, CategoryCoverage]
     blind_spots: list[str]
+    retrieval_evaluation: RetrievalEvaluation | None = None
+
+    @model_validator(mode="after")
+    def bind_retrieval_evaluation_to_build(self) -> CoverageReport:
+        if (
+            self.retrieval_evaluation is not None
+            and self.retrieval_evaluation.knowledge_build_id != self.build_id
+        ):
+            raise ValueError("retrieval evaluation must match the coverage build")
+        return self
 
 
 def build_path(build: KnowledgeBuild | Path) -> Path:
@@ -47,7 +58,10 @@ def load_build_manifest(build: KnowledgeBuild | Path) -> dict[str, object]:
     return value
 
 
-def coverage_report(build: KnowledgeBuild | Path) -> CoverageReport:
+def coverage_report(
+    build: KnowledgeBuild | Path,
+    retrieval_evaluation: RetrievalEvaluation | None = None,
+) -> CoverageReport:
     """Report source, note and locator coverage for every ``ErrorCategory``."""
 
     manifest = load_build_manifest(build)
@@ -100,6 +114,7 @@ def coverage_report(build: KnowledgeBuild | Path) -> CoverageReport:
         build_hash=build_hash,
         categories=categories,
         blind_spots=blind_spots,
+        retrieval_evaluation=retrieval_evaluation,
     )
 
 

@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from debugmate.cli import main
+from debugmate.contracts import ErrorCategory, new_case_id
+from debugmate.evidence import EvidenceBundle
+from debugmate.knowledge.models import load_registry
+from debugmate.knowledge.retrieval import (
+    EvaluationCase,
+    RetrievalHit,
+    RetrievalTrace,
+    evaluate_retrieval_cases,
+    load_evaluation_cases,
+    validate_retrieval_trace,
+)
+
+
+def _query_hash(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
+def _manifest(tmp_path: Path) -> Path:
+    build_id = "b" * 64
+    manifest = {
+        "build_id": build_id,
+        "content_hash": "c" * 64,
+        "sources": [
+            {
+                "source_id": "python-errors",
+                "source_url": "https://docs.python.org/3/tutorial/errors.html",
+                "retrieved_at": "2026-07-10T08:00:00Z",
+            },
+            {
+                "source_id": "pytorch-cuda",
+                "source_url": "https://docs.pytorch.org/docs/2.13/notes/cuda.html",
+                "retrieved_at": "2026-07-11T08:00:00Z",
+            },
+        ],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    return path
+
+
+def _case(
+    category: ErrorCategory = ErrorCategory.DEPENDENCY_ENVIRONMENT,
+) -> EvaluationCase:
+    return EvaluationCase(
+        case_id=new_case_id(),
+        category=category,
+        query="虚构学生环境中导入包失败，但不包含任何真实路径",
+        expected_source_ids=["python-errors"],
+        expected_locators=["#exceptions"],
+    )
+
+
+def _trace(case: EvaluationCase, *, hits: list[RetrievalHit]) -> RetrievalTrace:
+    return RetrievalTrace(
+        case_id=case.case_id,
+        query_sha256=_query_hash(case.query),
+        knowledge_build_id="b" * 64,
+        retrieved_at_utc=datetime(2026, 7, 11, 9, 0, tzinfo=UTC),
+        hits=hits,
+    )
+
+
+def _hit(
+    *,
+    chunk_id: str = "python-errors#exceptions-0",
+    content_summary: str = "Traceback anatomy",
+    source_id: str = "python-errors",
+    source_url: str = "https://docs.python.org/3/tutorial/errors.html",
+    locator: str = "#exceptions",
+    relevance_score: float = 0.91,
+) -> RetrievalHit:
+    return RetrievalHit(
+        chunk_id=chunk_id,
+        content_summary=content_summary,
+        source_id=source_id,
+        source_url=source_url,
+        locator=locator,
+        relevance_score=relevance_score,
+    )
+
+
+def test_retrieval_hit_keeps_only_auditable_bounded_source_fields() -> None:
+    hit = _hit()
+
+    assert hit.relevance_score == 0.91
+    assert "content" not in hit.model_dump()
+    with pytest.raises(ValidationError):
+        _hit(content_summary="x" * 501)
+    with pytest.raises(ValidationError):
+        _hit(source_url="http://docs.python.org/3/tutorial/errors.html")
+    with pytest.raises(ValidationError):
+        _hit(relevance_score=1)  # type: ignore[arg-type]
+
+
+def test_trace_rejects_duplicate_chunks_and_unsorted_scores() -> None:
+    case = _case()
+
+    with pytest.raises(ValidationError, match="duplicate"):
+        _trace(case, hits=[_hit(), _hit()])
+    with pytest.raises(ValidationError, match="descending"):
+        _trace(
+            case,
+            hits=[
+                _hit(relevance_score=0.2),
+                _hit(chunk_id="python-errors#exceptions-1", relevance_score=0.9),
+            ],
+        )
+
+
+def test_trace_validation_binds_registry_build_url_and_query(tmp_path: Path) -> None:
+    case = _case()
+    manifest = _manifest(tmp_path)
+    registry = load_registry(Path("knowledge/sources.json"))
+    trace = _trace(case, hits=[_hit()])
+
+    assert validate_retrieval_trace(trace, manifest, registry, case) is trace
+
+    wrong_url = _trace(
+        case,
+        hits=[_hit(source_url="https://docs.python.org/3/library/venv.html")],
+    )
+    with pytest.raises(ValueError, match="URL"):
+        validate_retrieval_trace(wrong_url, manifest, registry, case)
+
+    unknown = _trace(
+        case,
+        hits=[
+            _hit(
+                source_id="missing-source",
+                source_url="https://docs.python.org/3/missing.html",
+            )
+        ],
+    )
+    with pytest.raises(ValueError, match="absent"):
+        validate_retrieval_trace(unknown, manifest, registry, case)
+
+    changed_query = case.model_copy(update={"query": case.query + " changed"})
+    with pytest.raises(ValueError, match="query"):
+        validate_retrieval_trace(trace, manifest, registry, changed_query)
+
+
+def test_category_hit_rate_and_blind_spot_are_reported(tmp_path: Path) -> None:
+    dependency = _case(ErrorCategory.DEPENDENCY_ENVIRONMENT)
+    cuda = _case(ErrorCategory.CUDA_MEMORY).model_copy(
+        update={
+            "expected_source_ids": ["pytorch-cuda"],
+            "expected_locators": ["#memory-management"],
+        }
+    )
+    traces = [_trace(dependency, hits=[_hit()]), _trace(cuda, hits=[])]
+
+    result = evaluate_retrieval_cases(
+        [cuda, dependency], traces, build_manifest=_manifest(tmp_path), top_k=3
+    )
+
+    assert result.by_category[ErrorCategory.DEPENDENCY_ENVIRONMENT].hit_rate == 1.0
+    assert result.by_category[ErrorCategory.CUDA_MEMORY].hit_rate == 0.0
+    assert ErrorCategory.CUDA_MEMORY.value in result.blind_spots
+    assert result.blind_spots == sorted(result.blind_spots)
+    assert result.by_category[ErrorCategory.CUDA_MEMORY].uncovered_expected_sources == [
+        "pytorch-cuda"
+    ]
+    assert (
+        result.by_category[ErrorCategory.CUDA_MEMORY].last_source_update_utc
+        == "2026-07-11T08:00:00Z"
+    )
+
+
+def test_evaluation_rejects_missing_duplicate_or_wrong_build_traces(
+    tmp_path: Path,
+) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+
+    with pytest.raises(ValueError, match="exactly one"):
+        evaluate_retrieval_cases([case], [], build_manifest=_manifest(tmp_path))
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_retrieval_cases(
+            [case], [trace, trace], build_manifest=_manifest(tmp_path)
+        )
+    with pytest.raises(ValueError, match="build"):
+        evaluate_retrieval_cases(
+            [case],
+            [trace.model_copy(update={"knowledge_build_id": "d" * 64})],
+            build_manifest=_manifest(tmp_path),
+        )
+
+
+def test_fixed_query_set_covers_every_category_and_known_registry_sources() -> None:
+    cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    registry = load_registry(Path("knowledge/sources.json"))
+    known_ids = {source.source_id for source in registry.sources}
+
+    assert {case.category for case in cases} == set(ErrorCategory)
+    assert len({case.case_id for case in cases}) == len(cases)
+    assert all(set(case.expected_source_ids) <= known_ids for case in cases)
+    assert all(case.expected_locators for case in cases)
+
+
+def test_retrieval_evidence_contains_summary_but_never_raw_chunk(tmp_path: Path) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case.case_id)
+
+    output = bundle.write_retrieval_trace(trace)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert output.name == "retrieval.json"
+    assert payload["hits"][0]["content_summary"] == "Traceback anatomy"
+    assert "content" not in payload["hits"][0]
+
+
+def test_coverage_cli_includes_retrieval_evaluation_when_fixtures_are_given(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+    _manifest(tmp_path)
+    queries = tmp_path / "queries.json"
+    queries.write_text(
+        json.dumps(
+            {"version": "1.0.0", "cases": [case.model_dump(mode="json")]}
+        ),
+        encoding="utf-8",
+    )
+    traces = tmp_path / "traces.json"
+    traces.write_text(
+        json.dumps({"traces": [trace.model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "knowledge-coverage",
+                str(tmp_path),
+                "--eval-queries",
+                str(queries),
+                "--retrieval-traces",
+                str(traces),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    evaluation = payload["retrieval_evaluation"]
+    assert evaluation["knowledge_build_id"] == "b" * 64
+    assert evaluation["by_category"]["dependency_environment"]["hit_rate"] == 1.0

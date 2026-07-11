@@ -154,6 +154,15 @@ class EvidenceBundle:
         _assert_safe_export(value)
         return self.write_bytes(relative_path, canonical_json_bytes(value), "application/json")
 
+    def write_retrieval_trace(self, trace: Any) -> Path:
+        """Store the bounded retrieval contract, never provider raw chunks."""
+
+        from debugmate.knowledge.retrieval import RetrievalTrace
+
+        if not isinstance(trace, RetrievalTrace):
+            raise TypeError("trace must be a validated RetrievalTrace")
+        return self.write_json("retrieval.json", trace.model_dump(mode="json"))
+
     def write_bytes(self, relative_path: str | Path, value: bytes, mime_type: str) -> Path:
         path = Path(relative_path)
         target = resolve_artifact_path(self.temp_path, path)
