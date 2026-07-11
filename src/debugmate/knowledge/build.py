@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal
@@ -48,6 +49,15 @@ class KnowledgeBuild(StrictKnowledgeModel):
     syncable: bool
     notes: list[DiagnosticNote]
     failures: list[dict[str, str]]
+
+
+@dataclass(frozen=True)
+class ValidatedKnowledgeBuild:
+    """Strict manifest plus hash-verified note snapshots for safe consumers."""
+
+    path: Path
+    manifest: dict[str, object]
+    note_bytes: dict[str, bytes]
 
 
 def _canonical_json(value: object) -> bytes:
@@ -323,6 +333,62 @@ def _validated_manifest(file: Path) -> dict[str, object]:
     return manifest
 
 
+def validate_knowledge_build(path: Path) -> ValidatedKnowledgeBuild:
+    """Fail closed unless ``path`` is one complete immutable knowledge build.
+
+    Notes are returned as verified byte snapshots. Consumers must use these bytes
+    instead of reopening paths after validation, which closes the validation/use
+    race and makes every derived artifact traceable to the manifest hashes.
+    """
+
+    build_path = path.resolve(strict=True)
+    _require(path.is_dir() and not path.is_symlink(), "build path must be a regular directory")
+    manifest_path = build_path / "manifest.json"
+    _require(
+        manifest_path.is_file() and not manifest_path.is_symlink(),
+        "manifest must be a regular file",
+    )
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = _validated_manifest(manifest_path)
+    _require(build_path.name == manifest["build_id"], "build directory must match build_id")
+
+    raw_notes = manifest["notes"]
+    assert isinstance(raw_notes, list)
+    expected_paths = {str(note["path"]) for note in raw_notes}
+    notes_path = build_path / "notes"
+    _require(notes_path.is_dir() and not notes_path.is_symlink(), "notes must be a directory")
+    actual_paths: set[str] = set()
+    for entry in notes_path.rglob("*"):
+        relative = entry.relative_to(build_path).as_posix()
+        _require(
+            entry.is_file() and not entry.is_symlink(),
+            f"unmanifested notes entry {relative}",
+        )
+        actual_paths.add(relative)
+    _require(actual_paths == expected_paths, "note file set does not match manifest")
+
+    snapshots: dict[str, bytes] = {}
+    for note in raw_notes:
+        relative = str(note["path"])
+        raw = (build_path / relative).read_bytes()
+        _require(
+            hashlib.sha256(raw).hexdigest() == note["note_sha256"],
+            "note bytes do not match note_sha256",
+        )
+        snapshots[relative] = raw
+    _require(manifest_path.read_bytes() == manifest_bytes, "manifest changed during validation")
+    _require(
+        {
+            entry.relative_to(build_path).as_posix()
+            for entry in notes_path.rglob("*")
+            if entry.is_file() and not entry.is_symlink()
+        }
+        == expected_paths,
+        "note file set changed during validation",
+    )
+    return ValidatedKnowledgeBuild(path=build_path, manifest=manifest, note_bytes=snapshots)
+
+
 def _immutable_file_hash(file: Path, relative_path: str) -> str:
     if relative_path == "manifest.json":
         manifest = _validated_manifest(file)
@@ -509,5 +575,7 @@ __all__ = [
     "ImmutableBuildCollision",
     "KnowledgeBuild",
     "KnowledgeBuildError",
+    "ValidatedKnowledgeBuild",
     "build_knowledge",
+    "validate_knowledge_build",
 ]

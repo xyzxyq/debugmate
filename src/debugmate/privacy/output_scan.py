@@ -140,6 +140,8 @@ def _ignored_secret_rules(key: object | None, value: str) -> set[str]:
     normalized = str(key).lower()
     if normalized == "case_id" and re.fullmatch(r"case_[0-9a-f]{32}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
+    if normalized in {"knowledge_build_id"} and re.fullmatch(r"[0-9a-f]{64}", value):
+        return {item.rule_id for item in scan_text("metadata", value)}
     if normalized.endswith("sha256") and re.fullmatch(r"[0-9a-f]{64}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
     if normalized in {"run_id", "file_id"}:

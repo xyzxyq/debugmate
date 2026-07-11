@@ -13,7 +13,9 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 
 from debugmate.contracts import CaseId, ErrorCategory
+from debugmate.knowledge.build import validate_knowledge_build
 from debugmate.knowledge.models import SourceRegistry, StrictKnowledgeModel
+from debugmate.privacy.output_scan import assert_export_safe
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 SourceId = Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
@@ -449,7 +451,8 @@ def run_offline_retrieval(
     if type(top_k) is not int or top_k < 1:
         raise ValueError("top_k must be a positive integer")
     strict_cases = [_strict_case(case) for case in cases]
-    manifest = _load_manifest(build)
+    validated_build = validate_knowledge_build(build)
+    manifest = validated_build.manifest
     build_id = manifest.get("build_id")
     if not isinstance(build_id, str):
         raise ValueError("knowledge build ID must be text")
@@ -475,10 +478,12 @@ def run_offline_retrieval(
             or not isinstance(categories, list)
         ):
             raise ValueError("knowledge note index is invalid")
-        note_path = build / relative_path
-        if not note_path.is_file() or note_path.is_symlink():
-            raise ValueError(f"published note is missing: {relative_path}")
-        note_text = note_path.read_text(encoding="utf-8")
+        try:
+            note_text = validated_build.note_bytes[relative_path].decode("utf-8")
+        except KeyError as error:
+            raise ValueError(f"published note is missing: {relative_path}") from error
+        except UnicodeDecodeError as error:
+            raise ValueError(f"published note is not UTF-8: {relative_path}") from error
         strict_categories = {
             ErrorCategory(category) for category in categories if isinstance(category, str)
         }
@@ -541,13 +546,19 @@ def write_offline_retrieval_evidence(
     """Persist reproducible summary-only retrieval evidence outside the build."""
 
     validated = OfflineRetrievalRun.model_validate(run.model_dump(), strict=True)
+    traces_payload = {
+        "traces": [trace.model_dump(mode="json") for trace in validated.traces]
+    }
+    run_payload = validated.model_dump(mode="json")
+    assert_export_safe(traces_payload)
+    assert_export_safe(run_payload)
     output.mkdir(parents=True, exist_ok=True)
     traces_path = output / "retrieval-traces.json"
     run_path = output / "retrieval-run.json"
     traces_path.write_bytes(
-        _canonical_json({"traces": [trace.model_dump(mode="json") for trace in validated.traces]})
+        _canonical_json(traces_payload)
     )
-    run_path.write_bytes(_canonical_json(validated.model_dump(mode="json")))
+    run_path.write_bytes(_canonical_json(run_payload))
     return RetrievalEvidencePaths(traces=traces_path, run=run_path)
 
 

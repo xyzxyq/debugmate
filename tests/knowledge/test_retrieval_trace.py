@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
 from debugmate.cli import main
 from debugmate.contracts import ErrorCategory, new_case_id
 from debugmate.evidence import EvidenceBundle
-from debugmate.knowledge.models import load_registry
+from debugmate.knowledge.build import ImmutableBuildCollision, build_knowledge
+from debugmate.knowledge.models import SourceRegistry, load_registry
 from debugmate.knowledge.retrieval import (
     EvaluationCase,
     ExpectedAnchor,
@@ -24,6 +27,7 @@ from debugmate.knowledge.retrieval import (
     validate_retrieval_trace,
     write_offline_retrieval_evidence,
 )
+from debugmate.privacy.output_scan import UnsafeExport
 
 
 def _query_hash(query: str) -> str:
@@ -321,37 +325,91 @@ def test_coverage_cli_includes_retrieval_evaluation_when_fixtures_are_given(
 
 
 def _fixture_build(tmp_path: Path) -> Path:
-    build = tmp_path / "fixture-build"
-    notes = build / "notes"
-    notes.mkdir(parents=True)
-    (notes / "python-errors.md").write_text(
-        "# Python Errors\n\n## 短摘录\n\n"
-        "- #exceptions：Tracebacks identify the exception type and triggering line.\n"
-        "- #handling-exceptions：Handlers can catch selected exception classes.\n\n"
-        "SECRET_RAW_NOTE_BODY_THAT_MUST_NOT_BE_EXPORTED\n",
+    registry = load_registry(Path("knowledge/sources.json"))
+    source = next(item for item in registry.sources if item.source_id == "python-errors")
+    fixture = Path("tests/fixtures/knowledge/python-errors.html").read_bytes()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Last-Modified": "Fri, 10 Jul 2026 08:00:00 GMT",
+            },
+            content=fixture,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = build_knowledge(
+            SourceRegistry(registry_version=registry.registry_version, sources=[source]),
+            tmp_path,
+            client,
+        )
+    return result.path
+
+
+@pytest.mark.parametrize(
+    "tampered_text",
+    [
+        "- #invented-locator：This locator was never published.\n",
+        "- #exceptions：Contact leaked.student@example.com for access.\n",
+    ],
+    ids=["locator", "email"],
+)
+def test_offline_runner_rejects_tampered_note_before_trace_creation(
+    tmp_path: Path,
+    tampered_text: str,
+) -> None:
+    build_path = _fixture_build(tmp_path / "source")
+    copied_build = tmp_path / "copied" / build_path.name
+    copied_build.parent.mkdir()
+    shutil.copytree(build_path, copied_build)
+    note_path = copied_build / "notes" / "python-errors.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8") + tampered_text,
         encoding="utf-8",
     )
-    manifest = {
-        "build_id": "b" * 64,
-        "content_hash": "c" * 64,
-        "sources": [
-            {
-                "source_id": "python-errors",
-                "url": "https://docs.python.org/3/tutorial/errors.html",
-                "retrieved_at": "2026-07-10T08:00:00Z",
-            }
-        ],
-        "notes": [
-            {
-                "source_id": "python-errors",
-                "path": "notes/python-errors.md",
-                "categories": ["python_runtime"],
-                "locators": ["#exceptions", "#handling-exceptions"],
-            }
-        ],
-    }
-    (build / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    return build
+    original_build_id = json.loads(
+        (copied_build / "manifest.json").read_text(encoding="utf-8")
+    )["build_id"]
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(ImmutableBuildCollision, match="note bytes"):
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(copied_build),
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert copied_build.name == original_build_id
+    assert not output.exists()
+
+
+def test_retrieval_evidence_rejects_secret_before_creating_any_artifact(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path / "build")
+    cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    run = run_offline_retrieval(cases, build_path)
+    first_trace = next(trace for trace in run.traces if trace.hits)
+    unsafe_hit = first_trace.hits[0].model_copy(
+        update={"content_summary": "Contact leaked.student@example.com for access."}
+    )
+    unsafe_trace = first_trace.model_copy(update={"hits": [unsafe_hit]})
+    unsafe_run = run.model_copy(
+        update={"traces": [unsafe_trace, *run.traces[1:]]}
+    )
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(UnsafeExport):
+        write_offline_retrieval_evidence(unsafe_run, output)
+
+    assert not output.exists()
 
 
 def test_offline_runner_reads_published_notes_and_keeps_honest_misses(
