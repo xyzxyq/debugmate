@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import json
+from collections import Counter
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from debugmate.contracts import ErrorCategory
+from debugmate.knowledge.models import KnowledgeSource, SourceRegistry, load_registry
+
+ROOT = Path(__file__).resolve().parents[2]
+REGISTRY_PATH = ROOT / "knowledge" / "sources.json"
+SCHEMA_PATH = ROOT / "knowledge" / "manifest.schema.json"
+
+EXPECTED_URLS = {
+    "python-errors": "https://docs.python.org/3/tutorial/errors.html",
+    "python-venv": "https://docs.python.org/3/library/venv.html",
+    "python-import": "https://docs.python.org/3/reference/import.html",
+    "pip-resolution": "https://pip.pypa.io/en/stable/topics/dependency-resolution/",
+    "pip-user-guide": "https://pip.pypa.io/en/stable/user_guide/",
+    "pytorch-cuda": "https://docs.pytorch.org/docs/stable/notes/cuda.html",
+    "pytorch-serialization": "https://docs.pytorch.org/docs/stable/notes/serialization.html",
+    "pytorch-tensor-view": (
+        "https://docs.pytorch.org/docs/stable/generated/torch.Tensor.view.html"
+    ),
+    "cuda-compatibility": "https://docs.nvidia.com/deploy/cuda-compatibility/",
+    "cuda-windows-install": (
+        "https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/"
+    ),
+    "hf-installation": "https://huggingface.co/docs/transformers/en/installation",
+    "hf-cache": "https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache",
+    "ultralytics-install": "https://docs.ultralytics.com/quickstart/",
+    "ultralytics-predict": "https://docs.ultralytics.com/modes/predict/",
+    "windows-env": (
+        "https://learn.microsoft.com/en-us/powershell/module/"
+        "microsoft.powershell.core/about/about_environment_variables?view=powershell-7.5"
+    ),
+    "windows-policy": (
+        "https://learn.microsoft.com/en-us/powershell/module/"
+        "microsoft.powershell.core/about/about_execution_policies?view=powershell-7.5"
+    ),
+    "windows-path-format": (
+        "https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats"
+    ),
+}
+
+
+def _valid_source(**overrides: object) -> dict[str, object]:
+    source: dict[str, object] = {
+        "source_id": "python-errors",
+        "title": "Python Errors and Exceptions",
+        "url": EXPECTED_URLS["python-errors"],
+        "product": "python",
+        "version_scope": "Python 3",
+        "platform": "cross-platform",
+        "allowed_domain": "docs.python.org",
+        "heading_patterns": ["Errors and Exceptions", "Exceptions"],
+        "error_categories": [ErrorCategory.PYTHON_RUNTIME],
+        "license_or_terms_note": "Python documentation license and terms apply.",
+        "selection_reason": "Canonical language reference for Python runtime failures.",
+    }
+    source.update(overrides)
+    return source
+
+
+def test_registry_contains_exact_curated_official_urls() -> None:
+    registry = load_registry(REGISTRY_PATH)
+
+    assert len(registry.sources) == 17
+    assert {source.source_id: source.url for source in registry.sources} == EXPECTED_URLS
+
+
+def test_registry_covers_exact_product_families() -> None:
+    registry = load_registry(REGISTRY_PATH)
+    counts = Counter(source.product for source in registry.sources)
+
+    assert set(counts) == {
+        "python",
+        "pip",
+        "pytorch",
+        "cuda",
+        "huggingface",
+        "ultralytics",
+        "windows",
+    }
+    assert counts == {
+        "python": 3,
+        "pip": 2,
+        "pytorch": 3,
+        "cuda": 2,
+        "huggingface": 2,
+        "ultralytics": 2,
+        "windows": 3,
+    }
+
+
+def test_registry_entries_have_non_empty_extraction_and_category_metadata() -> None:
+    registry = load_registry(REGISTRY_PATH)
+
+    assert all(source.heading_patterns for source in registry.sources)
+    assert all(source.error_categories for source in registry.sources)
+    assert all(source.license_or_terms_note.strip() for source in registry.sources)
+    assert all(source.selection_reason.strip() for source in registry.sources)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("url", "http://docs.python.org/3/tutorial/errors.html"),
+        ("allowed_domain", "python.org"),
+        ("error_categories", []),
+        ("heading_patterns", []),
+    ],
+)
+def test_source_rejects_unsafe_or_incomplete_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        KnowledgeSource.model_validate(_valid_source(**{field: value}), strict=True)
+
+
+def test_source_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        KnowledgeSource.model_validate(_valid_source(retrieved_at="2026-07-11"), strict=True)
+
+
+@pytest.mark.parametrize("duplicate_field", ["source_id", "url"])
+def test_registry_rejects_duplicate_ids_and_urls(duplicate_field: str) -> None:
+    first = _valid_source()
+    second = _valid_source(
+        source_id="python-venv",
+        url=EXPECTED_URLS["python-venv"],
+    )
+    second[duplicate_field] = first[duplicate_field]
+
+    with pytest.raises(ValidationError):
+        SourceRegistry.model_validate(
+            {"registry_version": "1.0.0", "sources": [first, second]},
+            strict=True,
+        )
+
+
+def test_registry_rejects_unknown_top_level_fields() -> None:
+    with pytest.raises(ValidationError):
+        SourceRegistry.model_validate(
+            {
+                "registry_version": "1.0.0",
+                "sources": [_valid_source()],
+                "comment": "not part of the contract",
+            },
+            strict=True,
+        )
+
+
+def test_committed_manifest_schema_is_strict_and_keeps_audit_fields() -> None:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    assert schema["type"] == "array"
+    assert schema["items"]["additionalProperties"] is False
+    assert {"retrieved_at", "sha256"} <= set(schema["items"]["required"])
+    assert {
+        "source_id",
+        "allowed_domain",
+        "heading_patterns",
+        "error_categories",
+        "selection_reason",
+    } <= set(schema["items"]["properties"])
+
+
+def test_registry_file_is_valid_against_generated_model_schema() -> None:
+    raw = REGISTRY_PATH.read_text(encoding="utf-8")
+
+    registry = SourceRegistry.model_validate_json(raw, strict=True)
+    assert registry.model_dump(mode="json") == json.loads(raw)
