@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from io import BytesIO
@@ -19,6 +19,7 @@ from debugmate.hashing import (
     artifact_metadata,
     canonical_json_bytes,
     resolve_artifact_path,
+    sha256_bytes,
 )
 from debugmate.privacy.output_scan import UnsafeExport, assert_export_safe
 
@@ -139,7 +140,7 @@ class EvidenceBundle:
         self.temp_path = temp_path
         self.final_path = final_path
         self._mime_types: dict[str, str] = {}
-        self._validated_binary_artifacts: set[str] = set()
+        self._sealed_binary_hashes: dict[str, str] = {}
         self._created_at = datetime.now(UTC)
 
     @classmethod
@@ -171,10 +172,15 @@ class EvidenceBundle:
     def write_bytes(self, relative_path: str | Path, value: bytes, mime_type: str) -> Path:
         path = Path(relative_path)
         normalized_mime = mime_type.lower().split(";", 1)[0].strip()
-        if normalized_mime == "image/png" or path.suffix.lower() == ".png":
+        binary_kind = _binary_kind(value)
+        if normalized_mime == "image/png" or path.suffix.lower() == ".png" or binary_kind == "PNG":
             raise UnsafeEvidenceContent("PNG evidence must be written with write_png")
-        if normalized_mime.startswith("audio/") or path.suffix.lower() == ".mp3":
-            raise UnsafeEvidenceContent("audio evidence must be written with write_audio")
+        if (
+            normalized_mime.startswith("audio/")
+            or path.suffix.lower() == ".mp3"
+            or binary_kind == "audio"
+        ):
+            raise UnsafeEvidenceContent("audio evidence must be written with write_generated_audio")
         return self._write_validated_bytes(path, value, mime_type)
 
     def write_png(self, relative_path: str | Path, value: bytes) -> Path:
@@ -186,28 +192,28 @@ class EvidenceBundle:
         if path.suffix.lower() != ".png":
             raise UnsafeEvidenceContent("PNG evidence path must use the .png extension")
         written = self._write_validated_bytes(path, sanitized, "image/png")
-        self._validated_binary_artifacts.add(path.as_posix())
+        self._sealed_binary_hashes[path.as_posix()] = sha256_bytes(sanitized)
         return written
 
-    def write_audio(
+    def write_generated_audio(
         self,
         relative_path: str | Path,
-        value: bytes,
-        mime_type: str,
         recap_text: str,
+        generate: Callable[[str], tuple[bytes, str]],
     ) -> Path:
-        """Publish MP3 bytes only when their source recap and embedded bytes are safe."""
+        """Generate, sanitize and seal MP3 bytes from the exact validated recap."""
 
         _assert_safe_export(recap_text)
+        value, mime_type = generate(recap_text)
+        if not isinstance(value, bytes) or not isinstance(mime_type, str):
+            raise UnsafeEvidenceContent("audio generator returned an invalid result")
         normalized_mime = mime_type.lower().split(";", 1)[0].strip()
         path = Path(relative_path)
         if normalized_mime not in {"audio/mpeg", "audio/mp3"} or path.suffix.lower() != ".mp3":
             raise UnsafeEvidenceContent("only MP3 audio evidence is supported")
-        if not _is_mp3(value):
-            raise UnsafeEvidenceContent("audio evidence does not have a valid MP3 header")
-        _assert_binary_safe(value)
-        written = self._write_validated_bytes(path, value, "audio/mpeg")
-        self._validated_binary_artifacts.add(path.as_posix())
+        sanitized = _sanitize_mp3(value)
+        written = self._write_validated_bytes(path, sanitized, "audio/mpeg")
+        self._sealed_binary_hashes[path.as_posix()] = sha256_bytes(sanitized)
         return written
 
     def _write_validated_bytes(
@@ -243,20 +249,26 @@ class EvidenceBundle:
             raise ValueError("temporary bundle contains untracked artifacts")
         for path, mime_type in self._mime_types.items():
             normalized_mime = mime_type.lower().split(";", 1)[0].strip()
-            if normalized_mime == "image/png" or normalized_mime.startswith("audio/"):
-                if path not in self._validated_binary_artifacts:
+            artifact_bytes = (self.temp_path / Path(path)).read_bytes()
+            binary_kind = _binary_kind(artifact_bytes)
+            declared_kind = (
+                "PNG"
+                if normalized_mime == "image/png"
+                else "audio"
+                if normalized_mime.startswith("audio/")
+                else None
+            )
+            if binary_kind is not None or declared_kind is not None:
+                if binary_kind != declared_kind or path not in self._sealed_binary_hashes:
                     raise UnsafeEvidenceContent(
                         "binary evidence is missing a validated safe contract"
                     )
-                artifact_bytes = (self.temp_path / Path(path)).read_bytes()
-                if normalized_mime == "image/png":
+                if sha256_bytes(artifact_bytes) != self._sealed_binary_hashes[path]:
+                    raise UnsafeEvidenceContent("sealed binary evidence was modified")
+                if binary_kind == "PNG":
                     _assert_sanitized_png(artifact_bytes)
                 else:
-                    if not _is_mp3(artifact_bytes):
-                        raise UnsafeEvidenceContent(
-                            "audio evidence does not have a valid MP3 header"
-                        )
-                    _assert_binary_safe(artifact_bytes)
+                    _assert_sanitized_mp3(artifact_bytes)
 
         artifacts = [
             ArtifactEntry.model_validate(
@@ -346,15 +358,22 @@ def verify_bundle(path: Path) -> BundleVerification:
             issues.append(f"sha256 mismatch: {entry.path}")
         normalized_mime = entry.mime_type.lower().split(";", 1)[0].strip()
         artifact_bytes = candidate.read_bytes()
+        binary_kind = _binary_kind(artifact_bytes)
         try:
-            if normalized_mime == "image/png" or candidate.suffix.lower() == ".png":
+            if (
+                binary_kind == "PNG"
+                or normalized_mime == "image/png"
+                or candidate.suffix.lower() == ".png"
+            ):
                 _assert_sanitized_png(artifact_bytes)
-            elif normalized_mime.startswith("audio/") or candidate.suffix.lower() == ".mp3":
-                if not _is_mp3(artifact_bytes):
-                    raise UnsafeEvidenceContent("invalid MP3 header")
-                _assert_binary_safe(artifact_bytes)
+            elif (
+                binary_kind == "audio"
+                or normalized_mime.startswith("audio/")
+                or candidate.suffix.lower() == ".mp3"
+            ):
+                _assert_sanitized_mp3(artifact_bytes)
         except UnsafeEvidenceContent:
-            label = "PNG" if normalized_mime == "image/png" else "audio"
+            label = "PNG" if binary_kind == "PNG" or normalized_mime == "image/png" else "audio"
             issues.append(f"unsafe {label} artifact: {entry.path}")
     for unlisted in sorted(actual - listed):
         issues.append(f"unlisted artifact: {unlisted}")
@@ -418,9 +437,98 @@ def _assert_binary_safe(value: bytes) -> None:
     printable = "\n".join(match.decode("ascii") for match in re.findall(rb"[\x20-\x7e]{4,}", value))
     if printable:
         _assert_safe_export(printable)
+    for offset in (0, 1):
+        aligned = value[offset : len(value) - ((len(value) - offset) % 2)]
+        for codec in ("utf-16-le", "utf-16-be"):
+            if not aligned:
+                continue
+            decoded = aligned.decode(codec, errors="ignore")
+            printable_wide = "\n".join(re.findall(r"[\x20-\x7e]{4,}", decoded))
+            if printable_wide:
+                _assert_safe_export(printable_wide)
 
 
 def _is_mp3(value: bytes) -> bool:
     return value.startswith(b"ID3") or (
         len(value) >= 2 and value[0] == 0xFF and value[1] & 0xE0 == 0xE0
     )
+
+
+def _binary_kind(value: bytes) -> str | None:
+    if value.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "PNG"
+    if _is_mp3(value):
+        return "audio"
+    return None
+
+
+def _synchsafe(value: bytes) -> int:
+    if len(value) != 4 or any(byte & 0x80 for byte in value):
+        raise UnsafeEvidenceContent("audio evidence has invalid ID3 metadata")
+    return (value[0] << 21) | (value[1] << 14) | (value[2] << 7) | value[3]
+
+
+def _scan_id3_text(tag: bytes, version: int) -> None:
+    position = 0
+    while position + 10 <= len(tag):
+        frame_id = tag[position : position + 4]
+        if frame_id == b"\x00\x00\x00\x00":
+            return
+        size_bytes = tag[position + 4 : position + 8]
+        size = _synchsafe(size_bytes) if version == 4 else int.from_bytes(size_bytes, "big")
+        position += 10
+        if size < 0 or position + size > len(tag):
+            raise UnsafeEvidenceContent("audio evidence has invalid ID3 metadata")
+        payload = tag[position : position + size]
+        position += size
+        if not frame_id.startswith(b"T") or not payload:
+            continue
+        encoding, encoded = payload[0], payload[1:]
+        codec = {0: "latin-1", 1: "utf-16", 2: "utf-16-be", 3: "utf-8"}.get(encoding)
+        if codec is None:
+            raise UnsafeEvidenceContent("audio evidence has invalid ID3 text metadata")
+        try:
+            text = encoded.decode(codec).rstrip("\x00")
+        except UnicodeError:
+            raise UnsafeEvidenceContent("audio evidence has invalid ID3 text metadata") from None
+        if text:
+            _assert_safe_export(text)
+
+
+def _sanitize_mp3(value: bytes) -> bytes:
+    if not _is_mp3(value):
+        raise UnsafeEvidenceContent("audio evidence does not have a valid MP3 header")
+    position = 0
+    while value[position : position + 3] == b"ID3":
+        if len(value) - position < 10:
+            raise UnsafeEvidenceContent("audio evidence has invalid ID3 metadata")
+        version = value[position + 3]
+        if version not in {3, 4}:
+            raise UnsafeEvidenceContent("audio evidence has unsupported ID3 metadata")
+        flags = value[position + 5]
+        size = _synchsafe(value[position + 6 : position + 10])
+        end = position + 10 + size + (10 if flags & 0x10 else 0)
+        if end > len(value):
+            raise UnsafeEvidenceContent("audio evidence has invalid ID3 metadata")
+        _scan_id3_text(value[position + 10 : position + 10 + size], version)
+        position = end
+    clean = value[position:]
+    if len(clean) >= 128 and clean[-128:-125] == b"TAG":
+        legacy_tag = clean[-125:]
+        for codec in ("utf-8", "utf-16-le", "utf-16-be"):
+            try:
+                _assert_safe_export(legacy_tag.decode(codec))
+            except UnicodeError:
+                continue
+        clean = clean[:-128]
+    if not _is_mp3(clean) or clean.startswith(b"ID3"):
+        raise UnsafeEvidenceContent("audio evidence does not contain an MP3 frame")
+    _assert_binary_safe(clean)
+    return clean
+
+
+def _assert_sanitized_mp3(value: bytes) -> None:
+    if value.startswith(b"ID3") or (len(value) >= 128 and value[-128:-125] == b"TAG"):
+        raise UnsafeEvidenceContent("audio evidence contains ID3 metadata")
+    if _sanitize_mp3(value) != value:
+        raise UnsafeEvidenceContent("audio evidence is not sanitized")

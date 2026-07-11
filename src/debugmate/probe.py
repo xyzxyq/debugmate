@@ -212,9 +212,13 @@ def run_cloud_probe(settings: DebugMateSettings, output_root: Path) -> ProbeOutc
         diagnosis_path = bundle.write_json(
             "diagnosis.json", workflow.diagnosis.model_dump(mode="json")
         )
-        audio = backend.synthesize_audio(workflow.diagnosis.recap_text, settings.dify_user)
-        audio_path = bundle.write_audio(
-            "recap.mp3", audio.audio, audio.mime_type, workflow.diagnosis.recap_text
+
+        def generate_audio(recap_text: str) -> tuple[bytes, str]:
+            audio = backend.synthesize_audio(recap_text, settings.dify_user)
+            return audio.audio, audio.mime_type
+
+        audio_path = bundle.write_generated_audio(
+            "recap.mp3", workflow.diagnosis.recap_text, generate_audio
         )
         evidence = {
             "C01": upload_path,
