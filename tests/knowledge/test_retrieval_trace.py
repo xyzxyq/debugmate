@@ -14,6 +14,7 @@ from debugmate.evidence import EvidenceBundle
 from debugmate.knowledge.models import load_registry
 from debugmate.knowledge.retrieval import (
     EvaluationCase,
+    ExpectedAnchor,
     RetrievalHit,
     RetrievalTrace,
     evaluate_retrieval_cases,
@@ -43,6 +44,16 @@ def _manifest(tmp_path: Path) -> Path:
                 "retrieved_at": "2026-07-11T08:00:00Z",
             },
         ],
+        "notes": [
+            {
+                "source_id": "python-errors",
+                "locators": ["#exceptions", "#handling-exceptions"],
+            },
+            {
+                "source_id": "pytorch-cuda",
+                "locators": ["#memory-management"],
+            },
+        ],
     }
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -56,8 +67,9 @@ def _case(
         case_id=new_case_id(),
         category=category,
         query="虚构学生环境中导入包失败，但不包含任何真实路径",
-        expected_source_ids=["python-errors"],
-        expected_locators=["#exceptions"],
+        expected_anchors=[
+            ExpectedAnchor(source_id="python-errors", locator="#exceptions")
+        ],
     )
 
 
@@ -124,7 +136,7 @@ def test_trace_validation_binds_registry_build_url_and_query(tmp_path: Path) -> 
     registry = load_registry(Path("knowledge/sources.json"))
     trace = _trace(case, hits=[_hit()])
 
-    assert validate_retrieval_trace(trace, manifest, registry, case) is trace
+    assert validate_retrieval_trace(trace, manifest, registry, case) == trace
 
     wrong_url = _trace(
         case,
@@ -165,12 +177,49 @@ def test_validation_and_evidence_reject_model_copy_bypass(tmp_path: Path) -> Non
         bundle.write_retrieval_trace(invalid_trace)
 
 
+def test_trace_rejects_locator_borrowed_from_another_source(tmp_path: Path) -> None:
+    case = _case()
+    cross_paired = _trace(
+        case,
+        hits=[_hit(locator="#memory-management")],
+    )
+
+    with pytest.raises(ValueError, match="locator"):
+        validate_retrieval_trace(cross_paired, _manifest(tmp_path), case=case)
+
+    result = evaluate_retrieval_cases([case], [cross_paired])
+    assert result.by_category[ErrorCategory.DEPENDENCY_ENVIRONMENT].hit_rate == 0.0
+
+
+def test_evaluation_strictly_revalidates_model_copies_and_direct_dicts(
+    tmp_path: Path,
+) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+
+    valid = evaluate_retrieval_cases(
+        [case.model_dump()],
+        [trace.model_dump()],
+        build_manifest=_manifest(tmp_path),
+    )
+    assert valid.by_category[case.category].hit_rate == 1.0
+
+    invalid_case = case.model_copy(update={"query": ""})
+    with pytest.raises(ValidationError):
+        evaluate_retrieval_cases([invalid_case], [trace])
+    with pytest.raises(ValidationError):
+        evaluate_retrieval_cases([{"case_id": case.case_id}], [trace])
+
+
 def test_category_hit_rate_and_blind_spot_are_reported(tmp_path: Path) -> None:
     dependency = _case(ErrorCategory.DEPENDENCY_ENVIRONMENT)
     cuda = _case(ErrorCategory.CUDA_MEMORY).model_copy(
         update={
-            "expected_source_ids": ["pytorch-cuda"],
-            "expected_locators": ["#memory-management"],
+            "expected_anchors": [
+                ExpectedAnchor(
+                    source_id="pytorch-cuda", locator="#memory-management"
+                )
+            ],
         }
     )
     traces = [_trace(dependency, hits=[_hit()]), _trace(cuda, hits=[])]
@@ -219,8 +268,11 @@ def test_fixed_query_set_covers_every_category_and_known_registry_sources() -> N
 
     assert {case.category for case in cases} == set(ErrorCategory)
     assert len({case.case_id for case in cases}) == len(cases)
-    assert all(set(case.expected_source_ids) <= known_ids for case in cases)
-    assert all(case.expected_locators for case in cases)
+    assert all(
+        {anchor.source_id for anchor in case.expected_anchors} <= known_ids
+        for case in cases
+    )
+    assert all(case.expected_anchors for case in cases)
 
 
 def test_retrieval_evidence_contains_summary_but_never_raw_chunk(tmp_path: Path) -> None:

@@ -89,25 +89,35 @@ class RetrievalTrace(StrictKnowledgeModel):
         return self
 
 
+class ExpectedAnchor(StrictKnowledgeModel):
+    """An expected retrieval locator bound to exactly one official source."""
+
+    source_id: SourceId
+    locator: NonEmpty
+
+    @field_validator("locator")
+    @classmethod
+    def reject_blank_locator(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("expected locator must not be blank")
+        return value
+
+
 class EvaluationCase(StrictKnowledgeModel):
     """One fictional, versioned retrieval query with expected source anchors."""
 
     case_id: CaseId
     category: ErrorCategory
     query: Annotated[str, Field(min_length=1, max_length=2_000)]
-    expected_source_ids: Annotated[list[SourceId], Field(min_length=1)]
-    expected_locators: Annotated[list[NonEmpty], Field(min_length=1)]
+    expected_anchors: Annotated[list[ExpectedAnchor], Field(min_length=1)]
 
     @model_validator(mode="after")
     def require_unique_expectations(self) -> Self:
         if not self.query.strip():
             raise ValueError("evaluation query must not be blank")
-        if len(self.expected_source_ids) != len(set(self.expected_source_ids)):
-            raise ValueError("expected source IDs must be unique")
-        if len(self.expected_locators) != len(set(self.expected_locators)):
-            raise ValueError("expected locators must be unique")
-        if any(not locator.strip() for locator in self.expected_locators):
-            raise ValueError("expected locators must not be blank")
+        anchors = [(anchor.source_id, anchor.locator) for anchor in self.expected_anchors]
+        if len(anchors) != len(set(anchors)):
+            raise ValueError("expected source anchors must be unique")
         return self
 
 
@@ -179,6 +189,42 @@ def _manifest_sources(manifest: dict[str, object]) -> dict[str, dict[str, object
     return by_id
 
 
+def _manifest_note_locators(manifest: dict[str, object]) -> dict[str, set[str]]:
+    notes = manifest.get("notes")
+    if not isinstance(notes, list):
+        raise ValueError("knowledge build manifest notes must be a list")
+    by_source: dict[str, set[str]] = {}
+    for raw in notes:
+        if not isinstance(raw, dict):
+            raise ValueError("knowledge build notes must be objects")
+        source_id = raw.get("source_id")
+        locators = raw.get("locators")
+        if not isinstance(source_id, str) or not source_id:
+            raise ValueError("knowledge build note source_id must be non-empty text")
+        if source_id in by_source:
+            raise ValueError("knowledge build contains duplicate note source IDs")
+        if (
+            not isinstance(locators, list)
+            or not locators
+            or not all(isinstance(locator, str) and locator.strip() for locator in locators)
+        ):
+            raise ValueError("knowledge build note locators must be non-empty text")
+        if len(locators) != len(set(locators)):
+            raise ValueError("knowledge build note locators must be unique")
+        by_source[source_id] = set(locators)
+    return by_source
+
+
+def _strict_case(value: object) -> EvaluationCase:
+    payload = value.model_dump() if isinstance(value, EvaluationCase) else value
+    return EvaluationCase.model_validate(payload, strict=True)
+
+
+def _strict_trace(value: object) -> RetrievalTrace:
+    payload = value.model_dump() if isinstance(value, RetrievalTrace) else value
+    return RetrievalTrace.model_validate(payload, strict=True)
+
+
 def validate_retrieval_trace(
     trace: RetrievalTrace,
     build_manifest: Path | dict[str, object],
@@ -187,12 +233,14 @@ def validate_retrieval_trace(
 ) -> RetrievalTrace:
     """Validate trace IDs and URLs against an immutable build and registry."""
 
-    RetrievalTrace.model_validate(trace.model_dump(), strict=True)
+    trace = _strict_trace(trace)
+    case = _strict_case(case) if case is not None else None
     manifest = _load_manifest(build_manifest)
     build_id = manifest.get("build_id")
     if trace.knowledge_build_id != build_id:
         raise ValueError("retrieval trace knowledge build ID does not match manifest")
     build_sources = _manifest_sources(manifest)
+    note_locators = _manifest_note_locators(manifest)
     registry_sources = (
         {source.source_id: source for source in registry.sources}
         if registry is not None
@@ -204,6 +252,10 @@ def validate_retrieval_trace(
             raise ValueError(f"retrieval source {hit.source_id!r} is absent from build")
         if hit.source_url != built["source_url"]:
             raise ValueError(f"retrieval source URL mismatch for {hit.source_id!r}")
+        if hit.locator not in note_locators.get(hit.source_id, set()):
+            raise ValueError(
+                f"retrieval locator is not published for source {hit.source_id!r}"
+            )
         if registry_sources is not None:
             registered = registry_sources.get(hit.source_id)
             if registered is None:
@@ -257,8 +309,8 @@ def load_retrieval_traces(path: Path) -> list[RetrievalTrace]:
 
 
 def evaluate_retrieval_cases(
-    cases: list[EvaluationCase],
-    traces: list[RetrievalTrace],
+    cases: list[EvaluationCase] | list[object],
+    traces: list[RetrievalTrace] | list[object],
     *,
     build_manifest: Path | dict[str, object] | None = None,
     top_k: int = 3,
@@ -267,6 +319,8 @@ def evaluate_retrieval_cases(
 
     if type(top_k) is not int or top_k < 1:
         raise ValueError("top_k must be a positive integer")
+    cases = [_strict_case(case) for case in cases]
+    traces = [_strict_trace(trace) for trace in traces]
     case_ids = [case.case_id for case in cases]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("evaluation cases contain duplicate case IDs")
@@ -293,7 +347,7 @@ def evaluate_retrieval_cases(
     source_records = _manifest_sources(manifest) if manifest is not None else {}
     if manifest is not None:
         expected_source_ids = {
-            source_id for case in cases for source_id in case.expected_source_ids
+            anchor.source_id for case in cases for anchor in case.expected_anchors
         }
         absent_expected = sorted(expected_source_ids - set(source_records))
         if absent_expected:
@@ -313,12 +367,11 @@ def evaluate_retrieval_cases(
         updates: list[str] = []
         for case in category_cases:
             trace = trace_by_case[case.case_id]
-            expected_sources.update(case.expected_source_ids)
             expected_pairs = {
-                (source_id, locator)
-                for source_id in case.expected_source_ids
-                for locator in case.expected_locators
+                (anchor.source_id, anchor.locator)
+                for anchor in case.expected_anchors
             }
+            expected_sources.update(source_id for source_id, _ in expected_pairs)
             matched = {
                 hit.source_id
                 for hit in trace.hits[:top_k]
@@ -327,7 +380,7 @@ def evaluate_retrieval_cases(
             if matched:
                 hit_count += 1
                 covered_sources.update(matched)
-            for source_id in case.expected_source_ids:
+            for source_id in sorted({anchor.source_id for anchor in case.expected_anchors}):
                 retrieved_at = source_records.get(source_id, {}).get("retrieved_at")
                 if isinstance(retrieved_at, str):
                     updates.append(retrieved_at)
@@ -356,6 +409,7 @@ def evaluate_retrieval_cases(
 __all__ = [
     "CategoryRetrievalEvaluation",
     "EvaluationCase",
+    "ExpectedAnchor",
     "RetrievalEvaluation",
     "RetrievalHit",
     "RetrievalTrace",
