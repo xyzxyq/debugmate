@@ -15,17 +15,17 @@
 ### 安全与隐私
 
 - [x] **SAFE-01**: 系统在任何输入离开本机前遮蔽 Token、密码、邮箱、用户名、绝对路径和常见私有标识，并保存脱敏审计结果。
-- [ ] **SAFE-02**: 系统在结果展示和证据导出前再次扫描文本、PNG元数据、音频讲稿和日志，阻止敏感内容进入课程材料。
-- [ ] **SAFE-03**: 系统把日志、截图、代码和知识文档都视为不可信数据，禁止其中的文本覆盖系统指令或触发外部动作。
+- [x] **SAFE-02**: 系统在结果展示和证据导出前再次扫描文本、PNG元数据、音频讲稿和日志，阻止敏感内容进入课程材料。
+- [x] **SAFE-03**: 系统把日志、截图、代码和知识文档都视为不可信数据，禁止其中的文本覆盖系统指令或触发外部动作。
 - [ ] **SAFE-04**: 系统不自动执行诊断生成的修复命令；每条命令标注适用平台、影响、预期结果和必要的回退说明。
 
 ### 专属知识库
 
-- [ ] **KNOW-01**: 项目维护一个官方知识源 manifest，首版覆盖 Python、pip/venv、PyTorch、CUDA、Hugging Face、Ultralytics 和 Windows 路径问题。
-- [ ] **KNOW-02**: 每个知识源条目包含标题、URL、产品、版本范围、适用平台、抓取时间、内容哈希和许可/使用说明。
-- [ ] **KNOW-03**: 项目可以从本地知识源重建 Dify 知识库，并验证文档数量、元数据和检索配置与 manifest 一致。
-- [ ] **KNOW-04**: 系统在诊断运行中保存命中的 chunk ID、内容摘要、来源元数据、相关性分数和引用位置。
-- [ ] **KNOW-05**: 项目可以按错误类别输出知识覆盖、评测命中率、盲区和最后更新时间报告。
+- [x] **KNOW-01**: 项目维护一个官方知识源 manifest，首版覆盖 Python、pip/venv、PyTorch、CUDA、Hugging Face、Ultralytics 和 Windows 路径问题。
+- [x] **KNOW-02**: 每个知识源条目包含标题、URL、产品、版本范围、适用平台、抓取时间、内容哈希和许可/使用说明。
+- [x] **KNOW-03**: 项目可以从本地知识源重建 Dify 知识库，并验证文档数量、元数据和检索配置与 manifest 一致。
+- [x] **KNOW-04**: 系统在诊断运行中保存命中的 chunk ID、内容摘要、来源元数据、相关性分数和引用位置。
+- [x] **KNOW-05**: 项目可以按错误类别输出知识覆盖、评测命中率、盲区和最后更新时间报告。
 
 ### 诊断工作流
 
@@ -106,14 +106,14 @@
 | INP-03 | Phase 3 | Pending |
 | INP-04 | Phase 1 | Pending |
 | SAFE-01 | Phase 2 | Complete |
-| SAFE-02 | Phase 2 | Pending |
-| SAFE-03 | Phase 2 | Pending |
+| SAFE-02 | Phase 2 | Complete |
+| SAFE-03 | Phase 2 | Complete |
 | SAFE-04 | Phase 3 | Pending |
-| KNOW-01 | Phase 2 | Pending |
-| KNOW-02 | Phase 2 | Pending |
-| KNOW-03 | Phase 2 | Pending |
-| KNOW-04 | Phase 2 | Pending |
-| KNOW-05 | Phase 2 | Pending |
+| KNOW-01 | Phase 2 | Complete |
+| KNOW-02 | Phase 2 | Complete |
+| KNOW-03 | Phase 2 | Complete |
+| KNOW-04 | Phase 2 | Complete |
+| KNOW-05 | Phase 2 | Complete |
 | DIAG-01 | Phase 3 | Pending |
 | DIAG-02 | Phase 3 | Pending |
 | DIAG-03 | Phase 3 | Pending |
