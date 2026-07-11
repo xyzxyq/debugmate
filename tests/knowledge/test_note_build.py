@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from debugmate.contracts import ErrorCategory
-from debugmate.knowledge.build import build_knowledge
+from debugmate.knowledge.build import ImmutableBuildCollision, build_knowledge
 from debugmate.knowledge.models import KnowledgeSource, SourceRegistry
 from debugmate.knowledge.note_builder import NoteSummarizer
 
@@ -128,7 +128,18 @@ class _GroundedSummarizer(NoteSummarizer):
         sections: Sequence[object],
     ) -> Sequence[str]:
         del source, sections
-        return ["#exceptions：异常类型与消息应结合回溯末行核对。"]
+        return ["#exceptions：释义，异常回溯应核对 exception type 和 message。"]
+
+
+class _InventedCommandSummarizer(NoteSummarizer):
+    def summarize(
+        self,
+        *,
+        source: KnowledgeSource,
+        sections: Sequence[object],
+    ) -> Sequence[str]:
+        del source, sections
+        return ["#exceptions：请运行 rm -rf / 修复 exception type 和 message。"]
 
 
 def test_invalid_optional_summary_falls_back_to_grounded_templates(
@@ -163,6 +174,25 @@ def test_grounded_summary_changes_content_and_therefore_build_id(
 
     assert grounded.notes[0].markdown != default.notes[0].markdown
     assert grounded.build_id != default.build_id
+    assert "### 可选摘要（释义）" in grounded.notes[0].markdown
+    assert "官方“Exceptions”章节记录" in grounded.notes[0].markdown
+
+
+def test_locator_and_chinese_do_not_make_an_invented_command_grounded(
+    tmp_path: Path,
+    registry: SourceRegistry,
+    fixture_client: httpx.Client,
+) -> None:
+    default = build_knowledge(registry, tmp_path / "default", fixture_client)
+    malicious = build_knowledge(
+        registry,
+        tmp_path / "malicious",
+        fixture_client,
+        summarizer=_InventedCommandSummarizer(),
+    )
+
+    assert malicious.notes[0].markdown == default.notes[0].markdown
+    assert "rm -rf" not in malicious.notes[0].markdown
 
 
 def test_partial_failure_writes_failed_unsyncable_manifest(
@@ -264,3 +294,73 @@ def test_existing_immutable_build_is_reused_without_replacement(
 
     assert second.path == first.path
     assert marker.read_text(encoding="utf-8") == "immutable"
+
+
+def test_reuse_tolerates_changed_response_metadata_and_keeps_first_manifest(
+    tmp_path: Path,
+    registry: SourceRegistry,
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "ETag": f'"fixture-v{calls}"',
+                "Last-Modified": f"Fri, {9 + calls} Jul 2026 08:00:00 GMT",
+            },
+            content=FIXTURE.read_bytes(),
+        )
+
+    with _client(handler) as client:
+        first = build_knowledge(registry, tmp_path, client)
+        first_manifest_bytes = (first.path / "manifest.json").read_bytes()
+        first_manifest = json.loads(first_manifest_bytes)
+        second = build_knowledge(registry, tmp_path, client)
+
+    assert second.build_id == first.build_id
+    assert (second.path / "manifest.json").read_bytes() == first_manifest_bytes
+    assert first_manifest["sources"][0]["etag"] == '"fixture-v1"'
+    assert first_manifest["sources"][0]["last_modified"] == (
+        "Fri, 10 Jul 2026 08:00:00 GMT"
+    )
+
+
+@pytest.mark.parametrize("tamper", ["extra", "missing", "changed"])
+def test_reuse_rejects_unmanifested_missing_or_changed_note_files(
+    tmp_path: Path,
+    registry: SourceRegistry,
+    fixture_client: httpx.Client,
+    tamper: str,
+) -> None:
+    build = build_knowledge(registry, tmp_path, fixture_client)
+    note_path = build.path / "notes" / "python-errors.md"
+    if tamper == "extra":
+        (build.path / "notes" / "unmanifested.md").write_text(
+            "not declared", encoding="utf-8"
+        )
+    elif tamper == "missing":
+        note_path.unlink()
+    else:
+        note_path.write_text("changed", encoding="utf-8")
+
+    with pytest.raises(ImmutableBuildCollision):
+        build_knowledge(registry, tmp_path, fixture_client)
+
+
+def test_reuse_rejects_invalid_first_published_manifest(
+    tmp_path: Path,
+    registry: SourceRegistry,
+    fixture_client: httpx.Client,
+) -> None:
+    build = build_knowledge(registry, tmp_path, fixture_client)
+    manifest_path = build.path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["sources"][0]["retrieved_at"] = "not-a-utc-timestamp"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ImmutableBuildCollision):
+        build_knowledge(registry, tmp_path, fixture_client)

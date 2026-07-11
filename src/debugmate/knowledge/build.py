@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal
 
@@ -66,15 +68,170 @@ def _failure(source_id: str, error: Exception) -> dict[str, str]:
     }
 
 
+def _manifest_error(message: str) -> ImmutableBuildCollision:
+    return ImmutableBuildCollision(f"existing build manifest is invalid: {message}")
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise _manifest_error(message)
+
+
+def _validated_manifest(file: Path) -> dict[str, object]:
+    try:
+        manifest = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise _manifest_error("not valid UTF-8 JSON") from error
+    _require(isinstance(manifest, dict), "root must be an object")
+    required = {
+        "build_id",
+        "content_hash",
+        "registry_version",
+        "status",
+        "syncable",
+        "extractor_version",
+        "generator_version",
+        "chunk_settings",
+        "document_count",
+        "categories",
+        "sources",
+        "notes",
+        "failures",
+    }
+    _require(set(manifest) == required, "fields do not match the build contract")
+    digest = re.compile(r"^[0-9a-f]{64}$")
+    _require(isinstance(manifest["build_id"], str), "build_id must be text")
+    _require(digest.fullmatch(manifest["build_id"]) is not None, "invalid build_id")
+    _require(isinstance(manifest["content_hash"], str), "content_hash must be text")
+    _require(
+        digest.fullmatch(manifest["content_hash"]) is not None,
+        "invalid content_hash",
+    )
+    _require(manifest["status"] in {"ready", "failed"}, "invalid status")
+    _require(type(manifest["syncable"]) is bool, "syncable must be boolean")
+    _require(
+        manifest["chunk_settings"] == {"size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
+        "invalid chunk settings",
+    )
+    _require(isinstance(manifest["categories"], list), "categories must be a list")
+    sources = manifest["sources"]
+    notes = manifest["notes"]
+    failures = manifest["failures"]
+    _require(isinstance(sources, list), "sources must be a list")
+    _require(isinstance(notes, list), "notes must be a list")
+    _require(isinstance(failures, list), "failures must be a list")
+    _require(
+        type(manifest["document_count"]) is int
+        and manifest["document_count"] == len(notes),
+        "document_count does not match notes",
+    )
+
+    source_by_id: dict[str, dict[str, object]] = {}
+    source_fields = {
+        "source_id",
+        "source_url",
+        "source_sha256",
+        "final_url",
+        "status_code",
+        "etag",
+        "last_modified",
+        "retrieved_at",
+    }
+    for source in sources:
+        _require(isinstance(source, dict), "source records must be objects")
+        _require(set(source) == source_fields, "source record fields are invalid")
+        source_id = source["source_id"]
+        _require(isinstance(source_id, str) and bool(source_id), "invalid source_id")
+        _require(source_id not in source_by_id, "duplicate source_id")
+        _require(
+            isinstance(source["source_url"], str)
+            and source["source_url"].startswith("https://"),
+            "invalid source_url",
+        )
+        _require(
+            source["final_url"] == source["source_url"],
+            "final_url must match source_url",
+        )
+        _require(
+            isinstance(source["source_sha256"], str)
+            and digest.fullmatch(source["source_sha256"]) is not None,
+            "invalid source_sha256",
+        )
+        _require(source["status_code"] == 200, "invalid source status_code")
+        _require(
+            source["etag"] is None or isinstance(source["etag"], str),
+            "invalid source etag",
+        )
+        _require(
+            source["last_modified"] is None
+            or isinstance(source["last_modified"], str),
+            "invalid source last_modified",
+        )
+        retrieved_at = source["retrieved_at"]
+        _require(
+            isinstance(retrieved_at, str) and retrieved_at.endswith("Z"),
+            "retrieved_at must be UTC",
+        )
+        try:
+            parsed_retrieved_at = datetime.fromisoformat(
+                retrieved_at.removesuffix("Z") + "+00:00"
+            )
+        except ValueError as error:
+            raise _manifest_error("retrieved_at is not an ISO timestamp") from error
+        _require(
+            parsed_retrieved_at.utcoffset() == timedelta(0),
+            "retrieved_at must be UTC",
+        )
+        source_by_id[source_id] = source
+
+    seen_note_paths: set[str] = set()
+    note_fields = {
+        "source_id",
+        "path",
+        "note_sha256",
+        "source_sha256",
+        "categories",
+        "locators",
+    }
+    for note in notes:
+        _require(isinstance(note, dict), "note records must be objects")
+        _require(set(note) == note_fields, "note record fields are invalid")
+        source_id = note["source_id"]
+        _require(source_id in source_by_id, "note source is absent from sources")
+        expected_path = f"notes/{source_id}.md"
+        _require(note["path"] == expected_path, "note path is not canonical")
+        _require(expected_path not in seen_note_paths, "duplicate note path")
+        seen_note_paths.add(expected_path)
+        _require(
+            isinstance(note["note_sha256"], str)
+            and digest.fullmatch(note["note_sha256"]) is not None,
+            "invalid note_sha256",
+        )
+        _require(
+            note["source_sha256"] == source_by_id[source_id]["source_sha256"],
+            "note source hash mismatch",
+        )
+        _require(isinstance(note["categories"], list), "invalid note categories")
+        _require(
+            isinstance(note["locators"], list)
+            and bool(note["locators"])
+            and all(
+                isinstance(locator, str) and locator.startswith("#")
+                for locator in note["locators"]
+            ),
+            "invalid note locators",
+        )
+    return manifest
+
+
 def _immutable_file_hash(file: Path, relative_path: str) -> str:
     if relative_path == "manifest.json":
-        try:
-            manifest = json.loads(file.read_text(encoding="utf-8"))
-            for source in manifest.get("sources", []):
-                source.pop("retrieved_at", None)
-            return _hash_json(manifest)
-        except (json.JSONDecodeError, AttributeError, TypeError) as error:
-            raise ImmutableBuildCollision("build manifest is not valid JSON") from error
+        manifest = _validated_manifest(file)
+        for source in manifest["sources"]:
+            source.pop("etag")
+            source.pop("last_modified")
+            source.pop("retrieved_at")
+        return _hash_json(manifest)
     return hashlib.sha256(file.read_bytes()).hexdigest()
 
 
@@ -88,6 +245,25 @@ def _expected_core_files(temp_path: Path) -> dict[str, str]:
 
 
 def _assert_same_immutable_build(destination: Path, expected: dict[str, str]) -> None:
+    notes_path = destination / "notes"
+    if not notes_path.is_dir() or notes_path.is_symlink():
+        raise ImmutableBuildCollision(
+            f"existing build {destination.name} has no regular notes directory"
+        )
+    expected_note_paths = set(expected) - {"manifest.json"}
+    actual_note_paths: set[str] = set()
+    for entry in notes_path.rglob("*"):
+        relative_path = entry.relative_to(destination).as_posix()
+        if entry.is_dir() or entry.is_symlink() or not entry.is_file():
+            raise ImmutableBuildCollision(
+                f"existing build {destination.name} has unmanifested notes entry {relative_path}"
+            )
+        actual_note_paths.add(relative_path)
+    if actual_note_paths != expected_note_paths:
+        raise ImmutableBuildCollision(
+            f"existing build {destination.name} notes do not match the manifest"
+        )
+
     actual: dict[str, str] = {}
     for relative_path in expected:
         file = destination / relative_path
