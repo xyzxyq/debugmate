@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from PIL import Image, PngImagePlugin
 
 from debugmate.contracts import CapabilityStatus
 from debugmate.evidence import (
@@ -279,6 +280,136 @@ def test_artifact_entry_rejects_nonportable_path() -> None:
             bytes=1,
             sha256="0" * 64,
         )
+
+
+def _png_with_text_metadata(value: str) -> bytes:
+    from io import BytesIO
+
+    output = BytesIO()
+    metadata = PngImagePlugin.PngInfo()
+    metadata.add_text("Comment", value)
+    Image.new("RGB", (2, 2), "white").save(output, format="PNG", pnginfo=metadata)
+    return output.getvalue()
+
+
+def test_generic_writer_rejects_privacy_sensitive_binary_formats(tmp_path: Path) -> None:
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", "case_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+    with pytest.raises(UnsafeEvidenceContent, match="write_png"):
+        bundle.write_bytes("card.png", _png_with_text_metadata("safe"), "image/png")
+    with pytest.raises(UnsafeEvidenceContent, match="write_audio"):
+        bundle.write_bytes("recap.mp3", b"ID3\x04\x00\x00safe", "audio/mpeg")
+
+    assert not (bundle.temp_path / "card.png").exists()
+    assert not (bundle.temp_path / "recap.mp3").exists()
+
+
+def test_png_writer_strips_sensitive_text_metadata_before_publish(tmp_path: Path) -> None:
+    case_id = "case_ffffffffffffffffffffffffffffffff"
+    sentinel = "student@example.com"
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
+
+    bundle.write_png("card.png", _png_with_text_metadata(sentinel))
+    final_path = bundle.finalize(make_manifest(case_id))
+
+    published = (final_path / "card.png").read_bytes()
+    assert sentinel.encode() not in published
+    with Image.open(final_path / "card.png") as image:
+        assert image.info == {}
+    assert verify_bundle(final_path).ok is True
+
+
+def test_audio_writer_requires_safe_recap_and_rejects_sensitive_bytes(tmp_path: Path) -> None:
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", "case_12121212121212121212121212121212")
+
+    with pytest.raises(UnsafeEvidenceContent):
+        bundle.write_audio(
+            "recap.mp3", b"ID3\x04\x00\x00fixture", "audio/mpeg", "mail student@example.com"
+        )
+    with pytest.raises(UnsafeEvidenceContent):
+        bundle.write_audio(
+            "recap.mp3",
+            b"ID3\x04\x00\x00student@example.com",
+            "audio/mpeg",
+            "fictional safe recap",
+        )
+
+    assert not (bundle.temp_path / "recap.mp3").exists()
+
+
+def test_audio_writer_binds_scanned_recap_without_exporting_it(tmp_path: Path) -> None:
+    case_id = "case_13131313131313131313131313131313"
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
+
+    bundle.write_audio(
+        "recap.mp3", b"ID3\x04\x00\x00fictional-audio", "audio/mpeg", "fictional safe recap"
+    )
+    final_path = bundle.finalize(make_manifest(case_id))
+
+    assert verify_bundle(final_path).ok is True
+    manifest_bytes = (final_path / "manifest.json").read_bytes()
+    assert b"fictional safe recap" not in manifest_bytes
+
+
+def test_finalize_rechecks_png_after_temporary_artifact_tamper(tmp_path: Path) -> None:
+    case_id = "case_15151515151515151515151515151515"
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
+    target = bundle.write_png("card.png", _png_with_text_metadata("safe"))
+    target.write_bytes(_png_with_text_metadata("student@example.com"))
+
+    with pytest.raises(UnsafeEvidenceContent):
+        bundle.finalize(make_manifest(case_id))
+
+    assert not bundle.final_path.exists()
+    assert not (bundle.temp_path / "manifest.json").exists()
+
+
+def test_verifier_rejects_hash_valid_png_with_sensitive_metadata(tmp_path: Path) -> None:
+    case_id = "case_14141414141414141414141414141414"
+    root = tmp_path / case_id
+    root.mkdir()
+    artifact = root / "card.png"
+    artifact.write_bytes(_png_with_text_metadata("student@example.com"))
+    manifest = make_manifest(case_id).model_copy(
+        update={
+            "artifacts": [
+                ArtifactEntry.model_validate(artifact_metadata(root, Path("card.png"), "image/png"))
+            ]
+        }
+    )
+    (root / "manifest.json").write_bytes(
+        canonical_json_bytes(manifest.model_dump(mode="json")) + b"\n"
+    )
+
+    result = verify_bundle(root)
+
+    assert result.ok is False
+    assert "unsafe PNG artifact: card.png" in result.issues
+
+
+def test_verifier_rejects_hash_valid_audio_with_sensitive_bytes(tmp_path: Path) -> None:
+    case_id = "case_16161616161616161616161616161616"
+    root = tmp_path / case_id
+    root.mkdir()
+    artifact = root / "recap.mp3"
+    artifact.write_bytes(b"ID3\x04\x00\x00student@example.com")
+    manifest = make_manifest(case_id).model_copy(
+        update={
+            "artifacts": [
+                ArtifactEntry.model_validate(
+                    artifact_metadata(root, Path("recap.mp3"), "audio/mpeg")
+                )
+            ]
+        }
+    )
+    (root / "manifest.json").write_bytes(
+        canonical_json_bytes(manifest.model_dump(mode="json")) + b"\n"
+    )
+
+    result = verify_bundle(root)
+
+    assert result.ok is False
+    assert "unsafe audio artifact: recap.mp3" in result.issues
 
 
 @pytest.mark.parametrize(

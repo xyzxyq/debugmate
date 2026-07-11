@@ -6,9 +6,11 @@ import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from debugmate.contracts import CapabilityStatus, CaseId
@@ -110,9 +112,10 @@ class RunManifest(EvidenceRecord):
             raise ValueError("artifact paths must be unique")
         artifact_hashes = {artifact.path: artifact.sha256 for artifact in self.artifacts}
         for capability in self.probe_capabilities:
-            if capability.status is CapabilityStatus.PASS and artifact_hashes.get(
-                capability.evidence_path or ""
-            ) != capability.sha256:
+            if (
+                capability.status is CapabilityStatus.PASS
+                and artifact_hashes.get(capability.evidence_path or "") != capability.sha256
+            ):
                 raise ValueError(
                     "passed capability evidence must match a manifest artifact and SHA-256"
                 )
@@ -136,6 +139,7 @@ class EvidenceBundle:
         self.temp_path = temp_path
         self.final_path = final_path
         self._mime_types: dict[str, str] = {}
+        self._validated_binary_artifacts: set[str] = set()
         self._created_at = datetime.now(UTC)
 
     @classmethod
@@ -166,6 +170,50 @@ class EvidenceBundle:
 
     def write_bytes(self, relative_path: str | Path, value: bytes, mime_type: str) -> Path:
         path = Path(relative_path)
+        normalized_mime = mime_type.lower().split(";", 1)[0].strip()
+        if normalized_mime == "image/png" or path.suffix.lower() == ".png":
+            raise UnsafeEvidenceContent("PNG evidence must be written with write_png")
+        if normalized_mime.startswith("audio/") or path.suffix.lower() == ".mp3":
+            raise UnsafeEvidenceContent("audio evidence must be written with write_audio")
+        return self._write_validated_bytes(path, value, mime_type)
+
+    def write_png(self, relative_path: str | Path, value: bytes) -> Path:
+        """Decode and deterministically re-encode a PNG without ancillary metadata."""
+
+        sanitized = _sanitize_png(value)
+        _assert_binary_safe(sanitized)
+        path = Path(relative_path)
+        if path.suffix.lower() != ".png":
+            raise UnsafeEvidenceContent("PNG evidence path must use the .png extension")
+        written = self._write_validated_bytes(path, sanitized, "image/png")
+        self._validated_binary_artifacts.add(path.as_posix())
+        return written
+
+    def write_audio(
+        self,
+        relative_path: str | Path,
+        value: bytes,
+        mime_type: str,
+        recap_text: str,
+    ) -> Path:
+        """Publish MP3 bytes only when their source recap and embedded bytes are safe."""
+
+        _assert_safe_export(recap_text)
+        normalized_mime = mime_type.lower().split(";", 1)[0].strip()
+        path = Path(relative_path)
+        if normalized_mime not in {"audio/mpeg", "audio/mp3"} or path.suffix.lower() != ".mp3":
+            raise UnsafeEvidenceContent("only MP3 audio evidence is supported")
+        if not _is_mp3(value):
+            raise UnsafeEvidenceContent("audio evidence does not have a valid MP3 header")
+        _assert_binary_safe(value)
+        written = self._write_validated_bytes(path, value, "audio/mpeg")
+        self._validated_binary_artifacts.add(path.as_posix())
+        return written
+
+    def _write_validated_bytes(
+        self, relative_path: str | Path, value: bytes, mime_type: str
+    ) -> Path:
+        path = Path(relative_path)
         target = resolve_artifact_path(self.temp_path, path)
         portable = path.as_posix()
         ArtifactEntry.validate_portable_path(portable)
@@ -193,6 +241,22 @@ class EvidenceBundle:
         }
         if actual_paths != set(self._mime_types):
             raise ValueError("temporary bundle contains untracked artifacts")
+        for path, mime_type in self._mime_types.items():
+            normalized_mime = mime_type.lower().split(";", 1)[0].strip()
+            if normalized_mime == "image/png" or normalized_mime.startswith("audio/"):
+                if path not in self._validated_binary_artifacts:
+                    raise UnsafeEvidenceContent(
+                        "binary evidence is missing a validated safe contract"
+                    )
+                artifact_bytes = (self.temp_path / Path(path)).read_bytes()
+                if normalized_mime == "image/png":
+                    _assert_sanitized_png(artifact_bytes)
+                else:
+                    if not _is_mp3(artifact_bytes):
+                        raise UnsafeEvidenceContent(
+                            "audio evidence does not have a valid MP3 header"
+                        )
+                    _assert_binary_safe(artifact_bytes)
 
         artifacts = [
             ArtifactEntry.model_validate(
@@ -280,6 +344,18 @@ def verify_bundle(path: Path) -> BundleVerification:
             issues.append(f"byte count mismatch: {entry.path}")
         if metadata["sha256"] != entry.sha256:
             issues.append(f"sha256 mismatch: {entry.path}")
+        normalized_mime = entry.mime_type.lower().split(";", 1)[0].strip()
+        artifact_bytes = candidate.read_bytes()
+        try:
+            if normalized_mime == "image/png" or candidate.suffix.lower() == ".png":
+                _assert_sanitized_png(artifact_bytes)
+            elif normalized_mime.startswith("audio/") or candidate.suffix.lower() == ".mp3":
+                if not _is_mp3(artifact_bytes):
+                    raise UnsafeEvidenceContent("invalid MP3 header")
+                _assert_binary_safe(artifact_bytes)
+        except UnsafeEvidenceContent:
+            label = "PNG" if normalized_mime == "image/png" else "audio"
+            issues.append(f"unsafe {label} artifact: {entry.path}")
     for unlisted in sorted(actual - listed):
         issues.append(f"unlisted artifact: {unlisted}")
 
@@ -306,3 +382,45 @@ def _assert_safe_export(value: Any) -> None:
         assert_export_safe(value)
     except UnsafeExport as error:
         raise UnsafeEvidenceContent(str(error)) from None
+
+
+def _sanitize_png(value: bytes) -> bytes:
+    try:
+        with Image.open(BytesIO(value)) as source:
+            if source.format != "PNG" or getattr(source, "n_frames", 1) != 1:
+                raise UnsafeEvidenceContent("evidence image must be a single-frame PNG")
+            source.load()
+            clean = source.copy()
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise UnsafeEvidenceContent("evidence image is not a valid PNG") from error
+    clean.info.clear()
+    output = BytesIO()
+    clean.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _assert_sanitized_png(value: bytes) -> None:
+    try:
+        with Image.open(BytesIO(value)) as image:
+            if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
+                raise UnsafeEvidenceContent("evidence image must be a single-frame PNG")
+            image.load()
+            if image.info:
+                raise UnsafeEvidenceContent("PNG evidence contains ancillary metadata")
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise UnsafeEvidenceContent("evidence image is not a valid PNG") from error
+    _assert_binary_safe(value)
+
+
+def _assert_binary_safe(value: bytes) -> None:
+    """Scan printable embedded strings without ever including their values in errors."""
+
+    printable = "\n".join(match.decode("ascii") for match in re.findall(rb"[\x20-\x7e]{4,}", value))
+    if printable:
+        _assert_safe_export(printable)
+
+
+def _is_mp3(value: bytes) -> bool:
+    return value.startswith(b"ID3") or (
+        len(value) >= 2 and value[0] == 0xFF and value[1] & 0xE0 == 0xE0
+    )
