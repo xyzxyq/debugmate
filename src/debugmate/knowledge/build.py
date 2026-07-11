@@ -18,7 +18,7 @@ from pydantic import Field
 from debugmate.contracts import ErrorCategory
 from debugmate.knowledge.extractor import EXTRACTOR_VERSION, extract_sections
 from debugmate.knowledge.fetcher import fetch_source
-from debugmate.knowledge.models import SourceRegistry, StrictKnowledgeModel
+from debugmate.knowledge.models import KnowledgeSource, SourceRegistry, StrictKnowledgeModel
 from debugmate.knowledge.note_builder import (
     NOTE_GENERATOR_VERSION,
     DiagnosticNote,
@@ -77,6 +77,66 @@ def _require(condition: bool, message: str) -> None:
         raise _manifest_error(message)
 
 
+_SOURCE_IDENTITY_FIELDS: Final = (
+    "source_id",
+    "title",
+    "url",
+    "product",
+    "version_scope",
+    "platform",
+    "allowed_domain",
+    "heading_patterns",
+    "error_categories",
+    "license_or_terms_note",
+    "selection_reason",
+    "sha256",
+    "final_url",
+    "status_code",
+)
+
+
+def _source_identity_hash(source: dict[str, object]) -> str:
+    return _hash_json({field: source[field] for field in _SOURCE_IDENTITY_FIELDS})
+
+
+def _build_identity(manifest: dict[str, object]) -> dict[str, object]:
+    sources = manifest["sources"]
+    notes = manifest["notes"]
+    failures = manifest["failures"]
+    assert isinstance(sources, list)
+    assert isinstance(notes, list)
+    assert isinstance(failures, list)
+    return {
+        "registry_version": manifest["registry_version"],
+        "source_hashes": [
+            {
+                "source_id": source["source_id"],
+                "sha256": _source_identity_hash(source),
+            }
+            for source in sources
+        ],
+        "note_hashes": [
+            {"source_id": note["source_id"], "sha256": note["note_sha256"]}
+            for note in notes
+        ],
+        "failed_sources": failures,
+        "extractor_version": manifest["extractor_version"],
+        "generator_version": manifest["generator_version"],
+        "chunk_settings": manifest["chunk_settings"],
+    }
+
+
+def _content_identity(manifest: dict[str, object]) -> dict[str, object]:
+    notes = manifest["notes"]
+    assert isinstance(notes, list)
+    return {
+        "build_id": manifest["build_id"],
+        "status": manifest["status"],
+        "notes": [record["note_sha256"] for record in notes],
+        "failures": manifest["failures"],
+    }
+
+
 def _validated_manifest(file: Path) -> dict[str, object]:
     try:
         manifest = json.loads(file.read_text(encoding="utf-8"))
@@ -129,8 +189,17 @@ def _validated_manifest(file: Path) -> dict[str, object]:
     source_by_id: dict[str, dict[str, object]] = {}
     source_fields = {
         "source_id",
-        "source_url",
-        "source_sha256",
+        "title",
+        "url",
+        "product",
+        "version_scope",
+        "platform",
+        "allowed_domain",
+        "heading_patterns",
+        "error_categories",
+        "license_or_terms_note",
+        "selection_reason",
+        "sha256",
         "final_url",
         "status_code",
         "etag",
@@ -144,19 +213,33 @@ def _validated_manifest(file: Path) -> dict[str, object]:
         _require(isinstance(source_id, str) and bool(source_id), "invalid source_id")
         _require(source_id not in source_by_id, "duplicate source_id")
         _require(
-            isinstance(source["source_url"], str)
-            and source["source_url"].startswith("https://"),
-            "invalid source_url",
+            isinstance(source["url"], str)
+            and source["url"].startswith("https://"),
+            "invalid source url",
         )
         _require(
-            source["final_url"] == source["source_url"],
-            "final_url must match source_url",
+            source["final_url"] == source["url"],
+            "final_url must match url",
         )
         _require(
-            isinstance(source["source_sha256"], str)
-            and digest.fullmatch(source["source_sha256"]) is not None,
-            "invalid source_sha256",
+            isinstance(source["sha256"], str)
+            and digest.fullmatch(source["sha256"]) is not None,
+            "invalid source sha256",
         )
+        try:
+            KnowledgeSource.model_validate(
+                {
+                    field: (
+                        [ErrorCategory(value) for value in source[field]]
+                        if field == "error_categories"
+                        else source[field]
+                    )
+                    for field in KnowledgeSource.model_fields
+                },
+                strict=True,
+            )
+        except Exception as error:
+            raise _manifest_error("source registry metadata is invalid") from error
         _require(source["status_code"] == 200, "invalid source status_code")
         _require(
             source["etag"] is None or isinstance(source["etag"], str),
@@ -208,7 +291,7 @@ def _validated_manifest(file: Path) -> dict[str, object]:
             "invalid note_sha256",
         )
         _require(
-            note["source_sha256"] == source_by_id[source_id]["source_sha256"],
+            note["source_sha256"] == source_by_id[source_id]["sha256"],
             "note source hash mismatch",
         )
         _require(isinstance(note["categories"], list), "invalid note categories")
@@ -221,6 +304,22 @@ def _validated_manifest(file: Path) -> dict[str, object]:
             ),
             "invalid note locators",
         )
+        note_path = file.parent / expected_path
+        _require(
+            note_path.is_file()
+            and not note_path.is_symlink()
+            and hashlib.sha256(note_path.read_bytes()).hexdigest()
+            == note["note_sha256"],
+            "note bytes do not match note_sha256",
+        )
+    _require(
+        manifest["build_id"] == _hash_json(_build_identity(manifest)),
+        "build_id does not match source and note identities",
+    )
+    _require(
+        manifest["content_hash"] == _hash_json(_content_identity(manifest)),
+        "content_hash does not match build contents",
+    )
     return manifest
 
 
@@ -317,9 +416,9 @@ def build_knowledge(
             notes.append(note)
             source_records.append(
                 {
+                    **source.model_dump(mode="json"),
+                    "sha256": fetched.sha256,
                     "source_id": source.source_id,
-                    "source_url": source.url,
-                    "source_sha256": fetched.sha256,
                     "final_url": fetched.final_url,
                     "status_code": fetched.status_code,
                     "etag": fetched.etag,
@@ -335,35 +434,6 @@ def build_knowledge(
     notes.sort(key=lambda note: note.source_id)
     source_records.sort(key=lambda record: str(record["source_id"]))
     failures.sort(key=lambda failure: failure["source_id"])
-    build_identity = {
-        "registry_version": registry.registry_version,
-        "source_hashes": [
-            {
-                "source_id": record["source_id"],
-                "sha256": record["source_sha256"],
-            }
-            for record in source_records
-        ],
-        "note_hashes": [
-            {
-                "source_id": note.source_id,
-                "sha256": note.content_sha256,
-            }
-            for note in notes
-        ],
-        "failed_sources": [
-            {
-                "source_id": failure["source_id"],
-                "error_type": failure["error_type"],
-                "message": failure["message"],
-            }
-            for failure in failures
-        ],
-        "extractor_version": EXTRACTOR_VERSION,
-        "generator_version": NOTE_GENERATOR_VERSION,
-        "chunk_settings": {"size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
-    }
-    build_id = _hash_json(build_identity)
     status: Literal["ready", "failed"] = "failed" if failures else "ready"
     syncable = status == "ready" and bool(notes)
     categories = sorted(
@@ -385,17 +455,9 @@ def build_knowledge(
         }
         for note in notes
     ]
-    content_hash = _hash_json(
-        {
-            "build_id": build_id,
-            "status": status,
-            "notes": [record["note_sha256"] for record in note_records],
-            "failures": failures,
-        }
-    )
     manifest = {
-        "build_id": build_id,
-        "content_hash": content_hash,
+        "build_id": "0" * 64,
+        "content_hash": "0" * 64,
         "registry_version": registry.registry_version,
         "status": status,
         "syncable": syncable,
@@ -408,6 +470,10 @@ def build_knowledge(
         "notes": note_records,
         "failures": failures,
     }
+    build_id = _hash_json(_build_identity(manifest))
+    manifest["build_id"] = build_id
+    content_hash = _hash_json(_content_identity(manifest))
+    manifest["content_hash"] = content_hash
 
     output_root.mkdir(parents=True, exist_ok=True)
     temp_path = Path(tempfile.mkdtemp(prefix=".knowledge-build-", dir=output_root))

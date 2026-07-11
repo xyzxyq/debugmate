@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from debugmate.knowledge.build import KnowledgeBuild, build_knowledge
 from debugmate.knowledge.coverage import coverage_report
 from debugmate.knowledge.models import KnowledgeSource, SourceRegistry
 from debugmate.knowledge.sync import (
+    DifyReadbackManifest,
     KnowledgeSyncError,
     MissingDatasetKey,
     SyncConfirmationRequired,
@@ -20,6 +22,7 @@ from debugmate.knowledge.sync import (
     SyncPlan,
     create_sync_plan,
     execute_sync,
+    verify_remote_readback,
 )
 
 FIXTURE = (
@@ -151,7 +154,7 @@ def test_sync_plan_rejects_noncanonical_local_note_path(build: KnowledgeBuild) -
     manifest["notes"][0]["path"] = "../outside.md"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="canonical"):
+    with pytest.raises(KnowledgeSyncError, match="canonical"):
         create_sync_plan(build.path, {"documents": []})
 
 
@@ -169,6 +172,100 @@ def test_dry_run_performs_zero_http_and_needs_no_key(build: KnowledgeBuild) -> N
     assert result.executed is False
     assert result.operation_count == 1
     assert calls == []
+
+
+def test_note_and_declared_hash_tamper_is_rejected_before_planning(
+    build: KnowledgeBuild,
+) -> None:
+    calls: list[httpx.Request] = []
+    note_path = build.path / "notes" / "python-errors.md"
+    note_path.write_text("tampered together with its declared hash", encoding="utf-8")
+    manifest_path = build.path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["notes"][0]["note_sha256"] = hashlib.sha256(note_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        pytest.raises((KnowledgeSyncError, ValueError), match="identity|manifest"),
+    ):
+        create_sync_plan(build.path, {"documents": []})
+
+    assert calls == []
+
+
+def test_sync_plan_and_request_carry_source_metadata_and_fixed_dify_config(
+    build: KnowledgeBuild,
+) -> None:
+    requests: list[httpx.Request] = []
+    plan = create_sync_plan(build, {"documents": []})
+
+    assert plan.document_count == 1
+    assert plan.config.chunk_size == 800
+    assert plan.config.chunk_overlap == 120
+    assert plan.config.retrieval_method == "semantic_search"
+    assert plan.creates[0].source_metadata.product == "python"
+    assert plan.creates[0].source_metadata.source_sha256 == build.notes[0].source_sha256
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "created"})
+
+    with httpx.Client(
+        base_url="https://api.dify.ai/v1/",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        execute_sync(
+            plan,
+            client=client,
+            dataset_key="dataset-key",
+            dataset_id="dataset",
+            dry_run=False,
+        )
+
+    payload = json.loads(requests[0].content)
+    assert payload["doc_metadata"]["source_id"] == "python-errors"
+    assert payload["doc_metadata"]["source_sha256"] == build.notes[0].source_sha256
+    assert payload["process_rule"]["rules"]["segmentation"] == {
+        "separator": "\n",
+        "max_tokens": 800,
+        "chunk_overlap": 120,
+    }
+    assert payload["retrieval_model"]["search_method"] == "semantic_search"
+
+
+def test_remote_readback_strictly_compares_count_metadata_hashes_and_config(
+    build: KnowledgeBuild,
+) -> None:
+    plan = create_sync_plan(build, {"documents": []})
+    item = plan.creates[0]
+    readback = DifyReadbackManifest(
+        document_count=1,
+        documents=[
+            {
+                "source_id": item.source_id,
+                "content_sha256": item.content_sha256,
+                "document_id": "doc-python",
+                "source_metadata": item.source_metadata,
+            }
+        ],
+        config=plan.config,
+    )
+
+    assert verify_remote_readback(plan, readback) == readback
+
+    wrong_count = readback.model_copy(update={"document_count": 2})
+    with pytest.raises(KnowledgeSyncError, match="document count"):
+        verify_remote_readback(plan, wrong_count)
+    wrong_config = readback.model_copy(
+        update={"config": readback.config.model_copy(update={"chunk_size": 799})}
+    )
+    with pytest.raises(KnowledgeSyncError, match="configuration"):
+        verify_remote_readback(plan, wrong_config)
 
 
 def test_sync_never_deletes_without_confirmation(build: KnowledgeBuild) -> None:
@@ -296,12 +393,16 @@ def test_sync_plan_enforces_action_lists_and_build_bound_paths(
         source_id="python-errors",
         content_sha256=build.notes[0].content_sha256,
         local_path=tmp_path / "outside.md",
+        source_metadata=valid.creates[0].source_metadata,
     )
     with pytest.raises(ValidationError, match="bound"):
         SyncPlan(
             build_id=valid.build_id,
             build_hash=valid.build_hash,
             build_path=valid.build_path,
+            document_count=1,
+            source_manifest_hash=valid.source_manifest_hash,
+            config=valid.config,
             creates=[outside],
             updates=[],
             unchanged=[],

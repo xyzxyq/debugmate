@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 
 from debugmate.contracts import ErrorCategory
 from debugmate.knowledge.build import ImmutableBuildCollision, build_knowledge
@@ -308,6 +309,24 @@ def test_manifest_records_immutable_build_contract(
     assert manifest["notes"][0]["source_sha256"] == build.notes[0].source_sha256
     assert manifest["notes"][0]["note_sha256"] == build.notes[0].content_sha256
     assert manifest["sources"][0]["retrieved_at"].endswith("Z")
+
+
+def test_actual_build_sources_validate_against_committed_manifest_schema(
+    tmp_path: Path,
+    registry: SourceRegistry,
+    fixture_client: httpx.Client,
+) -> None:
+    build = build_knowledge(registry, tmp_path, fixture_client)
+    manifest = json.loads((build.path / "manifest.json").read_text(encoding="utf-8"))
+    schema_path = Path(__file__).resolve().parents[2] / "knowledge" / "manifest.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+
+    validator.validate(manifest["sources"])
+    built_source = manifest["sources"][0]
+    registered_source = registry.sources[0].model_dump(mode="json")
+    for field in registered_source:
+        assert built_source[field] == registered_source[field]
 
 
 def test_existing_immutable_build_is_reused_without_replacement(
