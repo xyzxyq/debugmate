@@ -15,19 +15,14 @@ from debugmate.knowledge.extractor import ExtractedSection
 from debugmate.knowledge.fetcher import FetchedSource
 from debugmate.knowledge.models import KnowledgeSource, StrictKnowledgeModel
 
-NOTE_GENERATOR_VERSION: Final = "1.0.1"
+NOTE_GENERATOR_VERSION: Final = "1.0.2"
 MAX_NOTE_BYTES: Final = 32_000
 MAX_SECTIONS_PER_NOTE: Final = 8
 MAX_SNIPPET_CHARACTERS: Final = 600
-MAX_SUMMARY_BULLETS: Final = 8
-MAX_SUMMARY_BULLET_CHARACTERS: Final = 1_000
-_CHINESE_CHARACTER = re.compile(r"[\u3400-\u9fff]")
-_LOCATOR_TOKEN = re.compile(r"(?<![\w-])#[A-Za-z0-9][A-Za-z0-9._:-]*(?![\w-])")
-_ASCII_TERM = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*")
 
 
 class NoteSummarizer(Protocol):
-    """Optional grounded summarizer boundary; implementations may call an LLM."""
+    """Reserved summarizer boundary, excluded from authoritative MVP notes."""
 
     def summarize(
         self,
@@ -35,7 +30,7 @@ class NoteSummarizer(Protocol):
         source: KnowledgeSource,
         sections: Sequence[ExtractedSection],
     ) -> Sequence[str]:
-        """Return Chinese diagnostic bullets containing official source locators."""
+        """Return candidate text for a future entailment-verified side channel."""
 
 
 class DiagnosticNote(StrictKnowledgeModel):
@@ -69,69 +64,14 @@ def _fallback_facts(sections: Sequence[ExtractedSection]) -> list[str]:
     ]
 
 
-def _validated_summary(
-    summarizer: NoteSummarizer | None,
-    source: KnowledgeSource,
-    sections: Sequence[ExtractedSection],
-) -> list[str] | None:
-    if summarizer is None:
-        return None
-    try:
-        bullets = list(summarizer.summarize(source=source, sections=sections))
-    except Exception:
-        return None
-    if not bullets or len(bullets) > MAX_SUMMARY_BULLETS:
-        return None
-    sections_by_locator = {section.source_locator: section for section in sections}
-    validated: list[str] = []
-    for bullet in bullets:
-        if not isinstance(bullet, str):
-            return None
-        normalized = bullet.strip()
-        if normalized.startswith("- "):
-            normalized = normalized[2:].strip()
-        locator_tokens = _LOCATOR_TOKEN.findall(normalized)
-        exact_locators = [
-            locator for locator in locator_tokens if locator in sections_by_locator
-        ]
-        if (
-            not normalized
-            or len(normalized) > MAX_SUMMARY_BULLET_CHARACTERS
-            or _CHINESE_CHARACTER.search(normalized) is None
-            or len(locator_tokens) != 1
-            or len(exact_locators) != 1
-        ):
-            return None
-        locator = exact_locators[0]
-        summary_without_locator = normalized.replace(locator, " ", 1)
-        summary_terms = {
-            term.casefold() for term in _ASCII_TERM.findall(summary_without_locator)
-        }
-        section = sections_by_locator[locator]
-        source_terms = {
-            term.casefold()
-            for term in _ASCII_TERM.findall(f"{section.heading} {section.text}")
-        }
-        overlapping_terms = summary_terms & source_terms
-        if (
-            len(overlapping_terms) < 2
-            or len(overlapping_terms) / max(len(summary_terms), 1) < 0.8
-        ):
-            return None
-        validated.append(f"- {normalized}")
-    return validated
-
-
 def _render_markdown(
     source: KnowledgeSource,
     fetched: FetchedSource,
     sections: Sequence[ExtractedSection],
-    summarizer: NoteSummarizer | None,
 ) -> str:
     selected = list(sections[:MAX_SECTIONS_PER_NOTE])
     locators = [section.source_locator for section in selected]
     facts = _fallback_facts(selected)
-    optional_summary = _validated_summary(summarizer, source, selected)
     categories = [category.value for category in source.error_categories]
     lines = [
         "---",
@@ -159,18 +99,6 @@ def _render_markdown(
         "## 诊断事实",
         "",
         *facts,
-        *(
-            [
-                "",
-                "### 可选摘要（释义）",
-                "",
-                "以下释义已通过来源锚点与术语重合校验，原始确定性事实仍保留在上方。",
-                "",
-                *optional_summary,
-            ]
-            if optional_summary is not None
-            else []
-        ),
         "",
         "## 检查建议",
         "",
@@ -214,7 +142,11 @@ def build_note(
 
     if not sections:
         raise ValueError("a diagnostic note requires at least one extracted section")
-    markdown = _render_markdown(source, fetched, sections, summarizer)
+    # Lexical or locator checks cannot prove entailment. Until an entailment
+    # verifier exists, candidate LLM text is deliberately neither called nor
+    # persisted in authoritative/syncable notes.
+    del summarizer
+    markdown = _render_markdown(source, fetched, sections)
     return DiagnosticNote(
         source_id=source.source_id,
         source_url=source.url,

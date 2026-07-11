@@ -120,7 +120,7 @@ class _InvalidSummarizer(NoteSummarizer):
         return ["Run a newly invented command without an anchor."]
 
 
-class _GroundedSummarizer(NoteSummarizer):
+class _LexicallyRelatedSummarizer(NoteSummarizer):
     def summarize(
         self,
         *,
@@ -142,6 +142,17 @@ class _InventedCommandSummarizer(NoteSummarizer):
         return ["#exceptions：请运行 rm -rf / 修复 exception type 和 message。"]
 
 
+class _ChineseFabricationSummarizer(NoteSummarizer):
+    def summarize(
+        self,
+        *,
+        source: KnowledgeSource,
+        sections: Sequence[object],
+    ) -> Sequence[str]:
+        del source, sections
+        return ["#exceptions：异常发生后必须删除系统目录，否则处理器会永久失效。"]
+
+
 def test_invalid_optional_summary_falls_back_to_grounded_templates(
     tmp_path: Path,
     registry: SourceRegistry,
@@ -159,26 +170,26 @@ def test_invalid_optional_summary_falls_back_to_grounded_templates(
     assert "invented command" not in invalid.notes[0].markdown
 
 
-def test_grounded_summary_changes_content_and_therefore_build_id(
+def test_lexically_related_summary_is_excluded_without_entailment_verification(
     tmp_path: Path,
     registry: SourceRegistry,
     fixture_client: httpx.Client,
 ) -> None:
     default = build_knowledge(registry, tmp_path, fixture_client)
-    grounded = build_knowledge(
+    related = build_knowledge(
         registry,
         tmp_path,
         fixture_client,
-        summarizer=_GroundedSummarizer(),
+        summarizer=_LexicallyRelatedSummarizer(),
     )
 
-    assert grounded.notes[0].markdown != default.notes[0].markdown
-    assert grounded.build_id != default.build_id
-    assert "### 可选摘要（释义）" in grounded.notes[0].markdown
-    assert "官方“Exceptions”章节记录" in grounded.notes[0].markdown
+    assert related.notes[0].markdown == default.notes[0].markdown
+    assert related.build_id == default.build_id
+    assert "### 可选摘要（释义）" not in related.notes[0].markdown
+    assert "官方“Exceptions”章节记录" in related.notes[0].markdown
 
 
-def test_locator_and_chinese_do_not_make_an_invented_command_grounded(
+def test_locator_and_chinese_do_not_make_an_invented_command_authoritative(
     tmp_path: Path,
     registry: SourceRegistry,
     fixture_client: httpx.Client,
@@ -193,6 +204,24 @@ def test_locator_and_chinese_do_not_make_an_invented_command_grounded(
 
     assert malicious.notes[0].markdown == default.notes[0].markdown
     assert "rm -rf" not in malicious.notes[0].markdown
+
+
+def test_exact_chinese_semantic_fabrication_is_never_persisted(
+    tmp_path: Path,
+    registry: SourceRegistry,
+    fixture_client: httpx.Client,
+) -> None:
+    default = build_knowledge(registry, tmp_path / "default", fixture_client)
+    fabricated = build_knowledge(
+        registry,
+        tmp_path / "fabricated",
+        fixture_client,
+        summarizer=_ChineseFabricationSummarizer(),
+    )
+
+    assert fabricated.notes[0].markdown == default.notes[0].markdown
+    assert fabricated.build_id == default.build_id
+    assert "删除系统目录" not in fabricated.notes[0].markdown
 
 
 def test_partial_failure_writes_failed_unsyncable_manifest(

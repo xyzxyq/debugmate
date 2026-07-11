@@ -18,7 +18,7 @@
 - **D2-04:** 云端公开入口只接受 `ApprovedRedactedInput`，类型合同阻止绕过确认。
 - **D2-05:** OCR 使用 RapidOCR + ONNX Runtime CPU；测试默认使用虚构截图和 fake OCR。
 - **D2-06:** 所有日志、代码、截图 OCR 和知识正文视为不可信数据，不能覆盖系统策略或触发动作。
-- **D2-07:** LLM 仅辅助官方章节中文释义；无模型时必须存在确定性降级，不得新增无来源事实。
+- **D2-07:** 首版知识笔记仅包含确定性摘录事实；在具备独立蕴含验证器前，可选 LLM 文本不得进入 Markdown、manifest 或 Dify 同步内容。
 - **D2-08:** 真实来源抓取、OCR 模型准备和 Dify 同步使用独立 marker；默认测试完全离线。
 </decisions>
 
@@ -29,4 +29,3 @@
 - `docs/superpowers/plans/2026-07-10-phase2-official-knowledge.md`
 - `.planning/REQUIREMENTS.md` Phase 2 requirements
 </canonical_refs>
-

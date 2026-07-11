@@ -4,7 +4,7 @@
 
 **Goal:** Build a reproducible curated-official-source pipeline that fetches approved pages, produces deterministic structured diagnostic notes, audits coverage, and prepares a deletion-safe Dify synchronization bundle.
 
-**Architecture:** A strict source registry drives an allowlisted HTTP fetcher. BeautifulSoup extracts configured heading ranges into normalized sections; a deterministic note renderer is the default, while an optional summarizer port may provide grounded Chinese paraphrases. Immutable build directories record every source/document hash and retrieval configuration.
+**Architecture:** A strict source registry drives an allowlisted HTTP fetcher. BeautifulSoup extracts configured heading ranges into normalized sections, and the authoritative knowledge notes are rendered only from deterministic extracted facts. The optional summarizer port is reserved but excluded from Markdown, manifests and sync until an entailment verifier exists. Immutable build directories record every source/document hash and retrieval configuration.
 
 **Tech Stack:** HTTPX 0.28.1, BeautifulSoup 4.15.0, Pydantic 2.13.4, standard-library HTML/JSON/hash tools, pytest.
 
@@ -157,7 +157,7 @@ Run: `.\.venv\Scripts\python.exe -m pytest -q tests/knowledge/test_note_build.py
 
 - [ ] **Step 3: Implement deterministic renderer**
 
-Render UTF-8 Markdown with fixed frontmatter and sections: symptoms/categories, diagnostic facts, checks, version/platform limits, source anchors, short extracted snippets. The default summarizer paraphrases using deterministic templates and never invents commands. An injected `NoteSummarizer` may return Chinese bullets only when every bullet includes a locator; invalid output falls back to templates.
+Render UTF-8 Markdown with fixed frontmatter and sections: symptoms/categories, diagnostic facts, checks, version/platform limits, source anchors, short extracted snippets. Deterministic templates and bounded extracted facts are the only authoritative note content. An injected `NoteSummarizer` remains API-compatible but is not called or persisted in Markdown, manifests or syncable output; locator and lexical overlap do not prove source entailment.
 
 - [ ] **Step 4: Implement immutable build manifest**
 
