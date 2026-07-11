@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from debugmate.cli import main
 from debugmate.contracts import ErrorCategory
@@ -15,6 +16,8 @@ from debugmate.knowledge.sync import (
     KnowledgeSyncError,
     MissingDatasetKey,
     SyncConfirmationRequired,
+    SyncItem,
+    SyncPlan,
     create_sync_plan,
     execute_sync,
 )
@@ -27,12 +30,14 @@ FIXTURE = (
 )
 
 
-@pytest.fixture
-def build(tmp_path: Path) -> KnowledgeBuild:
-    source = KnowledgeSource(
-        source_id="python-errors",
-        title="Python Errors and Exceptions",
-        url="https://docs.python.org/3/tutorial/errors.html",
+def _source(
+    source_id: str = "python-errors",
+    url: str = "https://docs.python.org/3/tutorial/errors.html",
+) -> KnowledgeSource:
+    return KnowledgeSource(
+        source_id=source_id,
+        title=f"Python reference {source_id}",
+        url=url,
         product="python",
         version_scope="Python 3",
         platform="cross-platform",
@@ -42,8 +47,9 @@ def build(tmp_path: Path) -> KnowledgeBuild:
         license_or_terms_note="Python documentation license applies.",
         selection_reason="Canonical Python runtime error reference.",
     )
-    registry = SourceRegistry(registry_version="1.0.0", sources=[source])
 
+
+def _fixture_client() -> httpx.Client:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -54,8 +60,31 @@ def build(tmp_path: Path) -> KnowledgeBuild:
             content=FIXTURE.read_bytes(),
         )
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+@pytest.fixture
+def build(tmp_path: Path) -> KnowledgeBuild:
+    source = _source()
+    registry = SourceRegistry(registry_version="1.0.0", sources=[source])
+    with _fixture_client() as client:
         return build_knowledge(registry, tmp_path / "builds", client)
+
+
+@pytest.fixture
+def two_source_build(tmp_path: Path) -> KnowledgeBuild:
+    registry = SourceRegistry(
+        registry_version="1.0.0",
+        sources=[
+            _source(),
+            _source(
+                source_id="python-venv",
+                url="https://docs.python.org/3/library/venv.html",
+            ),
+        ],
+    )
+    with _fixture_client() as client:
+        return build_knowledge(registry, tmp_path / "two-builds", client)
 
 
 def test_coverage_reports_all_categories_and_sorted_blind_spots(
@@ -216,6 +245,182 @@ def test_real_sync_rejects_unsafe_dataset_identifier(build: KnowledgeBuild) -> N
             dataset_id="../another-dataset",
             dry_run=False,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("source_id", "../victim"), ("remote_document_id", "doc/escape")],
+)
+def test_sync_item_rejects_unsafe_identifiers(field: str, value: str) -> None:
+    values: dict[str, object] = {
+        "action": "delete",
+        "source_id": "stale-source",
+        "content_sha256": "a" * 64,
+        "remote_document_id": "doc-stale",
+    }
+    values[field] = value
+
+    with pytest.raises(ValidationError):
+        SyncItem(**values)
+
+
+def test_sync_item_enforces_action_field_invariants(build: KnowledgeBuild) -> None:
+    with pytest.raises(ValidationError):
+        SyncItem(
+            action="delete",
+            source_id="stale-source",
+            content_sha256="a" * 64,
+            local_path=build.path / "notes" / "python-errors.md",
+            remote_document_id="doc-stale",
+        )
+
+
+def test_sync_plan_enforces_action_lists_and_build_bound_paths(
+    build: KnowledgeBuild,
+    tmp_path: Path,
+) -> None:
+    valid = create_sync_plan(build, {"documents": []})
+    with pytest.raises(ValidationError, match="different action"):
+        SyncPlan(
+            build_id=valid.build_id,
+            build_hash=valid.build_hash,
+            build_path=valid.build_path,
+            creates=[],
+            updates=[],
+            unchanged=[],
+            deletes=valid.creates,
+        )
+
+    outside = SyncItem(
+        action="create",
+        source_id="python-errors",
+        content_sha256=build.notes[0].content_sha256,
+        local_path=tmp_path / "outside.md",
+    )
+    with pytest.raises(ValidationError, match="bound"):
+        SyncPlan(
+            build_id=valid.build_id,
+            build_hash=valid.build_hash,
+            build_path=valid.build_path,
+            creates=[outside],
+            updates=[],
+            unchanged=[],
+            deletes=[],
+        )
+
+
+def test_tampered_plan_or_current_build_identity_causes_zero_http(
+    build: KnowledgeBuild,
+) -> None:
+    requests: list[httpx.Request] = []
+    valid = create_sync_plan(build, {"documents": []})
+    tampered = valid.model_copy(update={"build_hash": "a" * 64})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    with httpx.Client(
+        base_url="https://api.dify.ai/v1/",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(KnowledgeSyncError, match="plan"):
+            execute_sync(
+                tampered,
+                client=client,
+                dataset_key="dataset-key",
+                dataset_id="dataset",
+                dry_run=False,
+            )
+
+        manifest_path = build.path / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["content_hash"] = "b" * 64
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(KnowledgeSyncError, match="identity"):
+            execute_sync(
+                valid,
+                client=client,
+                dataset_key="dataset-key",
+                dataset_id="dataset",
+                dry_run=False,
+            )
+
+    assert requests == []
+
+
+def test_directly_constructed_malicious_delete_plan_is_rejected_before_http(
+    build: KnowledgeBuild,
+) -> None:
+    requests: list[httpx.Request] = []
+    malicious = SyncPlan(
+        build_id=build.build_id,
+        build_hash=build.content_hash,
+        build_path=build.path,
+        creates=[],
+        updates=[],
+        unchanged=[],
+        deletes=[
+            SyncItem(
+                action="delete",
+                source_id="stale-source",
+                content_sha256="a" * 64,
+                remote_document_id="doc-stale",
+            )
+        ],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/",
+            transport=httpx.MockTransport(handler),
+        ) as client,
+        pytest.raises(KnowledgeSyncError, match="plan"),
+    ):
+        execute_sync(
+            malicious,
+            client=client,
+            dataset_key="dataset-key",
+            dataset_id="dataset",
+            confirm_delete=True,
+            dry_run=False,
+        )
+
+    assert requests == []
+
+
+def test_stale_second_note_causes_zero_cloud_calls(
+    two_source_build: KnowledgeBuild,
+) -> None:
+    requests: list[httpx.Request] = []
+    plan = create_sync_plan(two_source_build, {"documents": []})
+    second_note = two_source_build.path / "notes" / "python-venv.md"
+    second_note.write_text("changed after planning", encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/",
+            transport=httpx.MockTransport(handler),
+        ) as client,
+        pytest.raises(KnowledgeSyncError, match="changed"),
+    ):
+        execute_sync(
+            plan,
+            client=client,
+            dataset_key="dataset-key",
+            dataset_id="dataset",
+            dry_run=False,
+        )
+
+    assert requests == []
 
 
 @pytest.mark.cloud
