@@ -5,6 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import ValidationError
 
 from debugmate.contracts import ErrorCategory
@@ -13,6 +14,26 @@ from debugmate.knowledge.models import KnowledgeSource, SourceRegistry, load_reg
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = ROOT / "knowledge" / "sources.json"
 SCHEMA_PATH = ROOT / "knowledge" / "manifest.schema.json"
+
+REQUIRED_MANIFEST_FIELDS = {
+    "source_id",
+    "title",
+    "url",
+    "final_url",
+    "product",
+    "version_scope",
+    "platform",
+    "allowed_domain",
+    "heading_patterns",
+    "error_categories",
+    "retrieved_at",
+    "status_code",
+    "etag",
+    "last_modified",
+    "sha256",
+    "license_or_terms_note",
+    "selection_reason",
+}
 
 EXPECTED_URLS = {
     "python-errors": "https://docs.python.org/3/tutorial/errors.html",
@@ -63,6 +84,34 @@ def _valid_source(**overrides: object) -> dict[str, object]:
     }
     source.update(overrides)
     return source
+
+
+def _valid_manifest_entry() -> dict[str, object]:
+    return {
+        "source_id": "python-errors",
+        "title": "Python Tutorial: Errors and Exceptions",
+        "url": EXPECTED_URLS["python-errors"],
+        "final_url": EXPECTED_URLS["python-errors"],
+        "product": "python",
+        "version_scope": "Python 3",
+        "platform": "cross-platform",
+        "allowed_domain": "docs.python.org",
+        "heading_patterns": ["Syntax Errors", "Exceptions"],
+        "error_categories": ["python_runtime"],
+        "retrieved_at": "2026-07-11T08:30:00Z",
+        "status_code": 200,
+        "etag": '"python-errors-v1"',
+        "last_modified": None,
+        "sha256": "a" * 64,
+        "license_or_terms_note": "Python documentation license applies.",
+        "selection_reason": "Canonical Python runtime error reference.",
+    }
+
+
+def _manifest_validator() -> Draft202012Validator:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
 def test_registry_contains_exact_curated_official_urls() -> None:
@@ -157,14 +206,35 @@ def test_committed_manifest_schema_is_strict_and_keeps_audit_fields() -> None:
 
     assert schema["type"] == "array"
     assert schema["items"]["additionalProperties"] is False
-    assert {"retrieved_at", "sha256"} <= set(schema["items"]["required"])
-    assert {
+    assert set(schema["items"]["required"]) == REQUIRED_MANIFEST_FIELDS
+
+
+def test_realistic_fetched_manifest_is_valid() -> None:
+    _manifest_validator().validate([_valid_manifest_entry()])
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
         "source_id",
         "allowed_domain",
         "heading_patterns",
         "error_categories",
         "selection_reason",
-    } <= set(schema["items"]["properties"])
+        "final_url",
+        "status_code",
+        "etag",
+        "last_modified",
+    ],
+)
+def test_fetched_manifest_rejects_missing_audit_evidence(missing_field: str) -> None:
+    entry = _valid_manifest_entry()
+    del entry[missing_field]
+
+    errors = list(_manifest_validator().iter_errors([entry]))
+
+    assert errors
+    assert any(error.validator == "required" for error in errors)
 
 
 def test_registry_file_is_valid_against_generated_model_schema() -> None:

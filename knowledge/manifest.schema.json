@@ -7,14 +7,23 @@
     "type": "object",
     "additionalProperties": false,
     "required": [
+      "source_id",
       "title",
       "url",
+      "final_url",
       "product",
       "version_scope",
       "platform",
+      "allowed_domain",
+      "heading_patterns",
+      "error_categories",
       "retrieved_at",
+      "status_code",
+      "etag",
+      "last_modified",
       "sha256",
-      "license_or_terms_note"
+      "license_or_terms_note",
+      "selection_reason"
     ],
     "properties": {
       "source_id": {
@@ -23,6 +32,7 @@
       },
       "title": {"type": "string", "minLength": 1},
       "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+      "final_url": {"type": "string", "format": "uri", "pattern": "^https://"},
       "product": {
         "enum": [
           "python",
@@ -60,6 +70,19 @@
         }
       },
       "retrieved_at": {"type": "string", "format": "date-time"},
+      "status_code": {"type": "integer", "minimum": 200, "maximum": 299},
+      "etag": {
+        "anyOf": [
+          {"type": "string", "minLength": 1},
+          {"type": "null"}
+        ]
+      },
+      "last_modified": {
+        "anyOf": [
+          {"type": "string", "minLength": 1},
+          {"type": "null"}
+        ]
+      },
       "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
       "license_or_terms_note": {"type": "string", "minLength": 1},
       "selection_reason": {"type": "string", "minLength": 1}

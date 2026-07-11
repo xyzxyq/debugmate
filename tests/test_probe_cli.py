@@ -252,14 +252,23 @@ def test_contract_and_knowledge_schemas_are_separate_and_strict() -> None:
     assert diagnosis["title"] == "DiagnosisRecord"
     assert diagnosis["additionalProperties"] is False
     required = {
+        "source_id",
         "title",
         "url",
+        "final_url",
         "product",
         "version_scope",
         "platform",
+        "allowed_domain",
+        "heading_patterns",
+        "error_categories",
         "retrieved_at",
+        "status_code",
+        "etag",
+        "last_modified",
         "sha256",
         "license_or_terms_note",
+        "selection_reason",
     }
     assert set(knowledge["items"]["required"]) == required
     assert knowledge["items"]["additionalProperties"] is False
