@@ -173,6 +173,28 @@ def test_extraction_deduplicates_canonical_text(source: KnowledgeSource) -> None
     assert sections[0].text_sha256 == hashlib.sha256(b"Same diagnostic fact.").hexdigest()
 
 
+def test_extraction_stops_at_same_level_heading_nested_in_wrapper(
+    source: KnowledgeSource,
+) -> None:
+    nested_boundary_html = """
+    <h2 id="exceptions">Exceptions</h2>
+    <div class="content-wrapper">
+      <p>Included diagnostic fact.</p>
+      <section>
+        <h2 id="handling-exceptions">Handling Exceptions</h2>
+        <p>Must not leak into the Exceptions section.</p>
+      </section>
+    </div>
+    """
+
+    sections = extract_sections(source, nested_boundary_html)
+
+    assert sections[0].heading == "Exceptions"
+    assert sections[0].text == "Included diagnostic fact."
+    assert sections[1].heading == "Handling Exceptions"
+    assert sections[1].text == "Must not leak into the Exceptions section."
+
+
 def test_extraction_caps_each_section_at_8000_characters(source: KnowledgeSource) -> None:
     html = f'<h2 id="exceptions">Exceptions</h2><p>{"x" * 9000}</p>'
 

@@ -95,6 +95,36 @@ def _heading_level(heading: Tag) -> int:
     return int(heading.name[1])
 
 
+def _render_until_heading_boundary(
+    node: Tag | NavigableString,
+    boundary_level: int,
+) -> tuple[list[str], bool]:
+    if isinstance(node, Tag) and node.name in _HEADING_NAMES:
+        if _heading_level(node) <= boundary_level:
+            return [], True
+        return _render_node(node), False
+    if isinstance(node, Tag) and node.name not in {
+        "pre",
+        "p",
+        "li",
+        "dt",
+        "dd",
+        "blockquote",
+        "ul",
+        "ol",
+    }:
+        blocks: list[str] = []
+        for child in node.children:
+            child_blocks, reached_boundary = _render_until_heading_boundary(
+                child, boundary_level
+            )
+            blocks.extend(child_blocks)
+            if reached_boundary:
+                return blocks, True
+        return blocks, False
+    return _render_node(node), False
+
+
 def _locator(heading: Tag, heading_text: str) -> str:
     anchor = heading.get("id")
     if not anchor:
@@ -120,13 +150,10 @@ def _section_text(heading: Tag) -> str:
     blocks: list[str] = []
     sibling = heading.next_sibling
     while sibling is not None:
-        if (
-            isinstance(sibling, Tag)
-            and sibling.name in _HEADING_NAMES
-            and _heading_level(sibling) <= level
-        ):
+        sibling_blocks, reached_boundary = _render_until_heading_boundary(sibling, level)
+        blocks.extend(sibling_blocks)
+        if reached_boundary:
             break
-        blocks.extend(_render_node(sibling))
         sibling = sibling.next_sibling
     return _bounded("\n\n".join(block for block in blocks if block).strip())
 

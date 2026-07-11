@@ -69,12 +69,12 @@
     {
       "source_id": "pytorch-cuda",
       "title": "PyTorch CUDA Semantics",
-      "url": "https://docs.pytorch.org/docs/stable/notes/cuda.html",
+      "url": "https://docs.pytorch.org/docs/2.13/notes/cuda.html",
       "product": "pytorch",
       "version_scope": "Current stable PyTorch documentation",
       "platform": "CUDA-capable systems",
       "allowed_domain": "docs.pytorch.org",
-      "heading_patterns": ["CUDA semantics", "Asynchronous execution", "Memory management"],
+      "heading_patterns": ["^CUDA semantics(?: #)?$", "^Asynchronous execution(?: #)?$", "^Memory management(?: #)?$"],
       "error_categories": ["cuda_memory", "tensor_shape_dtype"],
       "license_or_terms_note": "Use follows PyTorch documentation terms; publish only attributed diagnostic notes and short extracts.",
       "selection_reason": "Primary source for CUDA execution, device, and allocator behavior in PyTorch."
@@ -82,12 +82,12 @@
     {
       "source_id": "pytorch-serialization",
       "title": "PyTorch Serialization Semantics",
-      "url": "https://docs.pytorch.org/docs/stable/notes/serialization.html",
+      "url": "https://docs.pytorch.org/docs/2.13/notes/serialization.html",
       "product": "pytorch",
       "version_scope": "Current stable PyTorch documentation",
       "platform": "cross-platform",
       "allowed_domain": "docs.pytorch.org",
-      "heading_patterns": ["Serialization semantics", "Saving and loading tensors", "torch.load with weights_only"],
+      "heading_patterns": ["^Serialization semantics(?: #)?$", "^Saving and loading tensors(?: #)?$", "^torch\\.load with weights_only=True(?: #)?$"],
       "error_categories": ["model_loading", "dependency_environment"],
       "license_or_terms_note": "Use follows PyTorch documentation terms; publish only attributed diagnostic notes and short extracts.",
       "selection_reason": "Official reference for checkpoint formats, loading safety, and device mapping."
@@ -95,12 +95,12 @@
     {
       "source_id": "pytorch-tensor-view",
       "title": "PyTorch torch.Tensor.view",
-      "url": "https://docs.pytorch.org/docs/stable/generated/torch.Tensor.view.html",
+      "url": "https://docs.pytorch.org/docs/2.13/generated/torch.Tensor.view.html",
       "product": "pytorch",
       "version_scope": "Current stable PyTorch documentation",
       "platform": "cross-platform",
       "allowed_domain": "docs.pytorch.org",
-      "heading_patterns": ["Tensor.view", "Returns a new tensor"],
+      "heading_patterns": ["^torch\\.Tensor\\.view(?: #)?$"],
       "error_categories": ["tensor_shape_dtype"],
       "license_or_terms_note": "Use follows PyTorch documentation terms; publish only attributed diagnostic notes and short extracts.",
       "selection_reason": "Authoritative constraints for shape reinterpretation and contiguous tensor layouts."
@@ -108,12 +108,12 @@
     {
       "source_id": "cuda-compatibility",
       "title": "NVIDIA CUDA Compatibility",
-      "url": "https://docs.nvidia.com/deploy/cuda-compatibility/",
+      "url": "https://docs.nvidia.com/deploy/cuda-compatibility/latest/",
       "product": "cuda",
       "version_scope": "Current NVIDIA CUDA compatibility documentation",
       "platform": "NVIDIA GPU systems",
       "allowed_domain": "docs.nvidia.com",
-      "heading_patterns": ["Why CUDA Compatibility", "Minor Version Compatibility", "Forward Compatibility"],
+      "heading_patterns": ["^CUDA Compatibility(?: #)?$"],
       "error_categories": ["dependency_environment", "cuda_memory", "model_loading"],
       "license_or_terms_note": "NVIDIA documentation terms apply; retain source attribution and only short diagnostic extracts.",
       "selection_reason": "Official compatibility rules connecting CUDA toolkit, drivers, and deployed applications."
@@ -160,12 +160,12 @@
     {
       "source_id": "ultralytics-install",
       "title": "Ultralytics Quickstart",
-      "url": "https://docs.ultralytics.com/quickstart/",
+      "url": "https://docs.ultralytics.com/quickstart",
       "product": "ultralytics",
       "version_scope": "Current Ultralytics documentation",
       "platform": "cross-platform",
       "allowed_domain": "docs.ultralytics.com",
-      "heading_patterns": ["Install Ultralytics", "Quickstart", "Use Ultralytics with Python"],
+      "heading_patterns": ["^(?:Link to this section )?Install Ultralytics(?: #)?$", "^(?:Link to this section )?Headless Server Installation(?: #)?$", "^(?:Link to this section )?Use Ultralytics with Python(?: #)?$"],
       "error_categories": ["dependency_environment", "model_loading"],
       "license_or_terms_note": "Ultralytics documentation terms apply; retain attribution and short extracts only.",
       "selection_reason": "Official installation and first-run reference for the Ultralytics package."
@@ -173,12 +173,12 @@
     {
       "source_id": "ultralytics-predict",
       "title": "Ultralytics Predict Mode",
-      "url": "https://docs.ultralytics.com/modes/predict/",
+      "url": "https://docs.ultralytics.com/modes/predict",
       "product": "ultralytics",
       "version_scope": "Current Ultralytics documentation",
       "platform": "cross-platform",
       "allowed_domain": "docs.ultralytics.com",
-      "heading_patterns": ["Predict", "Inference Sources", "Key Features"],
+      "heading_patterns": ["^(?:Link to this section )?Model Prediction with Ultralytics YOLO(?: #)?$", "^(?:Link to this section )?Key Features of Predict Mode(?: #)?$", "^(?:Link to this section )?Inference Sources(?: #)?$"],
       "error_categories": ["model_loading", "tensor_shape_dtype", "path_permission"],
       "license_or_terms_note": "Ultralytics documentation terms apply; retain attribution and short extracts only.",
       "selection_reason": "Official inference input and model-loading behavior for reproducible prediction diagnostics."
@@ -191,7 +191,7 @@
       "version_scope": "PowerShell 7.5 documentation",
       "platform": "Windows PowerShell and PowerShell",
       "allowed_domain": "learn.microsoft.com",
-      "heading_patterns": ["About Environment Variables", "Using and changing environment variables", "Saving changes to environment variables"],
+      "heading_patterns": ["^about_Environment_Variables$", "^Use the variable syntax$", "^Create persistent environment variables in Windows$", "^Path information$"],
       "error_categories": ["dependency_environment", "path_permission"],
       "license_or_terms_note": "Microsoft Learn terms of use apply; store only short attributed technical extracts.",
       "selection_reason": "Official reference for PATH and process, user, and machine environment-variable scope."

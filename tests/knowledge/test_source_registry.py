@@ -41,19 +41,19 @@ EXPECTED_URLS = {
     "python-import": "https://docs.python.org/3/reference/import.html",
     "pip-resolution": "https://pip.pypa.io/en/stable/topics/dependency-resolution/",
     "pip-user-guide": "https://pip.pypa.io/en/stable/user_guide/",
-    "pytorch-cuda": "https://docs.pytorch.org/docs/stable/notes/cuda.html",
-    "pytorch-serialization": "https://docs.pytorch.org/docs/stable/notes/serialization.html",
+    "pytorch-cuda": "https://docs.pytorch.org/docs/2.13/notes/cuda.html",
+    "pytorch-serialization": "https://docs.pytorch.org/docs/2.13/notes/serialization.html",
     "pytorch-tensor-view": (
-        "https://docs.pytorch.org/docs/stable/generated/torch.Tensor.view.html"
+        "https://docs.pytorch.org/docs/2.13/generated/torch.Tensor.view.html"
     ),
-    "cuda-compatibility": "https://docs.nvidia.com/deploy/cuda-compatibility/",
+    "cuda-compatibility": "https://docs.nvidia.com/deploy/cuda-compatibility/latest/",
     "cuda-windows-install": (
         "https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/"
     ),
     "hf-installation": "https://huggingface.co/docs/transformers/en/installation",
     "hf-cache": "https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache",
-    "ultralytics-install": "https://docs.ultralytics.com/quickstart/",
-    "ultralytics-predict": "https://docs.ultralytics.com/modes/predict/",
+    "ultralytics-install": "https://docs.ultralytics.com/quickstart",
+    "ultralytics-predict": "https://docs.ultralytics.com/modes/predict",
     "windows-env": (
         "https://learn.microsoft.com/en-us/powershell/module/"
         "microsoft.powershell.core/about/about_environment_variables?view=powershell-7.5"
@@ -65,6 +65,37 @@ EXPECTED_URLS = {
     "windows-path-format": (
         "https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats"
     ),
+}
+
+EXPECTED_DRIFTED_HEADING_PATTERNS = {
+    "pytorch-cuda": [
+        r"^CUDA semantics(?: #)?$",
+        r"^Asynchronous execution(?: #)?$",
+        r"^Memory management(?: #)?$",
+    ],
+    "pytorch-serialization": [
+        r"^Serialization semantics(?: #)?$",
+        r"^Saving and loading tensors(?: #)?$",
+        r"^torch\.load with weights_only=True(?: #)?$",
+    ],
+    "pytorch-tensor-view": [r"^torch\.Tensor\.view(?: #)?$"],
+    "cuda-compatibility": [r"^CUDA Compatibility(?: #)?$"],
+    "ultralytics-install": [
+        r"^(?:Link to this section )?Install Ultralytics(?: #)?$",
+        r"^(?:Link to this section )?Headless Server Installation(?: #)?$",
+        r"^(?:Link to this section )?Use Ultralytics with Python(?: #)?$",
+    ],
+    "ultralytics-predict": [
+        r"^(?:Link to this section )?Model Prediction with Ultralytics YOLO(?: #)?$",
+        r"^(?:Link to this section )?Key Features of Predict Mode(?: #)?$",
+        r"^(?:Link to this section )?Inference Sources(?: #)?$",
+    ],
+    "windows-env": [
+        r"^about_Environment_Variables$",
+        r"^Use the variable syntax$",
+        r"^Create persistent environment variables in Windows$",
+        r"^Path information$",
+    ],
 }
 
 
@@ -152,6 +183,16 @@ def test_registry_entries_have_non_empty_extraction_and_category_metadata() -> N
     assert all(source.error_categories for source in registry.sources)
     assert all(source.license_or_terms_note.strip() for source in registry.sources)
     assert all(source.selection_reason.strip() for source in registry.sources)
+
+
+def test_drifted_sources_keep_live_verified_heading_patterns() -> None:
+    registry = load_registry(REGISTRY_PATH)
+    by_id = {source.source_id: source for source in registry.sources}
+
+    assert {
+        source_id: by_id[source_id].heading_patterns
+        for source_id in EXPECTED_DRIFTED_HEADING_PATTERNS
+    } == EXPECTED_DRIFTED_HEADING_PATTERNS
 
 
 @pytest.mark.parametrize(
