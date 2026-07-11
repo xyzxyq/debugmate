@@ -187,6 +187,7 @@ def validate_retrieval_trace(
 ) -> RetrievalTrace:
     """Validate trace IDs and URLs against an immutable build and registry."""
 
+    RetrievalTrace.model_validate(trace.model_dump(), strict=True)
     manifest = _load_manifest(build_manifest)
     build_id = manifest.get("build_id")
     if trace.knowledge_build_id != build_id:

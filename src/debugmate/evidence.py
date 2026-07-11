@@ -161,7 +161,8 @@ class EvidenceBundle:
 
         if not isinstance(trace, RetrievalTrace):
             raise TypeError("trace must be a validated RetrievalTrace")
-        return self.write_json("retrieval.json", trace.model_dump(mode="json"))
+        validated = RetrievalTrace.model_validate(trace.model_dump(), strict=True)
+        return self.write_json("retrieval.json", validated.model_dump(mode="json"))
 
     def write_bytes(self, relative_path: str | Path, value: bytes, mime_type: str) -> Path:
         path = Path(relative_path)

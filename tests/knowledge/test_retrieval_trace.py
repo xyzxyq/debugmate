@@ -150,6 +150,21 @@ def test_trace_validation_binds_registry_build_url_and_query(tmp_path: Path) -> 
         validate_retrieval_trace(trace, manifest, registry, changed_query)
 
 
+def test_validation_and_evidence_reject_model_copy_bypass(tmp_path: Path) -> None:
+    case = _case()
+    invalid_hit = _hit().model_copy(update={"content_summary": "raw" * 200})
+    invalid_trace = _trace(case, hits=[_hit()]).model_copy(
+        update={"hits": [invalid_hit]}
+    )
+
+    with pytest.raises(ValidationError):
+        validate_retrieval_trace(invalid_trace, _manifest(tmp_path), case=case)
+
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case.case_id)
+    with pytest.raises(ValidationError):
+        bundle.write_retrieval_trace(invalid_trace)
+
+
 def test_category_hit_rate_and_blind_spot_are_reported(tmp_path: Path) -> None:
     dependency = _case(ErrorCategory.DEPENDENCY_ENVIRONMENT)
     cuda = _case(ErrorCategory.CUDA_MEMORY).model_copy(
