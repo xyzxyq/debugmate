@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -168,6 +169,56 @@ def test_cloud_contract_failure_publishes_failed_manifest(
     assert verification.manifest is not None
     assert verification.manifest.status is RunStatus.FAILED
     assert verification.manifest.error_code == "E_DIFY_PROBE"
+
+
+def test_cloud_probe_keeps_scanned_recap_text_but_defers_audio_callback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    audio_calls: list[str] = []
+
+    class SuccessfulBackend:
+        def __init__(self, configured: DebugMateSettings) -> None:
+            del configured
+
+        def upload_file(self, path: Path, user: str) -> SimpleNamespace:
+            del path, user
+            return SimpleNamespace(file_id="file-fixture", filename="input.json", backend="dify")
+
+        def run_workflow(self, inputs: dict[str, object], user: str) -> SimpleNamespace:
+            del user
+            payload = json.loads(FIXTURE_DIAGNOSIS.read_text(encoding="utf-8"))
+            payload["case_id"] = inputs["case_id"]
+            from debugmate.contracts import DiagnosisRecord
+
+            return SimpleNamespace(
+                run_id="run-fixture",
+                diagnosis=DiagnosisRecord.model_validate_json(json.dumps(payload)),
+                backend="dify",
+            )
+
+        def synthesize_audio(self, text: str, user: str) -> None:
+            del user
+            audio_calls.append(text)
+            raise AssertionError("Phase 2 probe must not invoke TTS")
+
+    monkeypatch.setattr("debugmate.probe.DifyBackend", SuccessfulBackend)
+    configured = DebugMateSettings.from_env({"DIFY_API_KEY": SENTINEL})
+
+    outcome = run_cloud_probe(configured, tmp_path / "evidence")
+    report = json.loads((outcome.bundle_path / "probe-results.json").read_text(encoding="utf-8"))
+
+    assert outcome.exit_code == 0
+    assert audio_calls == []
+    assert not (outcome.bundle_path / "recap.mp3").exists()
+    assert json.loads((outcome.bundle_path / "recap.json").read_text(encoding="utf-8")) == {
+        "recap_text": (
+            "Confirm the active interpreter, check whether the package is installed there, "
+            "then install and verify only after reviewing the command."
+        ),
+    }
+    c07 = next(item for item in report["capabilities"] if item["capability_id"] == "C07")
+    assert c07["status"] == "not-tested"
+    assert c07["evidence_path"] is None
 
 
 def test_cli_fixture_probe_and_bundle_verification(

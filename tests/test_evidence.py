@@ -11,6 +11,7 @@ from debugmate.contracts import CapabilityStatus
 from debugmate.evidence import (
     MANIFEST_VERSION,
     ArtifactEntry,
+    AudioEvidenceNotReady,
     CapabilityEvidence,
     EvidenceBundle,
     RunManifest,
@@ -207,7 +208,7 @@ def test_duplicate_or_interrupted_bundle_never_looks_successful(tmp_path: Path) 
 
     interrupted_id = "case_44444444444444444444444444444444"
     interrupted = EvidenceBundle.begin(root, interrupted_id)
-    interrupted.write_bytes("partial.bin", b"partial", "application/octet-stream")
+    interrupted.write_bytes("partial.txt", b"partial", "text/plain")
     assert not (root / interrupted_id).exists()
     assert not (root / interrupted_id / "manifest.json").exists()
 
@@ -221,9 +222,9 @@ def test_verifier_detects_missing_manifest_tamper_and_unlisted_file(tmp_path: Pa
 
     case_id = "case_66666666666666666666666666666666"
     bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-    bundle.write_bytes("artifact.bin", b"original", "application/octet-stream")
+    bundle.write_bytes("artifact.txt", b"original", "text/plain")
     final_path = bundle.finalize(make_manifest(case_id))
-    (final_path / "artifact.bin").write_bytes(b"tampered")
+    (final_path / "artifact.txt").write_bytes(b"tampered")
     tampered = verify_bundle(final_path)
     assert tampered.ok is False
     assert any("sha256 mismatch" in issue for issue in tampered.issues)
@@ -257,7 +258,7 @@ def test_bundle_rejects_absolute_paths_and_unsafe_failure_text(tmp_path: Path) -
     bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
 
     with pytest.raises(UnsafeArtifactPath):
-        bundle.write_bytes(Path("C:/absolute.bin"), b"x", "application/octet-stream")
+        bundle.write_bytes(Path("C:/absolute.txt"), b"x", "text/plain")
     with pytest.raises(UnsafeEvidenceContent):
         bundle.fail("E_UNSAFE", "Authorization: Bearer SECRET_SENTINEL_DO_NOT_LOG")
 
@@ -296,25 +297,12 @@ def _mp3_frame(payload: bytes = b"\x00" * 32) -> bytes:
     return b"\xff\xfb\x90\x64" + payload
 
 
-def _id3_text_tag(value: str, encoding: str) -> bytes:
-    if encoding == "utf-8":
-        body = b"\x03" + value.encode("utf-8")
-    elif encoding == "utf-16-le":
-        body = b"\x01\xff\xfe" + value.encode("utf-16-le")
-    else:
-        body = b"\x02" + value.encode("utf-16-be")
-    frame = b"TIT2" + len(body).to_bytes(4, "big") + b"\x00\x00" + body
-    size = len(frame)
-    synchsafe = bytes(((size >> 21) & 0x7F, (size >> 14) & 0x7F, (size >> 7) & 0x7F, size & 0x7F))
-    return b"ID3\x04\x00\x00" + synchsafe + frame
-
-
 def test_generic_writer_rejects_privacy_sensitive_binary_formats(tmp_path: Path) -> None:
     bundle = EvidenceBundle.begin(tmp_path / "evidence", "case_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 
     with pytest.raises(UnsafeEvidenceContent, match="write_png"):
         bundle.write_bytes("card.png", _png_with_text_metadata("safe"), "image/png")
-    with pytest.raises(UnsafeEvidenceContent, match="write_generated_audio"):
+    with pytest.raises(UnsafeEvidenceContent, match="not publishable"):
         bundle.write_bytes("recap.mp3", b"ID3\x04\x00\x00safe", "audio/mpeg")
 
     assert not (bundle.temp_path / "card.png").exists()
@@ -336,6 +324,30 @@ def test_generic_writer_rejects_binary_magic_disguised_as_octet_stream(
     assert not (bundle.temp_path / "artifact.bin").exists()
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"])
+def test_generic_writer_scans_artifact_bin_email_before_rejecting_without_echo(
+    tmp_path: Path, encoding: str
+) -> None:
+    sentinel = "student@example.com"
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", "case_24242424242424242424242424242424")
+
+    with pytest.raises(UnsafeEvidenceContent) as caught:
+        bundle.write_bytes("artifact.bin", sentinel.encode(encoding), "application/octet-stream")
+
+    assert sentinel not in str(caught.value)
+    assert "unsupported evidence type" not in str(caught.value)
+    assert not (bundle.temp_path / "artifact.bin").exists()
+
+
+def test_generic_writer_rejects_even_benign_unknown_binary_type(tmp_path: Path) -> None:
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", "case_25252525252525252525252525252525")
+
+    with pytest.raises(UnsafeEvidenceContent, match="unsupported evidence type"):
+        bundle.write_bytes("artifact.bin", b"benign bytes", "application/octet-stream")
+
+    assert not (bundle.temp_path / "artifact.bin").exists()
+
+
 def test_png_writer_strips_sensitive_text_metadata_before_publish(tmp_path: Path) -> None:
     case_id = "case_ffffffffffffffffffffffffffffffff"
     sentinel = "student@example.com"
@@ -351,103 +363,21 @@ def test_png_writer_strips_sensitive_text_metadata_before_publish(tmp_path: Path
     assert verify_bundle(final_path).ok is True
 
 
-def test_generated_audio_requires_safe_recap(tmp_path: Path) -> None:
+def test_generated_audio_is_deferred_and_never_executes_unrelated_callback(
+    tmp_path: Path,
+) -> None:
     bundle = EvidenceBundle.begin(tmp_path / "evidence", "case_12121212121212121212121212121212")
+    callback_calls: list[str] = []
 
-    with pytest.raises(UnsafeEvidenceContent):
-        bundle.write_generated_audio(
-            "recap.mp3",
-            "mail student@example.com",
-            lambda _text: (_mp3_frame(), "audio/mpeg"),
-        )
-
-    assert not (bundle.temp_path / "recap.mp3").exists()
-
-
-def test_generated_audio_binds_scanned_recap_without_exporting_it(tmp_path: Path) -> None:
-    case_id = "case_13131313131313131313131313131313"
-    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-    received: list[str] = []
-
-    bundle.write_generated_audio(
-        "recap.mp3",
-        "fictional safe recap",
-        lambda text: (received.append(text) or _mp3_frame(), "audio/mpeg"),
-    )
-    final_path = bundle.finalize(make_manifest(case_id))
-
-    assert received == ["fictional safe recap"]
-    assert verify_bundle(final_path).ok is True
-    manifest_bytes = (final_path / "manifest.json").read_bytes()
-    assert b"fictional safe recap" not in manifest_bytes
-
-
-@pytest.mark.parametrize("encoding", ["utf-8", "utf-16-le", "utf-16-be"])
-def test_generated_audio_detects_id3_text_in_all_supported_encodings(
-    tmp_path: Path, encoding: str
-) -> None:
-    case_id = "case_18181818181818181818181818181818"
-    sentinel = "student@example.com"
-    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-
-    with pytest.raises(UnsafeEvidenceContent) as caught:
+    with pytest.raises(AudioEvidenceNotReady, match="Phase 4"):
         bundle.write_generated_audio(
             "recap.mp3",
             "fictional safe recap",
-            lambda _text: (_id3_text_tag(sentinel, encoding) + _mp3_frame(), "audio/mpeg"),
+            lambda text: (callback_calls.append(text) or (_mp3_frame(), "audio/mpeg")),
         )
 
-    assert sentinel not in str(caught.value)
+    assert callback_calls == []
     assert not (bundle.temp_path / "recap.mp3").exists()
-
-
-def test_generated_audio_removes_benign_id3_metadata(tmp_path: Path) -> None:
-    case_id = "case_21212121212121212121212121212121"
-    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-
-    bundle.write_generated_audio(
-        "recap.mp3",
-        "fictional safe recap",
-        lambda _text: (_id3_text_tag("fictional title", "utf-8") + _mp3_frame(), "audio/mpeg"),
-    )
-    final_path = bundle.finalize(make_manifest(case_id))
-
-    assert (final_path / "recap.mp3").read_bytes() == _mp3_frame()
-
-
-@pytest.mark.parametrize("encoding", ["utf-8", "utf-16-le", "utf-16-be"])
-def test_generated_audio_rejects_encoded_sensitive_text_in_frame_payload(
-    tmp_path: Path, encoding: str
-) -> None:
-    case_id = "case_23232323232323232323232323232323"
-    sentinel = "student@example.com"
-    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-
-    with pytest.raises(UnsafeEvidenceContent) as caught:
-        bundle.write_generated_audio(
-            "recap.mp3",
-            "fictional safe recap",
-            lambda _text: (_mp3_frame(sentinel.encode(encoding)), "audio/mpeg"),
-        )
-
-    assert sentinel not in str(caught.value)
-    assert not (bundle.temp_path / "recap.mp3").exists()
-
-
-def test_finalize_rejects_generated_audio_tamper_even_when_bytes_stay_mp3(tmp_path: Path) -> None:
-    case_id = "case_19191919191919191919191919191919"
-    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-    target = bundle.write_generated_audio(
-        "recap.mp3",
-        "fictional safe recap",
-        lambda _text: (_mp3_frame(b"first"), "audio/mpeg"),
-    )
-    target.write_bytes(_mp3_frame(b"second"))
-
-    with pytest.raises(UnsafeEvidenceContent):
-        bundle.finalize(make_manifest(case_id))
-
-    assert not bundle.final_path.exists()
 
 
 @pytest.mark.parametrize(
@@ -459,10 +389,24 @@ def test_finalize_rejects_binary_magic_hidden_behind_generic_contract(
 ) -> None:
     case_id = "case_20202020202020202020202020202020"
     bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
-    target = bundle.write_bytes("artifact.bin", b"safe text", "application/octet-stream")
+    target = bundle.write_bytes("artifact.txt", b"safe text", "text/plain")
     target.write_bytes(payload)
 
     with pytest.raises(UnsafeEvidenceContent):
+        bundle.finalize(make_manifest(case_id))
+
+    assert not bundle.final_path.exists()
+
+
+def test_finalize_rejects_unrecognized_binary_hidden_behind_text_contract(
+    tmp_path: Path,
+) -> None:
+    case_id = "case_27272727272727272727272727272727"
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case_id)
+    target = bundle.write_bytes("artifact.txt", b"safe text", "text/plain")
+    target.write_bytes(b"\x00\xff\x00\xfe\x01\x80")
+
+    with pytest.raises(UnsafeEvidenceContent, match="valid UTF-8"):
         bundle.finalize(make_manifest(case_id))
 
     assert not bundle.final_path.exists()
@@ -558,6 +502,32 @@ def test_verifier_rejects_hash_valid_audio_with_sensitive_bytes(tmp_path: Path) 
 
     assert result.ok is False
     assert "unsafe audio artifact: recap.mp3" in result.issues
+
+
+def test_verifier_rejects_hash_valid_benign_audio_and_unknown_binary(tmp_path: Path) -> None:
+    case_id = "case_26262626262626262626262626262626"
+    root = tmp_path / case_id
+    root.mkdir()
+    audio = root / "recap.mp3"
+    binary = root / "artifact.bin"
+    audio.write_bytes(_mp3_frame(b"benign"))
+    binary.write_bytes(b"benign bytes")
+    entries = [
+        ArtifactEntry.model_validate(artifact_metadata(root, Path("recap.mp3"), "audio/mpeg")),
+        ArtifactEntry.model_validate(
+            artifact_metadata(root, Path("artifact.bin"), "application/octet-stream")
+        ),
+    ]
+    manifest = make_manifest(case_id).model_copy(update={"artifacts": entries})
+    (root / "manifest.json").write_bytes(
+        canonical_json_bytes(manifest.model_dump(mode="json")) + b"\n"
+    )
+
+    result = verify_bundle(root)
+
+    assert result.ok is False
+    assert "unsafe audio artifact: recap.mp3" in result.issues
+    assert "unsupported evidence artifact: artifact.bin" in result.issues
 
 
 @pytest.mark.parametrize(

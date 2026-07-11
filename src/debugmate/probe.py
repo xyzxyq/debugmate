@@ -21,12 +21,13 @@ from debugmate.adapters.fixture import FixtureBackend
 from debugmate.contracts import CapabilityStatus, new_case_id
 from debugmate.evidence import (
     MANIFEST_VERSION,
+    ArtifactEntry,
     CapabilityEvidence,
     EvidenceBundle,
     RunManifest,
     RunStatus,
 )
-from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
+from debugmate.hashing import artifact_metadata, canonical_json_bytes, sha256_bytes, sha256_file
 from debugmate.settings import DebugMateSettings
 
 CAPABILITY_IDS = ("C01", "C02", "C03", "C04", "C05", "C06", "C07")
@@ -89,6 +90,7 @@ def _manifest(
     run_id: str,
     started: datetime,
     capabilities: list[ProbeCapability],
+    artifacts: list[ArtifactEntry] | None = None,
 ) -> RunManifest:
     now = datetime.now(UTC)
     return RunManifest(
@@ -108,7 +110,7 @@ def _manifest(
         latency_ms=max(0, int((now - started).total_seconds() * 1000)),
         token_usage={},
         estimated_cost=0.0,
-        artifacts=[],
+        artifacts=artifacts or [],
         probe_capabilities=[
             CapabilityEvidence(
                 capability_id=item.capability_id,
@@ -153,6 +155,19 @@ def run_fixture_probe(output_root: Path) -> ProbeOutcome:
     bundle.write_json("input.redacted.json", input_payload)
     bundle.write_json("diagnosis.json", diagnosis.diagnosis.model_dump(mode="json"))
     bundle.write_json("probe-results.json", report.model_dump(mode="json"))
+    initial_artifacts = [
+        ArtifactEntry.model_validate(
+            artifact_metadata(bundle.temp_path, Path(path), "application/json")
+        )
+        for path in (
+            "input.redacted.json",
+            "dify-upload.json",
+            "diagnosis.json",
+            "recap.json",
+            "probe-results.json",
+        )
+        if (bundle.temp_path / path).is_file()
+    ]
     final = bundle.finalize(
         _manifest(
             case_id=case_id,
@@ -162,6 +177,7 @@ def run_fixture_probe(output_root: Path) -> ProbeOutcome:
             run_id=diagnosis.run_id,
             started=started,
             capabilities=capabilities,
+            artifacts=initial_artifacts,
         )
     )
     return ProbeOutcome(case_id=case_id, bundle_path=final, report=report, exit_code=0)
@@ -213,18 +229,15 @@ def run_cloud_probe(settings: DebugMateSettings, output_root: Path) -> ProbeOutc
             "diagnosis.json", workflow.diagnosis.model_dump(mode="json")
         )
 
-        def generate_audio(recap_text: str) -> tuple[bytes, str]:
-            audio = backend.synthesize_audio(recap_text, settings.dify_user)
-            return audio.audio, audio.mime_type
-
-        audio_path = bundle.write_generated_audio(
-            "recap.mp3", workflow.diagnosis.recap_text, generate_audio
+        # Phase 2 stores only the scanned source text. Audio generation remains
+        # deferred until Phase 4 can prove semantic derivation and media safety.
+        bundle.write_json(
+            "recap.json", {"recap_text": workflow.diagnosis.recap_text}
         )
         evidence = {
             "C01": upload_path,
             "C02": upload_path,
             "C05": diagnosis_path,
-            "C07": audio_path,
         }
         capabilities = []
         for capability_id in CAPABILITY_IDS:
@@ -260,6 +273,19 @@ def run_cloud_probe(settings: DebugMateSettings, output_root: Path) -> ProbeOutc
         capabilities=capabilities,
     )
     bundle.write_json("probe-results.json", report.model_dump(mode="json"))
+    initial_artifacts = [
+        ArtifactEntry.model_validate(
+            artifact_metadata(bundle.temp_path, Path(path), "application/json")
+        )
+        for path in (
+            "input.redacted.json",
+            "dify-upload.json",
+            "diagnosis.json",
+            "recap.json",
+            "probe-results.json",
+        )
+        if (bundle.temp_path / path).is_file()
+    ]
     final = bundle.finalize(
         _manifest(
             case_id=case_id,
@@ -269,6 +295,7 @@ def run_cloud_probe(settings: DebugMateSettings, output_root: Path) -> ProbeOutc
             run_id=run_id,
             started=started,
             capabilities=capabilities,
+            artifacts=initial_artifacts,
         )
     )
     return ProbeOutcome(case_id, final, report, exit_code)
