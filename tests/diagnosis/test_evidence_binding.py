@@ -13,7 +13,6 @@ from debugmate.diagnosis.evidence_binding import (
 )
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 
-
 CASE_ID = "case_55555555555555555555555555555555"
 BUILD_ID = "b" * 64
 FACT_ID = "fact_" + "a" * 32
@@ -76,9 +75,7 @@ def test_valid_trace_binds_deterministic_summary_only_anchor() -> None:
         build_manifest=_manifest(),
     )
 
-    assert [item.model_dump_json() for item in first] == [
-        item.model_dump_json() for item in second
-    ]
+    assert [item.model_dump_json() for item in first] == [item.model_dump_json() for item in second]
     assert first[0].evidence_id.startswith("evidence_")
     payload = json.loads(first[0].model_dump_json())
     assert payload["content_summary"] == _hit().content_summary
