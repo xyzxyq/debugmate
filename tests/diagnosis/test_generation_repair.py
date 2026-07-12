@@ -235,3 +235,31 @@ def test_transport_retry_is_independent_from_contract_repair_budget() -> None:
     assert outcome.generation_attempts == 1
     assert attempts == 2
     assert isinstance(backend, DiagnosisBackend)
+
+
+def test_dify_adapter_exposes_only_documented_candidate_output() -> None:
+    sentinel = "PROVIDER_REASONING_SENTINEL_DO_NOT_RETURN"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "workflow_run_id": "dify-run-safe",
+                "provider_body": sentinel,
+                "data": {
+                    "reasoning": sentinel,
+                    "outputs": {
+                        "diagnosis": valid_record(),
+                        "chain_of_thought": sentinel,
+                    },
+                },
+            },
+        )
+
+    settings = DebugMateSettings(dify_api_key=SecretStr("test-key-not-a-real-secret"))
+    backend = DifyBackend(settings, client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    candidate = backend.run_workflow({}, user="debugmate-test")
+
+    assert sentinel not in json.dumps(candidate.candidate_payload, ensure_ascii=False)
+    assert candidate.run_id == "dify-run-safe"
