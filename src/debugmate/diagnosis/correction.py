@@ -84,6 +84,9 @@ def apply_correction(base: CaseFacts, overlay: CorrectionOverlay) -> CaseFacts:
         base_facts_sha256=base.facts_sha256,
         old_value_sha256=actual_old_hash,
         new_value_sha256=new_value_hash,
+        source_provenance_candidate_ids=list(target.provenance_candidate_ids),
+        source_source_kinds=list(target.source_kinds),
+        source_confidence=target.confidence,
         reason_sha256=reason_hash,
         reason=overlay.reason,
     )

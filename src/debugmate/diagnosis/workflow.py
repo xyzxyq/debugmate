@@ -473,7 +473,7 @@ class DiagnosisWorkflow:
         previous = DiagnosisRunOutcome.model_validate(previous.model_dump(), strict=True)
         validate_diagnosis_outcome(previous)
         revised = apply_correction(previous.facts, overlay)
-        return self._from_facts(
+        outcome = self._from_facts(
             revised,
             stages=["facts_corrected"],
             extraction=previous.extraction,
@@ -482,3 +482,5 @@ class DiagnosisWorkflow:
             source_revision=previous.revision,
             source_facts_sha256=previous.facts_sha256,
         )
+        validate_diagnosis_outcome(outcome)
+        return outcome

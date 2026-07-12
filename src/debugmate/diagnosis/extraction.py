@@ -192,11 +192,34 @@ class CorrectionProvenance(StrictFrozenModel):
     base_facts_sha256: Sha256
     old_value_sha256: Sha256
     new_value_sha256: Sha256
+    source_provenance_candidate_ids: list[str]
+    source_source_kinds: list[SourceKind]
+    source_confidence: float = Field(strict=True, ge=0.0, le=1.0)
     reason_sha256: Sha256
     reason: str = Field(min_length=1, max_length=1_000, repr=False)
 
     @model_validator(mode="after")
     def require_canonical_reason(self) -> Self:
+        candidate_ids = self.source_provenance_candidate_ids
+        if (
+            candidate_ids != sorted(candidate_ids)
+            or len(candidate_ids) != len(set(candidate_ids))
+            or any(
+                re.fullmatch(r"candidate_[0-9a-f]{32}", candidate_id) is None
+                for candidate_id in candidate_ids
+            )
+        ):
+            raise ValueError("correction source candidate provenance is not canonical")
+        if self.source_source_kinds != sorted(self.source_source_kinds, key=str) or len(
+            self.source_source_kinds
+        ) != len(set(self.source_source_kinds)):
+            raise ValueError("correction source kinds are not canonical")
+        if not candidate_ids and self.source_source_kinds != [SourceKind.USER]:
+            raise ValueError("provenance-free correction source must be user-only")
+        if candidate_ids and not any(
+            source is not SourceKind.USER for source in self.source_source_kinds
+        ):
+            raise ValueError("candidate-backed correction source requires an extracted kind")
         try:
             assert_export_safe(self.reason)
         except UnsafeExport as error:
@@ -215,6 +238,9 @@ def correction_id_for(case_id: str, correction: CorrectionProvenance) -> str:
         "fact_id": correction.fact_id,
         "old_value_sha256": correction.old_value_sha256,
         "new_value_sha256": correction.new_value_sha256,
+        "source_provenance_candidate_ids": correction.source_provenance_candidate_ids,
+        "source_source_kinds": [item.value for item in correction.source_source_kinds],
+        "source_confidence": correction.source_confidence,
         "reason_sha256": correction.reason_sha256,
     }
     return f"correction_{sha256_bytes(canonical_json_bytes(payload))[:32]}"
@@ -388,6 +414,14 @@ def validate_facts_against_extraction(
         for previous, current in zip(corrections, corrections[1:], strict=False):
             if not hmac.compare_digest(previous.new_value_sha256, current.old_value_sha256):
                 raise ValueError("fact correction provenance chain is inconsistent")
+            if (
+                current.source_provenance_candidate_ids
+                != previous.source_provenance_candidate_ids
+                or current.source_source_kinds
+                != sorted({*previous.source_source_kinds, SourceKind.USER}, key=str)
+                or current.source_confidence != 1.0
+            ):
+                raise ValueError("fact correction provenance chain changed its source state")
         corrected_fields.add(field_id)
 
     for fact in facts.facts:
@@ -404,22 +438,34 @@ def validate_facts_against_extraction(
                 corrections[-1].new_value_sha256, sha256_bytes(fact.value.encode("utf-8"))
             ):
                 raise ValueError("fact correction provenance does not bind the final value")
+            first = corrections[0]
             initial = [
                 item
                 for item in extraction.candidates
                 if item.field_id is fact.field_id
                 and hmac.compare_digest(
-                    sha256_bytes(item.value.encode("utf-8")), corrections[0].old_value_sha256
+                    sha256_bytes(item.value.encode("utf-8")), first.old_value_sha256
                 )
             ]
-            if not initial or corrections[0].fact_id != fact_id_for(
-                fact.field_id, initial[0].value
+            if initial:
+                if first.fact_id != fact_id_for(fact.field_id, initial[0].value):
+                    raise ValueError("fact correction provenance does not bind its source value")
+                source_candidates = sorted(item.candidate_id for item in initial)
+                source_kinds = sorted({item.source_kind for item in initial}, key=str)
+                source_confidence = max(item.confidence for item in initial)
+            else:
+                source_candidates = []
+                source_kinds = [SourceKind.USER]
+                source_confidence = 1.0
+            if (
+                first.source_provenance_candidate_ids != source_candidates
+                or first.source_source_kinds != source_kinds
+                or first.source_confidence != source_confidence
             ):
-                raise ValueError("fact correction provenance does not bind its source value")
-            expected_candidates = sorted(item.candidate_id for item in initial)
-            expected_sources = sorted(
-                {*(item.source_kind for item in initial), SourceKind.USER}, key=str
-            )
+                raise ValueError("fact correction provenance does not bind its source state")
+            latest = corrections[-1]
+            expected_candidates = latest.source_provenance_candidate_ids
+            expected_sources = sorted({*latest.source_source_kinds, SourceKind.USER}, key=str)
         elif matching := grouped.get((fact.field_id, fact.value), []):
             expected_candidates = sorted(item.candidate_id for item in matching)
             expected_sources = sorted({item.source_kind for item in matching}, key=str)

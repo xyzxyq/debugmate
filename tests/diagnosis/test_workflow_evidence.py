@@ -9,8 +9,17 @@ from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
 from debugmate.cli import main
 from debugmate.contracts import EvidenceAnchor
 from debugmate.diagnosis.correction import CorrectionOverlay
-from debugmate.diagnosis.extraction import FieldId, SourceKind, facts_hash
-from debugmate.diagnosis.workflow import derive_run_identities, validate_diagnosis_outcome
+from debugmate.diagnosis.extraction import (
+    FieldId,
+    SourceKind,
+    correction_id_for,
+    facts_hash,
+)
+from debugmate.diagnosis.workflow import (
+    DiagnosisRunOutcome,
+    derive_run_identities,
+    validate_diagnosis_outcome,
+)
 from debugmate.evidence import (
     UnsafeEvidenceContent,
     publish_diagnosis_evidence,
@@ -214,6 +223,141 @@ def test_corrected_runs_preserve_both_bundles(tmp_path: Path) -> None:
     assert corrected_manifest.node_states["extracted"] == "inherited"
     assert corrected_manifest.node_states["facts_confirmed"] == "inherited"
     assert corrected_manifest.node_states["facts_corrected"] == "completed"
+
+
+def test_followup_user_fact_roundtrips_corrects_and_publishes_exact_source_transition(
+    tmp_path: Path,
+) -> None:
+    row = next(item for item in _rows() if item["case_key"] == "insufficient_information")
+    workflow, *_ = _workflow(row, tmp_path)
+    followup = workflow.run(
+        _approved(row["case_id"]),
+        followup_answers={FieldId.VERSION: "3.13.5"},
+    )
+    followup = DiagnosisRunOutcome.model_validate_json(followup.model_dump_json(), strict=True)
+    target = next(fact for fact in followup.facts.facts if fact.field_id is FieldId.VERSION)
+    assert target.provenance_candidate_ids == []
+    assert target.source_kinds == [SourceKind.USER]
+
+    root = tmp_path / "evidence"
+    source_path = publish_diagnosis_evidence(followup, root)
+    assert verify_bundle(source_path).ok is True
+    overlay = CorrectionOverlay(
+        case_id=followup.case_id,
+        base_revision=followup.revision,
+        base_facts_sha256=followup.facts_sha256,
+        field_id=target.field_id,
+        fact_id=target.fact_id,
+        old_value_sha256=sha256_bytes(target.value.encode()),
+        replacement="3.13.6",
+        reason="confirmed from the redacted environment summary",
+    )
+
+    corrected = workflow.rerun(followup, overlay)
+    corrected = DiagnosisRunOutcome.model_validate_json(corrected.model_dump_json(), strict=True)
+    validate_diagnosis_outcome(corrected)
+    provenance = corrected.facts.applied_corrections[-1]
+    assert provenance.source_provenance_candidate_ids == []
+    assert provenance.source_source_kinds == [SourceKind.USER]
+    assert provenance.source_confidence == 1.0
+
+    corrected_path = publish_diagnosis_evidence(corrected, root)
+    assert verify_bundle(source_path).ok is True
+    assert verify_bundle(corrected_path).ok is True
+    assert corrected.revision == 2
+    assert corrected.source_revision == 1
+    assert corrected.source_run_id == followup.run_id
+
+
+@pytest.mark.parametrize("forged_source", [[SourceKind.OCR], [SourceKind.VLM]])
+def test_provenance_free_non_user_correction_source_is_rejected(
+    forged_source: list[SourceKind], tmp_path: Path
+) -> None:
+    _, corrected = _corrected_outcome(tmp_path)
+    correction = corrected.facts.applied_corrections[-1]
+
+    with pytest.raises(ValueError, match="source|provenance|candidate"):
+        type(correction).model_validate(
+            {
+                **correction.model_dump(),
+                "source_provenance_candidate_ids": [],
+                "source_source_kinds": forged_source,
+            },
+            strict=True,
+        )
+
+
+def test_absent_extraction_candidate_cannot_be_forged_as_correction_source(
+    tmp_path: Path,
+) -> None:
+    row = next(item for item in _rows() if item["case_key"] == "insufficient_information")
+    workflow, *_ = _workflow(row, tmp_path)
+    followup = workflow.run(
+        _approved(row["case_id"]), followup_answers={FieldId.VERSION: "3.13.5"}
+    )
+    target = next(fact for fact in followup.facts.facts if fact.field_id is FieldId.VERSION)
+    corrected = workflow.rerun(
+        followup,
+        CorrectionOverlay(
+            case_id=followup.case_id,
+            base_revision=followup.revision,
+            base_facts_sha256=followup.facts_sha256,
+            field_id=target.field_id,
+            fact_id=target.fact_id,
+            old_value_sha256=sha256_bytes(target.value.encode()),
+            replacement="3.13.6",
+            reason="confirmed from the redacted environment summary",
+        ),
+    )
+    correction = corrected.facts.applied_corrections[-1]
+    forged = correction.model_copy(
+        update={
+            "source_provenance_candidate_ids": ["candidate_" + "f" * 32],
+            "source_source_kinds": [SourceKind.OCR],
+            "source_confidence": 0.9,
+        }
+    )
+    forged = forged.model_copy(
+        update={"correction_id": correction_id_for(corrected.case_id, forged)}
+    )
+    forged_facts = corrected.facts.model_copy(
+        update={
+            "applied_corrections": [forged],
+            "facts_sha256": facts_hash(
+                corrected.case_id, corrected.revision, corrected.facts.facts, [forged]
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="source state|provenance|candidate"):
+        validate_diagnosis_outcome(_rehash_outcome(corrected, forged_facts))
+
+
+def test_arbitrary_provenance_free_user_correction_requires_verified_source_bundle(
+    tmp_path: Path,
+) -> None:
+    row = next(item for item in _rows() if item["case_key"] == "insufficient_information")
+    workflow, *_ = _workflow(row, tmp_path)
+    followup = workflow.run(
+        _approved(row["case_id"]), followup_answers={FieldId.VERSION: "3.13.5"}
+    )
+    target = next(fact for fact in followup.facts.facts if fact.field_id is FieldId.VERSION)
+    corrected = workflow.rerun(
+        followup,
+        CorrectionOverlay(
+            case_id=followup.case_id,
+            base_revision=followup.revision,
+            base_facts_sha256=followup.facts_sha256,
+            field_id=target.field_id,
+            fact_id=target.fact_id,
+            old_value_sha256=sha256_bytes(target.value.encode()),
+            replacement="3.13.6",
+            reason="confirmed from the redacted environment summary",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="source bundle"):
+        publish_diagnosis_evidence(corrected, tmp_path / "evidence")
 
 
 def _corrected_outcome(tmp_path: Path):

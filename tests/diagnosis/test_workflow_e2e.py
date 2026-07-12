@@ -390,3 +390,39 @@ def test_correction_rerun_is_immutable_and_revision_bound(tmp_path: Path) -> Non
     assert rerun.completed_stages[0] == "facts_corrected"
     assert "extracted" not in rerun.completed_stages
     assert original.model_dump_json().encode() == original_bytes
+
+
+def test_rerun_validates_new_outcome_before_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = next(row for row in _rows() if row["case_key"] == "correction_rerun")
+    workflow, *_ = _workflow(row, tmp_path)
+    original = workflow.run(_approved(row["case_id"]))
+    target = next(f for f in original.facts.facts if f.field_id is FieldId.EXCEPTION_TYPE)
+    overlay = CorrectionOverlay(
+        case_id=original.case_id,
+        base_revision=original.revision,
+        base_facts_sha256=original.facts_sha256,
+        field_id=target.field_id,
+        fact_id=target.fact_id,
+        old_value_sha256=sha256_bytes(target.value.encode()),
+        replacement="AttributeError",
+        reason="confirmed from redacted traceback",
+    )
+    import debugmate.diagnosis.workflow as workflow_module
+
+    real_validator = workflow_module.validate_diagnosis_outcome
+    calls = 0
+
+    def fail_on_new_outcome(outcome):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError("new outcome contract mismatch")
+        return real_validator(outcome)
+
+    monkeypatch.setattr(workflow_module, "validate_diagnosis_outcome", fail_on_new_outcome)
+
+    with pytest.raises(ValueError, match="new outcome contract mismatch"):
+        workflow.rerun(original, overlay)
+    assert calls == 2

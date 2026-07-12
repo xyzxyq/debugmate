@@ -602,6 +602,14 @@ def _validate_correction_source_bundle(outcome: Any, root: Path) -> None:
         str(source_target.get("value_sha256", "")), latest.old_value_sha256
     ):
         raise ValueError("latest correction does not match its verified source fact")
+    if (
+        source_target.get("provenance_candidate_ids")
+        != latest.source_provenance_candidate_ids
+        or source_target.get("source_kinds")
+        != [item.value for item in latest.source_source_kinds]
+        or source_target.get("confidence") != latest.source_confidence
+    ):
+        raise ValueError("latest correction provenance does not match its verified source fact")
 
     final_summary = _facts_summary(outcome)
     final_items = final_summary["facts"]
