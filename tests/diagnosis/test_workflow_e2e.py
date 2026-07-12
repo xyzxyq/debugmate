@@ -52,8 +52,9 @@ def _approved(
     when: datetime | None = None,
     screenshot: Path | None = None,
     root: Path | None = None,
+    environment: dict[str, str] | None = None,
 ):
-    redacted = RedactedFields(error_text="fixture")
+    redacted = RedactedFields(error_text="fixture", environment=environment or {})
     if screenshot is not None:
         assert root is not None
         redacted = RedactedFields(
@@ -323,6 +324,39 @@ def test_valid_screenshot_is_root_confined_and_rehashed_before_ocr(tmp_path: Pat
     outcome = workflow.run(approved)
     assert outcome.status == "needs_information"
     assert ocr.paths == [screenshot.resolve()]
+
+
+def test_environment_only_facts_change_workflow_run_identity(tmp_path: Path) -> None:
+    @dataclass
+    class EmptyOcr:
+        def recognize(self, path: Path) -> list[OcrToken]:
+            return []
+
+    extractor = ProductionExtractionProvider(redacted_root=tmp_path, ocr_backend=EmptyOcr())
+    workflow = DiagnosisWorkflow(
+        extraction_provider=extractor,
+        retrieval_provider=RetrievalSpy(),
+        generator=GeneratorSpy(),
+        approval_key=KEY,
+        redacted_root=tmp_path,
+    )
+    case_id = "case_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    first = workflow.run(
+        _approved(case_id, environment={"runtime": "Version: 3.13.5\nDevice: cpu"})
+    )
+    second = workflow.run(
+        _approved(case_id, environment={"runtime": "Version: 3.13.6\nDevice: cpu"})
+    )
+
+    assert first.extraction is not None and second.extraction is not None
+    assert set(first.extraction.source_hashes) == {"environment", "error_text"}
+    assert {fact.field_id for fact in first.facts.facts} >= {
+        FieldId.VERSION,
+        FieldId.DEVICE,
+    }
+    assert first.facts_sha256 != second.facts_sha256
+    assert first.idempotency_key != second.idempotency_key
+    assert first.run_id != second.run_id
 
 
 def test_correction_rerun_is_immutable_and_revision_bound(tmp_path: Path) -> None:
