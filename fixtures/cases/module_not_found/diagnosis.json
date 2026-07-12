@@ -1,17 +1,46 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "case_id": "case_00000000000000000000000000000000",
   "category": "dependency_environment",
   "observed_facts": [
-    "Python raised ModuleNotFoundError for demo_missing_pkg at the import statement."
+    {
+      "fact_id": "fact_11111111111111111111111111111111",
+      "field_id": "exception_type",
+      "value": "Python raised ModuleNotFoundError for demo_missing_pkg at the import statement.",
+      "source_kind": "text",
+      "confidence": 1.0,
+      "locator": "error_text:line:1"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evidence_22222222222222222222222222222222",
+      "chunk_id": "python-exceptions:module-not-found",
+      "content_summary": "The import operation could not locate the requested module.",
+      "source_id": "python-exceptions",
+      "source_url": "https://docs.python.org/3/library/exceptions.html",
+      "locator": "ModuleNotFoundError",
+      "relevance_score": 0.95,
+      "knowledge_build_id": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  ],
+  "support_links": [
+    {
+      "fact_ids": ["fact_11111111111111111111111111111111"],
+      "evidence_ids": ["evidence_22222222222222222222222222222222"],
+      "support_type": "supports"
+    }
   ],
   "root_cause_candidates": [
     {
+      "candidate_id": "candidate_44444444444444444444444444444444",
       "cause": "demo_missing_pkg is not installed in the active Python environment.",
-      "supporting_facts": [
-        "The exception names demo_missing_pkg as the missing module."
-      ],
-      "confidence": 0.9
+      "claim_kind": "grounded",
+      "fact_ids": ["fact_11111111111111111111111111111111"],
+      "evidence_ids": ["evidence_22222222222222222222222222222222"],
+      "confidence": 0.9,
+      "applicability": "The traceback came from the active Python interpreter.",
+      "counterevidence_or_limits": "The fixture does not inspect the active environment."
     }
   ],
   "missing_information": [
@@ -20,14 +49,14 @@
   "checks": [
     {
       "command": "python -c \"import sys; print(sys.executable)\"",
-      "platform": "windows-powershell",
+      "platform": "windows_powershell",
       "impact": "read-only",
       "expected_result": "The active Python executable path is displayed.",
       "rollback": "No rollback is needed for a read-only command."
     },
     {
       "command": "python -m pip show demo_missing_pkg",
-      "platform": "windows-powershell",
+      "platform": "windows_powershell",
       "impact": "read-only",
       "expected_result": "Package metadata or a not-found message is displayed.",
       "rollback": "No rollback is needed for a read-only command."
@@ -36,7 +65,7 @@
   "fixes": [
     {
       "command": "python -m pip install demo_missing_pkg",
-      "platform": "windows-powershell",
+      "platform": "windows_powershell",
       "impact": "changes-environment",
       "expected_result": "The package is installed into the active environment.",
       "rollback": "python -m pip uninstall demo_missing_pkg"
@@ -45,7 +74,7 @@
   "verification_steps": [
     {
       "command": "python -c \"import demo_missing_pkg\"",
-      "platform": "windows-powershell",
+      "platform": "windows_powershell",
       "impact": "read-only",
       "expected_result": "The command exits without ModuleNotFoundError.",
       "rollback": "No rollback is needed for a read-only command."
@@ -55,14 +84,5 @@
   "limitations": [
     "This fixture does not inspect a real Python environment and does not execute commands."
   ],
-  "recap_text": "Confirm the active interpreter, check whether the package is installed there, then install and verify only after reviewing the command.",
-  "citations": [
-    {
-      "source_id": "python-exceptions",
-      "title": "Built-in Exceptions",
-      "url": "https://docs.python.org/3/library/exceptions.html",
-      "locator": "ModuleNotFoundError",
-      "excerpt": "The import operation could not locate the requested module."
-    }
-  ]
+  "recap_text": "Confirm the active interpreter, check whether the package is installed there, then install and verify only after reviewing the command."
 }

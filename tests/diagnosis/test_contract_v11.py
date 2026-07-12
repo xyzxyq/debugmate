@@ -55,7 +55,7 @@ def valid_record() -> dict[str, object]:
                 "source_url": "https://docs.python.org/3/library/exceptions.html",
                 "locator": "ModuleNotFoundError",
                 "relevance_score": 0.95,
-                "knowledge_build_id": "kb_33333333333333333333333333333333",
+                "knowledge_build_id": "3" * 64,
             }
         ],
         "support_links": [
@@ -203,7 +203,8 @@ def test_inference_candidate_may_be_ungrounded_but_requires_limits() -> None:
     )
     payload["support_links"] = []
 
-    assert DiagnosisRecord.model_validate(payload).root_cause_candidates[0].claim_kind == "inference"
+    migrated_candidate = DiagnosisRecord.model_validate(payload).root_cause_candidates[0]
+    assert migrated_candidate.claim_kind == "inference"
 
     candidate["counterevidence_or_limits"] = " "
     with pytest.raises(ValidationError):
@@ -211,10 +212,13 @@ def test_inference_candidate_may_be_ungrounded_but_requires_limits() -> None:
 
 
 def test_committed_v110_schema_matches_canonical_generated_schema() -> None:
-    committed = json.loads(
-        (ROOT / "contracts" / "diagnosis-record-v1.1.schema.json").read_text(encoding="utf-8")
+    committed = (ROOT / "contracts" / "diagnosis-record-v1.1.schema.json").read_text(
+        encoding="utf-8"
     )
-    assert committed == diagnosis_schema()
+    canonical = json.dumps(
+        diagnosis_schema(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    assert committed == canonical
 
 
 def test_frozen_v100_loader_rejects_v110_fields() -> None:

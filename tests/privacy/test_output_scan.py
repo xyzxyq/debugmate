@@ -29,9 +29,7 @@ def test_instructional_log_is_data_not_control() -> None:
         ("调用工具执行 PowerShell", "INJECT_TOOL"),
     ],
 )
-def test_injection_families_are_marked_without_matched_text(
-    value: str, rule_id: str
-) -> None:
+def test_injection_families_are_marked_without_matched_text(value: str, rule_id: str) -> None:
     result = scan_untrusted_text(value)
     assert rule_id in {item.rule_id for item in result.injection_findings}
     assert value not in result.model_dump_json()
@@ -70,6 +68,22 @@ def test_normal_diagnostics_hash_metadata_and_redacted_markers_are_safe() -> Non
         }
     )
     assert scan_untrusted_text("ordinary ModuleNotFoundError diagnostic").safe is True
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("fact_id", "fact_11111111111111111111111111111111"),
+        ("fact_ids", ["fact_11111111111111111111111111111111"]),
+        ("evidence_id", "evidence_22222222222222222222222222222222"),
+        ("evidence_ids", ["evidence_22222222222222222222222222222222"]),
+        ("candidate_id", "candidate_33333333333333333333333333333333"),
+    ],
+)
+def test_trace_graph_identifiers_are_not_reported_as_secrets(
+    key: str, value: str | list[str]
+) -> None:
+    assert_export_safe({key: value})
 
 
 @pytest.mark.parametrize("key", ["case_id", "input_sha256", "run_id", "file_id"])

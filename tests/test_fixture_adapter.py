@@ -35,7 +35,7 @@ def test_fixture_diagnosis_is_schema_valid_and_propagates_case_id() -> None:
     assert isinstance(result.diagnosis, DiagnosisRecord)
     assert result.diagnosis.case_id == case_id
     assert result.diagnosis.category.value == "dependency_environment"
-    assert "demo_missing_pkg" in result.diagnosis.observed_facts[0]
+    assert "demo_missing_pkg" in result.diagnosis.observed_facts[0].value
 
 
 def test_fixture_content_is_stable_apart_from_case_id() -> None:

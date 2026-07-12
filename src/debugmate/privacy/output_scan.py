@@ -95,9 +95,7 @@ class UnsafeExport(ValueError):
 
     def __init__(self, findings: Sequence[ExportFinding]) -> None:
         self.findings = tuple(findings)
-        rendered = "; ".join(
-            f"{item.path} [{','.join(item.rule_ids)}]" for item in self.findings
-        )
+        rendered = "; ".join(f"{item.path} [{','.join(item.rule_ids)}]" for item in self.findings)
         super().__init__(f"unsafe export: {rendered}")
 
 
@@ -125,6 +123,8 @@ def scan_untrusted_text(text: str) -> SafetyScanResult:
 
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
 def _path_for_key(parent: str, key: object) -> tuple[str, SafetyScanResult]:
     text = str(key)
     scanned = scan_untrusted_text(text)
@@ -139,6 +139,15 @@ def _ignored_secret_rules(key: object | None, value: str) -> set[str]:
         return set()
     normalized = str(key).lower()
     if normalized == "case_id" and re.fullmatch(r"case_[0-9a-f]{32}", value):
+        return {item.rule_id for item in scan_text("metadata", value)}
+    if normalized in {
+        "fact_id",
+        "fact_ids",
+        "evidence_id",
+        "evidence_ids",
+        "candidate_id",
+        "candidate_ids",
+    } and re.fullmatch(r"(?:fact|evidence|candidate)_[0-9a-f]{32}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
     if normalized in {"knowledge_build_id"} and re.fullmatch(r"[0-9a-f]{64}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
@@ -183,7 +192,7 @@ def assert_export_safe(value: Any) -> None:
             return
         if isinstance(current, Sequence) and not isinstance(current, (bytes, bytearray)):
             for index, nested in enumerate(current):
-                visit(nested, f"{path}[{index}]")
+                visit(nested, f"{path}[{index}]", metadata_key=metadata_key)
 
     visit(value, "$")
     unique = sorted(set(findings), key=lambda item: (item.path, item.rule_ids))
