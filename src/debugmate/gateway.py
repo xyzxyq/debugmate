@@ -6,6 +6,9 @@ import hmac
 from pathlib import Path
 
 from debugmate.adapters.base import CandidateRunResult, DiagnosisBackend
+from debugmate.diagnosis.correction import CorrectionOverlay, apply_correction
+from debugmate.diagnosis.extraction import CaseFacts
+from debugmate.diagnosis.workflow import DiagnosisRunOutcome, DiagnosisWorkflow
 from debugmate.hashing import UnsafeArtifactPath, resolve_artifact_path, sha256_file
 from debugmate.privacy.approval import ApprovalInvalid, verify_approval
 from debugmate.privacy.models import ApprovedRedactedInput
@@ -59,3 +62,35 @@ class CloudGateway:
             inputs["screenshot_file_id"] = uploaded.file_id
 
         return self._backend.run_workflow(inputs, self._user)
+
+
+def run_diagnosis_json(
+    workflow: DiagnosisWorkflow,
+    approved_payload: str,
+    *,
+    followup_answers: dict[object, str] | None = None,
+) -> DiagnosisRunOutcome:
+    """Strict JSON entry; the workflow performs approval verification before work."""
+
+    approved = ApprovedRedactedInput.model_validate_json(approved_payload, strict=True)
+    return workflow.run(approved, followup_answers=followup_answers)
+
+
+def apply_correction_json(facts_payload: str, overlay_payload: str) -> CaseFacts:
+    """Strict optimistic-lock correction boundary with no provider side effects."""
+
+    facts = CaseFacts.model_validate_json(facts_payload, strict=True)
+    overlay = CorrectionOverlay.model_validate_json(overlay_payload, strict=True)
+    return apply_correction(facts, overlay)
+
+
+def rerun_diagnosis_json(
+    workflow: DiagnosisWorkflow,
+    previous_payload: str,
+    overlay_payload: str,
+) -> DiagnosisRunOutcome:
+    """Strict correction-rerun boundary preserving the previous immutable outcome."""
+
+    previous = DiagnosisRunOutcome.model_validate_json(previous_payload, strict=True)
+    overlay = CorrectionOverlay.model_validate_json(overlay_payload, strict=True)
+    return workflow.rerun(previous, overlay)

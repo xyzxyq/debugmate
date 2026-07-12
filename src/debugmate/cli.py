@@ -11,6 +11,8 @@ from pathlib import Path
 import httpx
 
 from debugmate.contracts import diagnosis_schema
+from debugmate.diagnosis.extraction import CaseFacts, ExtractionRecord, FieldId
+from debugmate.diagnosis.workflow import DiagnosisRunOutcome
 from debugmate.evidence import verify_bundle
 from debugmate.hashing import canonical_json_bytes
 from debugmate.knowledge.build import build_knowledge
@@ -79,11 +81,75 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--execute", action="store_false", dest="dry_run")
     knowledge_sync.add_argument("--dataset-id")
     knowledge_sync.add_argument("--confirm-delete", action="store_true")
+    diagnosis_view = commands.add_parser("diagnosis-view")
+    diagnosis_view.add_argument("path", type=Path)
     return parser
 
 
 def _ascii_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
+def extraction_cli_view(record: ExtractionRecord) -> dict[str, object]:
+    """Render all six correction-addressable extraction slots, including missing ones."""
+
+    record = ExtractionRecord.model_validate(record.model_dump(), strict=True)
+    by_field = {candidate.field_id: candidate for candidate in record.candidates}
+    slots: dict[str, object] = {}
+    for field_id in FieldId:
+        candidate = by_field.get(field_id)
+        if candidate is None:
+            slots[field_id.value] = {"state": "missing", "field_id": field_id.value}
+            continue
+        slots[field_id.value] = {
+            "state": "populated",
+            "field_id": field_id.value,
+            "correction_field_id": field_id.value,
+            "candidate_id": candidate.candidate_id,
+            "value": candidate.value,
+            "source": candidate.source_kind.value,
+            "locator": candidate.locator.model_dump(mode="json"),
+            "confidence": candidate.confidence,
+        }
+    return {
+        "case_id": record.case_id,
+        "extraction_id": record.extraction_id,
+        "slots": slots,
+    }
+
+
+def diagnosis_cli_view(outcome: DiagnosisRunOutcome) -> dict[str, object]:
+    """Return the non-interactive diagnosis boundary used by scripts and demos."""
+
+    outcome = DiagnosisRunOutcome.model_validate(outcome.model_dump(), strict=True)
+    facts = CaseFacts.model_validate(outcome.facts.model_dump(), strict=True)
+    fact_ids = {
+        fact.field_id.value: {
+            "fact_id": fact.fact_id,
+            "correction_field_id": fact.field_id.value,
+        }
+        for fact in facts.facts
+    }
+    extraction = (
+        extraction_cli_view(outcome.extraction)
+        if outcome.extraction is not None
+        else {
+            "slots": {
+                field.value: {"state": "missing", "field_id": field.value} for field in FieldId
+            }
+        }
+    )
+    return {
+        "backend": outcome.backend,
+        "revision": outcome.revision,
+        "run_id": outcome.run_id,
+        "status": outcome.status.value,
+        "facts_sha256": outcome.facts_sha256,
+        "idempotency_key": outcome.idempotency_key,
+        "completed_stages": outcome.completed_stages,
+        "extraction": extraction,
+        "correction_targets": fact_ids,
+    }
 
 
 def _selected_registry(registry: SourceRegistry, source_id: str | None) -> SourceRegistry:
@@ -218,6 +284,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
         )
+        return 0
+    if args.command == "diagnosis-view":
+        outcome = DiagnosisRunOutcome.model_validate_json(
+            args.path.read_text(encoding="utf-8"), strict=True
+        )
+        print(_ascii_json(diagnosis_cli_view(outcome)))
         return 0
     raise AssertionError("unreachable command")
 
