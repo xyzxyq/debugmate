@@ -4,52 +4,47 @@ status: all_fixed
 findings_in_scope: 4
 fixed: 4
 skipped: 0
-iteration: 1
+iteration: 2
 fixed_at: 2026-07-12
 ---
 
-# Phase 3 Code Review Fix Report
+# Phase 3 Code Review Fix Report — Iteration 2
 
 ## Result
 
-All four findings from `03-REVIEW.md` were fixed with regression coverage. No roadmap,
-state, or ephemeral configuration file was committed.
+All four iteration-2 findings were fixed using test-first adversarial regressions. The
+report is intentionally left uncommitted for the controller's review loop.
 
 ## Fixes
 
-1. **Approved environment binding** (`9a519aa`, `eacd431`)
-   - Environment mappings now produce text-located candidates.
-   - Canonically serialized environment data participates in source hashes,
-     extraction identity, facts identity, idempotency identity, and run identity.
-   - Tests cover version/device facts supplied only through environment data and an
-     environment-only version change.
+1. **Key-aware structured environment extraction** (`5bfb7e7`)
+   - Canonically serializes sorted environment entries as `KEY: value`.
+   - Explicitly maps established `PYTHON`/`python` keys to `version` and `DEVICE` to
+     `device`, while retaining deterministic text locators into the serialized view.
 
-2. **Publication lineage validation** (`071e71a`)
-   - Added a shared public validator that recomputes and constant-time compares run
-     and idempotency identities before evidence directory creation.
-   - Publisher-contract versions, exact status-specific stage paths, and
-     status-specific field presence are validated before publication.
-   - Manifest versions now come from the already validated outcome rather than
-     silently replacing caller values.
+2. **Complete shared outcome-state binding** (`4b96f4c`)
+   - The shared validator now binds top-level revision and facts hash to nested
+     immutable facts before rerun or publication.
+   - Rerun rejects forged top-level fact state even when the nested graph is valid.
 
-3. **Canonical CaseFact reconstruction** (`676a959`)
-   - Stable fact IDs must match canonical field/value data.
-   - Fact values must already be normalized; provenance candidate IDs and source
-     kinds must be valid, unique, and sorted.
-   - The public `CaseFacts` boundary privacy-scans fact values even when an attacker
-     recomputes the aggregate facts hash.
+3. **Exact fact-to-extraction provenance binding** (`4b96f4c`)
+   - Every provenance candidate must exist in the exact `ExtractionRecord`, match the
+     fact field/value history, and contribute to the exact canonical candidate set.
+   - Source kinds must equal the candidate-derived set; corrected facts additionally
+     require a valid user-correction chain back to the extracted source value.
 
-4. **Correction rerun stage semantics** (`b8bb666`)
-   - Corrected reruns expose inherited input/extraction/fact-confirmation stages
-     separately from newly executed stages.
-   - Evidence manifests record inherited node states and retain the source run ID.
-   - Rerun validates the previous outcome before applying an overlay.
+4. **Independently verifiable correction source lineage** (`0ab5d7c`)
+   - Correction provenance records its immutable base facts hash.
+   - Corrected outcomes bind source run, source revision, and source facts hash and
+     reject missing, self, revision-zero, or no-correction inherited lineage.
+   - Publication verifies the already-published immutable source bundle before
+     beginning a corrected evidence bundle, rejecting arbitrary or tampered sources.
 
 ## Verification
 
-- Focused extraction tests: `7 passed`.
-- Focused fact/correction/router/sufficiency tests: `35 passed`.
-- Focused workflow/evidence/privacy tests: `58 passed`.
-- Full offline suite: `442 passed, 22 deselected`.
+- Focused adversarial and workflow suite: `68 passed`.
+- Full offline suite: `453 passed, 22 deselected`.
 - Ruff: `All checks passed!` for `src` and `tests`.
-
+- Pip dependency check: `No broken requirements found.`
+- `git diff --check`: clean except the pre-existing `.planning/config.json` line-ending
+  warning; no implementation patch errors.
