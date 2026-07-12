@@ -22,6 +22,7 @@ from debugmate.diagnosis.extraction import (
 )
 from debugmate.hashing import (
     UnsafeArtifactPath,
+    canonical_json_bytes,
     resolve_artifact_path,
     sha256_bytes,
     sha256_file,
@@ -107,6 +108,10 @@ class ProductionExtractionProvider:
             source_hashes["error_text"] = sha256_bytes(redacted.error_text.encode("utf-8"))
         if redacted.code is not None:
             source_hashes["code"] = sha256_bytes(redacted.code.encode("utf-8"))
+        if redacted.environment:
+            source_hashes["environment"] = sha256_bytes(
+                canonical_json_bytes(dict(sorted(redacted.environment.items())))
+            )
 
         screenshot = self._verified_screenshot(approved)
         if screenshot is not None:
@@ -175,6 +180,13 @@ class ProductionExtractionProvider:
         fields = (
             ("error_text", approved.redacted.error_text),
             ("code", approved.redacted.code),
+            (
+                "environment",
+                "\n".join(
+                    value for _, value in sorted(approved.redacted.environment.items())
+                )
+                or None,
+            ),
         )
         for input_field, content in fields:
             if content is None:

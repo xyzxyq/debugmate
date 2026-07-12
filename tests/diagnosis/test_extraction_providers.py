@@ -12,13 +12,19 @@ from debugmate.privacy.models import ApprovedRedactedInput, RedactedFields
 from debugmate.privacy.ocr import OcrToken
 
 
-def _approved(root: Path, *, error_text: str | None = None) -> ApprovedRedactedInput:
+def _approved(
+    root: Path,
+    *,
+    error_text: str | None = None,
+    environment: dict[str, str] | None = None,
+) -> ApprovedRedactedInput:
     screenshot = root / "case.png"
     Image.new("RGB", (640, 240), "white").save(screenshot)
     return ApprovedRedactedInput(
         case_id="case_0123456789abcdef0123456789abcdef",
         redacted=RedactedFields(
             error_text=error_text,
+            environment=environment or {},
             redacted_screenshot_path="case.png",
             redacted_screenshot_sha256=sha256_file(screenshot),
         ),
@@ -27,6 +33,34 @@ def _approved(root: Path, *, error_text: str | None = None) -> ApprovedRedactedI
         approval_signature="2" * 64,
         approved_at_utc=datetime(2026, 7, 12, tzinfo=UTC),
     )
+
+
+def test_environment_is_extracted_and_bound_to_record_identity(tmp_path: Path) -> None:
+    from debugmate.diagnosis.extraction import FieldId, TextLocator, build_case_facts
+    from debugmate.diagnosis.providers import ProductionExtractionProvider
+
+    provider = ProductionExtractionProvider(redacted_root=tmp_path, ocr_backend=FakeOcr([]))
+    first = provider.extract(
+        _approved(tmp_path, environment={"runtime": "Version: 3.13.5\nDevice: cpu"})
+    )
+    second = provider.extract(
+        _approved(tmp_path, environment={"runtime": "Version: 3.13.6\nDevice: cpu"})
+    )
+
+    assert "environment" in first.source_hashes
+    assert first.source_hashes["environment"] != second.source_hashes["environment"]
+    assert first.extraction_id != second.extraction_id
+    assert build_case_facts(first).facts_sha256 != build_case_facts(second).facts_sha256
+    assert {
+        candidate.field_id for candidate in first.candidates
+    } >= {FieldId.VERSION, FieldId.DEVICE}
+    environment_locators = [
+        candidate.locator
+        for candidate in first.candidates
+        if isinstance(candidate.locator, TextLocator)
+        and candidate.locator.input_field == "environment"
+    ]
+    assert len(environment_locators) == 2
 
 
 class FakeOcr:
