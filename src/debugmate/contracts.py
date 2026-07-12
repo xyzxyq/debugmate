@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SCHEMA_VERSION = "1.1.0"
 CASE_ID_PATTERN = r"^case_[0-9a-f]{32}$"
@@ -67,12 +68,64 @@ class SupportType(StrEnum):
     CORROBORATES = "corroborates"
 
 
+class CommandPlatform(StrEnum):
+    """Explicit platforms supported by inert command recommendations."""
+
+    WINDOWS_POWERSHELL = "windows_powershell"
+    WINDOWS_CMD = "windows_cmd"
+    LINUX_BASH = "linux_bash"
+    PYTHON = "python"
+    PLATFORM_AGNOSTIC = "platform_agnostic"
+
+
 # JSON enum values are strings by definition. Keep primitive fields strict while
 # allowing their exact string representation at Python dictionary boundaries.
 ErrorCategoryValue = Annotated[ErrorCategory, Field(strict=False)]
 SourceKindValue = Annotated[SourceKind, Field(strict=False)]
 ClaimKindValue = Annotated[ClaimKind, Field(strict=False)]
 SupportTypeValue = Annotated[SupportType, Field(strict=False)]
+CommandPlatformValue = Annotated[CommandPlatform, Field(strict=False)]
+
+
+_UNSAFE_COMMAND_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("multiple-lines", re.compile(r"[\r\n]")),
+    ("shell-chaining", re.compile(r"&&|\|\||;")),
+    (
+        "pipe-to-shell",
+        re.compile(
+            r"\|\s*(?:ba|z)?sh\b|\|\s*(?:cmd(?:\.exe)?|powershell|pwsh|iex|invoke-expression)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "command-substitution",
+        re.compile(
+            r"\$\(|`|&\s*\(|%[a-z_][a-z0-9_]*%|\binvoke-expression\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("recursive-rm", re.compile(r"\brm\s+-[a-z]*r[a-z]*\b", re.IGNORECASE)),
+    (
+        "recursive-remove-item",
+        re.compile(r"\bremove-item\b[^\r\n]*\s-recurse\b", re.IGNORECASE),
+    ),
+    (
+        "recursive-cmd-delete",
+        re.compile(r"\b(?:rmdir|rd|del)\b[^\r\n]*(?:/s\b)", re.IGNORECASE),
+    ),
+    (
+        "format-disk",
+        re.compile(r"^\s*(?:format(?:\.com)?|format-volume|diskpart)\b", re.IGNORECASE),
+    ),
+    (
+        "download-and-execute",
+        re.compile(
+            r"\b(?:curl|wget|iwr|invoke-webrequest)\b[^\r\n]*"
+            r"\b(?:iex|invoke-expression|start-process)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
 
 
 class StrictRecord(BaseModel):
@@ -191,10 +244,26 @@ class CommandStep(StrictRecord):
     """A command recommendation stored as data and never executed here."""
 
     command: str
-    platform: str
+    platform: CommandPlatformValue
     impact: str
     expected_result: str
     rollback: str
+
+    @field_validator("command", "platform", "impact", "expected_result", "rollback", mode="before")
+    @classmethod
+    def require_non_blank_metadata(cls, value: object, info: object) -> object:
+        if not isinstance(value, str) or not value.strip():
+            field_name = getattr(info, "field_name", "command metadata")
+            raise ValueError(f"{field_name} must not be blank")
+        return value
+
+    @field_validator("command")
+    @classmethod
+    def reject_unsafe_command(cls, value: str) -> str:
+        for rule_id, pattern in _UNSAFE_COMMAND_PATTERNS:
+            if pattern.search(value):
+                raise ValueError(f"unsafe command: {rule_id}")
+        return value
 
 
 class DiagnosisRecord(StrictRecord):
