@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from debugmate.adapters.base import CandidateRunResult
 from debugmate.adapters.dify import (
     DifyAuthError,
     DifyBackend,
@@ -79,10 +80,10 @@ def test_dify_connect_error_retries_once() -> None:
 
     assert calls == 2
     assert result.run_id == "run-test"
-    assert result.diagnosis.case_id == diagnosis["case_id"]
+    assert result.candidate_payload["case_id"] == diagnosis["case_id"]
 
 
-def test_dify_workflow_rejects_invalid_contract_without_leaking_secret() -> None:
+def test_dify_workflow_returns_invalid_contract_as_untrusted_candidate() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -92,10 +93,9 @@ def test_dify_workflow_rejects_invalid_contract_without_leaking_secret() -> None
 
     backend = DifyBackend(settings(), client=httpx.Client(transport=httpx.MockTransport(handler)))
 
-    with pytest.raises(DifyContractError) as caught:
-        backend.run_workflow({"case_id": new_case_id()}, user="debugmate-test")
+    result = backend.run_workflow({"case_id": new_case_id()}, user="debugmate-test")
 
-    assert SENTINEL not in str(caught.value)
+    assert result.candidate_payload == {}
 
 
 @pytest.mark.parametrize("audio", [b"ID3\x04\x00\x00fixture", b"\xff\xfb\x90\x64fixture"])
@@ -184,16 +184,14 @@ def test_cloud_probe_keeps_scanned_recap_text_but_defers_audio_callback(
             del path, user
             return SimpleNamespace(file_id="file-fixture", filename="input.json", backend="dify")
 
-        def run_workflow(self, inputs: dict[str, object], user: str) -> SimpleNamespace:
+        def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult:
             del user
             payload = json.loads(FIXTURE_DIAGNOSIS.read_text(encoding="utf-8"))
             payload["case_id"] = inputs["case_id"]
-            from debugmate.contracts import DiagnosisRecord
-
-            return SimpleNamespace(
+            return CandidateRunResult(
                 run_id="run-fixture",
-                diagnosis=DiagnosisRecord.model_validate_json(json.dumps(payload)),
                 backend="dify",
+                candidate_payload=payload,
             )
 
         def synthesize_audio(self, text: str, user: str) -> None:

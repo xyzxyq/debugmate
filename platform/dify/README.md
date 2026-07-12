@@ -7,11 +7,25 @@
 1. 在 Dify Cloud 创建最小 Workflow 应用，输入变量为 `error_text`、`error_image`、`code`、`environment`。
 2. 配置视觉模型节点，只使用仓库内虚构 `ModuleNotFoundError` 案例。
 3. 创建最小知识库与 Knowledge Retrieval 节点，保留命中 chunk 的标题和来源元数据。
-4. 让最终节点只输出符合 `contracts/diagnosis-record-v1.schema.json` 的 `diagnosis_json`。
+4. 让最终节点在 `outputs.diagnosis` 中只输出符合
+   `contracts/diagnosis-record-v1.1.schema.json` 的 JSON 候选；平台成功不等于本地发布成功。
 5. 在 API Access 中取得应用密钥，并仅通过本机环境变量 `DIFY_API_KEY` 提供；知识库管理 API 如需单独密钥，使用 `DIFY_DATASET_API_KEY`。
 6. 默认端点为 `DIFY_BASE_URL=https://api.dify.ai/v1`，调用身份为 `DIFY_USER=debugmate-local`。
 7. 导出真实 DSL 到本目录，重新导入为新应用，并把导入结果截图/日志放入对应 evidence bundle 后，C06 才能为 `pass`。
 8. 如账号提供 TTS provider，调用真实 TTS 保存 MP3；没有 provider 时保持 C07 为 `blocked` 或 `not-tested`。
+
+## 候选诊断与本地裁决
+
+- fixture 与 Dify adapter 都只返回有大小上限的 `CandidateRunResult`，不在 adapter 内构造或发布
+  `DiagnosisRecord`。
+- 本地 `DiagnosisGenerator` 是唯一诊断发布边界；它严格复核 Schema、case ID、最终路由、事实、
+  evidence、knowledge build、命令策略和隐私扫描。
+- 可修复的 JSON/合同错误最多发起一次 `contract_repair`。修复请求只含 Schema 版本、有限错误码、
+  JSON pointer 和已经脱敏的候选；第二次失败返回 `generation_failed`，不保留部分诊断。
+- HTTP transport 的一次网络重试与本地 contract repair 是独立预算，不能互相增加次数。
+- 真实 smoke 仅在显式设置 `DIFY_API_KEY` 和
+  `DEBUGMATE_DIFY_DIAGNOSIS_APP_CONFIGURED=1` 后通过
+  `pytest -m cloud tests/diagnosis/test_dify_diagnosis_cloud.py` 运行；缺少任一配置时安全跳过。
 
 ## 七项能力
 

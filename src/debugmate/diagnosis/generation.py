@@ -8,7 +8,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from debugmate.adapters.base import CandidateBackend
+from debugmate.adapters.base import CandidateBackend, CandidateRunResult
 from debugmate.contracts import (
     CaseId,
     DiagnosisRecord,
@@ -227,13 +227,23 @@ class DiagnosisGenerator:
         self._backend = backend
         self._user = user
 
-    def generate(self, request: GenerationRequest) -> GenerationOutcome:
+    def generate(
+        self,
+        request: GenerationRequest,
+        *,
+        initial_candidate: CandidateRunResult | None = None,
+    ) -> GenerationOutcome:
         request = GenerationRequest.model_validate(request.model_dump(), strict=True)
-        first_inputs: dict[str, object] = {
-            "request_kind": "candidate_generation",
-            "generation_request": request.model_dump(mode="json"),
-        }
-        first = self._backend.run_workflow(first_inputs, self._user)
+        if initial_candidate is None:
+            first_inputs: dict[str, object] = {
+                "request_kind": "candidate_generation",
+                "generation_request": request.model_dump(mode="json"),
+            }
+            first = self._backend.run_workflow(first_inputs, self._user)
+        elif not isinstance(initial_candidate, CandidateRunResult):
+            raise TypeError("initial candidate must use CandidateRunResult")
+        else:
+            first = initial_candidate
         diagnosis, issues, repairable = _validate_candidate(
             first.candidate_payload, request
         )

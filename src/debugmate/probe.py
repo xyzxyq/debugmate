@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from debugmate.adapters.base import CandidateBackend, CandidateRunResult
 from debugmate.adapters.dify import (
     DifyAuthError,
     DifyBackend,
@@ -18,7 +19,9 @@ from debugmate.adapters.dify import (
     DifyTransportError,
 )
 from debugmate.adapters.fixture import FixtureBackend
-from debugmate.contracts import CapabilityStatus, new_case_id
+from debugmate.contracts import CapabilityStatus, DiagnosisRecord, new_case_id
+from debugmate.diagnosis.generation import DiagnosisGenerator, GenerationRequest
+from debugmate.diagnosis.routing import DecisionStage, RoutingDecision
 from debugmate.evidence import (
     MANIFEST_VERSION,
     ArtifactEntry,
@@ -133,6 +136,41 @@ def _fixture_root() -> Path:
     return Path(__file__).resolve().parents[2] / "fixtures" / "cases"
 
 
+def _probe_generation_request(case_id: str) -> GenerationRequest:
+    payload = json.loads(
+        (_fixture_root() / "module_not_found" / "diagnosis.json").read_text(encoding="utf-8")
+    )
+    payload["case_id"] = case_id
+    expected = DiagnosisRecord.model_validate_json(json.dumps(payload), strict=True)
+    return GenerationRequest(
+        case_id=expected.case_id,
+        observed_facts=expected.observed_facts,
+        evidence=expected.evidence,
+        routing=RoutingDecision(
+            decision_stage=DecisionStage.FINAL,
+            rule_version="phase1-probe-expected-v1",
+            category=expected.category,
+            candidates=[],
+            reason="committed synthetic probe fixture",
+        ),
+        knowledge_build_id=expected.evidence[0].knowledge_build_id,
+        schema_version="1.1.0",
+        prompt_version="fixture-v1",
+    )
+
+
+def _validated_probe_diagnosis(
+    backend: CandidateBackend, candidate: CandidateRunResult, case_id: str
+) -> DiagnosisRecord:
+    outcome = DiagnosisGenerator(backend).generate(
+        _probe_generation_request(case_id),
+        initial_candidate=candidate,
+    )
+    if outcome.status != "completed":
+        raise DifyContractError("candidate failed local diagnosis validation")
+    return outcome.diagnosis
+
+
 def run_fixture_probe(output_root: Path) -> ProbeOutcome:
     started = datetime.now(UTC)
     case_id = new_case_id()
@@ -140,9 +178,11 @@ def run_fixture_probe(output_root: Path) -> ProbeOutcome:
     input_payload = json.loads(
         (fixture_root / "module_not_found" / "input.json").read_text(encoding="utf-8")
     )
-    diagnosis = FixtureBackend(fixture_root).run_workflow(
+    backend = FixtureBackend(fixture_root)
+    candidate = backend.run_workflow(
         {"case_id": case_id}, user="debugmate-local"
     )
+    diagnosis = _validated_probe_diagnosis(backend, candidate, case_id)
     capabilities = _capabilities(CapabilityStatus.NOT_TESTED)
     report = ProbeReport(
         case_id=case_id,
@@ -153,7 +193,7 @@ def run_fixture_probe(output_root: Path) -> ProbeOutcome:
 
     bundle = EvidenceBundle.begin(output_root, case_id)
     bundle.write_json("input.redacted.json", input_payload)
-    bundle.write_json("diagnosis.json", diagnosis.diagnosis.model_dump(mode="json"))
+    bundle.write_json("diagnosis.json", diagnosis.model_dump(mode="json"))
     bundle.write_json("probe-results.json", report.model_dump(mode="json"))
     initial_artifacts = [
         ArtifactEntry.model_validate(
@@ -174,7 +214,7 @@ def run_fixture_probe(output_root: Path) -> ProbeOutcome:
             backend="fixture",
             status=RunStatus.PASSED,
             input_sha256=sha256_bytes(canonical_json_bytes(input_payload)),
-            run_id=diagnosis.run_id,
+            run_id=candidate.run_id,
             started=started,
             capabilities=capabilities,
             artifacts=initial_artifacts,
@@ -225,14 +265,15 @@ def run_cloud_probe(settings: DebugMateSettings, output_root: Path) -> ProbeOutc
         workflow = backend.run_workflow(
             {"case_id": case_id, "file_id": upload.file_id}, settings.dify_user
         )
+        diagnosis = _validated_probe_diagnosis(backend, workflow, case_id)
         diagnosis_path = bundle.write_json(
-            "diagnosis.json", workflow.diagnosis.model_dump(mode="json")
+            "diagnosis.json", diagnosis.model_dump(mode="json")
         )
 
         # Phase 2 stores only the scanned source text. Audio generation remains
         # deferred until Phase 4 can prove semantic derivation and media safety.
         bundle.write_json(
-            "recap.json", {"recap_text": workflow.diagnosis.recap_text}
+            "recap.json", {"recap_text": diagnosis.recap_text}
         )
         evidence = {
             "C01": upload_path,

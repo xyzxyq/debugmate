@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 from pathlib import Path
 
-from debugmate.adapters.base import DiagnosisBackend, WorkflowRunResult
+from debugmate.adapters.base import CandidateRunResult, DiagnosisBackend
 from debugmate.hashing import UnsafeArtifactPath, resolve_artifact_path, sha256_file
 from debugmate.privacy.approval import ApprovalInvalid, verify_approval
 from debugmate.privacy.models import ApprovedRedactedInput
@@ -27,7 +27,7 @@ class CloudGateway:
         self._user = user
         self._redacted_root = None if redacted_root is None else Path(redacted_root)
 
-    def run(self, approved: ApprovedRedactedInput) -> WorkflowRunResult:
+    def run(self, approved: ApprovedRedactedInput) -> CandidateRunResult:
         if not isinstance(approved, ApprovedRedactedInput):
             raise TypeError("CloudGateway accepts only ApprovedRedactedInput")
         verify_approval(approved, self._approval_key)
