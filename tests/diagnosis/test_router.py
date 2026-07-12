@@ -13,7 +13,6 @@ from debugmate.diagnosis.extraction import (
 )
 from debugmate.diagnosis.routing import DecisionStage, route_case
 
-
 CASE_ID = "case_33333333333333333333333333333333"
 
 
@@ -45,9 +44,15 @@ def _facts(**values: str) -> CaseFacts:
         ({"exception_type": "ModuleNotFoundError"}, ErrorCategory.DEPENDENCY_ENVIRONMENT),
         ({"exception_type": "PermissionError"}, ErrorCategory.PATH_PERMISSION),
         ({"exception_type": "TypeError"}, ErrorCategory.PYTHON_RUNTIME),
-        ({"traceback_key_line": "mat1 and mat2 shapes cannot be multiplied"}, ErrorCategory.TENSOR_SHAPE_DTYPE),
+        (
+            {"traceback_key_line": "mat1 and mat2 shapes cannot be multiplied"},
+            ErrorCategory.TENSOR_SHAPE_DTYPE,
+        ),
         ({"traceback_key_line": "CUDA out of memory"}, ErrorCategory.CUDA_MEMORY),
-        ({"traceback_key_line": "Error loading state_dict for FictionalNet"}, ErrorCategory.MODEL_LOADING),
+        (
+            {"traceback_key_line": "Error loading state_dict for FictionalNet"},
+            ErrorCategory.MODEL_LOADING,
+        ),
         ({"package": "fictional-package"}, ErrorCategory.UNKNOWN),
     ],
 )
