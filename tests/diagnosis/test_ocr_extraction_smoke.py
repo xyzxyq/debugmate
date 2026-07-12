@@ -24,7 +24,12 @@ def test_real_ocr_runs_through_production_extraction_provider(tmp_path: Path) ->
         font = ImageFont.truetype(r"C:\Windows\Fonts\consola.ttf", 30)
     except OSError:
         pytest.skip("a deterministic monospace font is unavailable")
-    draw.text((20, 30), "ModuleNotFoundError: No module named fictional_pkg", fill="black", font=font)
+    draw.text(
+        (20, 30),
+        "ModuleNotFoundError: No module named fictional_pkg",
+        fill="black",
+        font=font,
+    )
     image.save(screenshot)
     approved = ApprovedRedactedInput(
         case_id="case_0123456789abcdef0123456789abcdef",
@@ -45,4 +50,7 @@ def test_real_ocr_runs_through_production_extraction_provider(tmp_path: Path) ->
         pytest.skip(f"real OCR assets unavailable: {type(error).__name__}")
     assert record.candidates
     assert all(candidate.source_kind is SourceKind.OCR for candidate in record.candidates)
-    assert all(candidate.locator.image_sha256 == sha256_file(screenshot) for candidate in record.candidates)
+    assert all(
+        candidate.locator.image_sha256 == sha256_file(screenshot)
+        for candidate in record.candidates
+    )
