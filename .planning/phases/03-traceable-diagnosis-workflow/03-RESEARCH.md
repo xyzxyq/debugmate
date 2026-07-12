@@ -372,41 +372,54 @@ git diff --check
 
 ### Plan 03-01 — Contract migration and trace graph
 
-- 新增 extraction/facts/correction/sufficiency/routing/outcome contracts。
-- 将 DiagnosisRecord 1.0.0 迁移到 1.1.0，加入 stable IDs、evidence anchors、support links、grounded/inference semantics。
-- 更新 committed schemas、hash snapshots、migration fixtures 和 contract tests。
+- 将 DiagnosisRecord 1.0.0 迁移到 1.1.0，加入 stable IDs、facts、evidence anchors、support links、grounded/inference semantics。
+- 更新 committed schemas、hash snapshots、migration fixtures 和 contract tests；保留冻结的 1.0.0 合同。
+- 为 CommandStep 建立只针对 shell/PowerShell/subprocess 调用能力的安全策略，不禁止领域层通用 `run`/`execute` 方法名。
 - 先完成这一计划，后续计划才能基于稳定 API 工作。
 
 ### Plan 03-02 — Extraction, normalization and correction replay
 
 - 从已脱敏 text + `OcrToken` 提取候选；VLM 为可选 backend candidate source。
 - 本地规范化、隐私复扫、locator/bbox 校验，生成 `CaseFacts`。
-- 实现 correction overlay、revision lineage、facts hash 和 JSON/CLI correction/replay seam。
+- 实现 correction overlay、revision lineage 和 facts hash；JSON/CLI correction/rerun seam 留给 Plan 03-05。
 - 不实现 Phase 4 可视化编辑器。
 
 ### Plan 03-03 — Sufficiency, deterministic routing and evidence binding
 
-- 六类充分性矩阵、问题模板、最多三问/一轮状态机。
-- 版本化规则 router，覆盖六类 + unknown/conflict。
+- 先运行版本化 provisional router（六类 + unknown/conflict），再选择六类充分性矩阵、问题模板和最多三问/一轮状态机，答案修订后运行 final router。
 - 复用可信 `RetrievalTrace`，构造/校验 evidence anchors 和 support graph 输入。
 - 信息不足必须在 generation 前结束。
 
-### Plan 03-04 — Candidate generation, one repair and end-to-end evidence
+### Plan 03-04 — Candidate generation and one repair
 
-- 重构 backend port 为 raw candidate envelope，fixture/Dify 同合同。
+- 重构 backend port 为 bounded candidate envelope，fixture/Dify 同合同。
 - 本地 generator 完成 strict + semantic + citation + privacy + command safety validation。
 - 实现最多一次 repair 与 typed failure；区分 transport retry。
-- 写入原子 evidence、CLI/API 入口、完整 fixture replay 和 marker-isolated cloud smoke。
+- Dify/VLM 真实路径只保留 marker-isolated smoke，不阻塞离线交付。
 
-## Open Questions / External Gates
+### Plan 03-05 — Approval-gated workflow, CLI and fixtures
 
-这些问题不应阻塞离线规划，但必须在 Phase 3 验证报告中如实标注：
+- workflow/CLI 在记录 `input_approved` 和调用任何 provider 前，用配置的 approval key 调用 `verify_approval`。
+- 伪造、过期、错 key、越界路径和截图 hash 变化均以零 provider 调用失败。
+- 串联 extraction -> provisional route -> sufficiency -> final route -> retrieval -> generation。
+- 提交六类 + unknown fixtures、有限追问、typed failure 和 correction rerun JSON 边界。
 
-1. 当前 Dify 账号所选模型是否原生支持 JSON Schema，还是仅 prompt-assisted structured output？
-2. Dify workflow 实际输出能否稳定回传知识命中 chunk/source/locator，如何映射到 Phase 2 `RetrievalTrace`？
-3. 真实 VLM 对 10 张终端截图的字段准确率和 bbox/来源能力如何？若只返回文本，则 bbox 以本地 OCR 为准，VLM 只作候选补充。
-4. Dify 自身 node retry 设置是否能固定为 0/1 并从运行 metadata 观察？否则本地 “一次 repair” 计数可能与平台隐藏重试混淆。
-5. 当前 Dify dataset 写入/回读仍是凭据门禁；真实 cloud evidence 不得由 offline retrieval 或 MockTransport 代替。
+### Plan 03-06 — Immutable evidence and full gates
+
+- 按 outcome 原子写入 summary-only allowlisted evidence 和 manifest hashes。
+- correction rerun 保留旧/新两个不可变 run bundle。
+- 阻塞门禁为完整离线 pytest、Ruff、pip check 和 diff check。
+- 真实 Dify/VLM/OCR 继续作为 marker-isolated、non-blocking external gates。
+
+## Open Questions (RESOLVED)
+
+以下五项均已用离线安全合同解决，不再阻塞 Phase 3 计划或默认验收；真实 Dify/VLM/OCR 只作为显式 marker 的外部门禁：
+
+1. **Dify JSON Schema 能力：已解决。** 离线实现不信任平台原生约束，统一把输出当候选，由本地 Pydantic 1.1 + 语义/隐私/命令校验裁决，并只允许一次受控修复；真实模型能力仅由 `pytest -m cloud` 记录。
+2. **Dify citation mapping：已解决。** 默认测试以严格 Phase 2 `RetrievalTrace` fixture 验证 case/build/chunk/source/locator，再绑定稳定 EvidenceAnchor；无法提供这些字段的真实 Dify 输出不得发布 grounded claim，`pytest -m cloud` 仅验证外部映射。
+3. **VLM 字段/bbox 能力：已解决。** bbox 和 image SHA-256 以本地 OCR/截图合同为权威，VLM 永远只提供 untrusted candidates、不能制造 bbox 或 facts；真实 VLM 质量通过 marker-isolated `cloud` smoke 观察，不影响离线通过。
+4. **Dify 隐藏 retry：已解决。** 本地 contract repair 固定最多一次并独立计数；平台 transport/node retry 只能记录为独立 metadata，缺失时标为 unknown，不能增加本地 repair budget 或伪装成功。
+5. **Dify dataset 凭据门禁：已解决。** 默认门禁使用固定、build-bound 的离线 RetrievalTrace/manifest；真实 dataset 写入/回读和 cloud evidence 仅在有凭据时由 `pytest -m cloud` 执行，跳过不会阻塞 Phase 3，也不能用 MockTransport 冒充真实运行。
 
 ## Confidence Assessment
 
