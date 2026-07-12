@@ -2,140 +2,99 @@
 phase: 03-traceable-diagnosis-workflow
 status: issues_found
 depth: deep
-reviewed_at: 2026-07-12
+reviewed_at: 2026-07-13
+reviewed_commits:
+  - 42bdbfd
+  - ff2487f
 files_reviewed: 41
-original_findings:
-  closed: 4
-iteration_2_findings:
-  closed: 2
-  partially_closed: 2
 findings:
   critical: 0
-  warning: 2
+  warning: 1
   info: 0
-  total: 2
+  total: 1
 ---
 
-# Phase 3 Final Software Quality Re-review
+# Phase 3 Contract and Regression Re-review
 
 ## Result
 
-The three iteration-2 implementation commits close the established structured-environment
-defect, bind top-level fact state, reject mismatched candidate provenance, and require a
-verified source bundle for corrected publication. The full offline suite remains green.
+Commits `42bdbfd` and `ff2487f` close the two previously reported public-boundary
+bypasses. Workflow outcomes now require their exact extraction record, matching extraction
+candidates cannot be relabelled as user-only facts, correction IDs and reasons are
+canonical, correction revisions are contiguous, and corrected publication proves each
+latest transition against a verified immutable source bundle.
 
-The phase is nevertheless **not clean**. Two public-boundary bypasses remain: extraction
-provenance can be removed wholesale, and correction history can be made internally false
-while retaining a verified source bundle. Both were reproduced by rebuilding the canonical
-facts hash, run ID, and idempotency key and then publishing through the normal public API.
+The phase is nevertheless **not clean**. One normal workflow supported by the public domain
+model is internally inconsistent: a legitimate user fact created by the bounded follow-up
+round can be corrected, but the resulting revision cannot pass the shared outcome validator
+or evidence publisher.
 
-## Findings
+## Finding
 
-### WARNING 1 - Removing the extraction record bypasses exact fact provenance validation
+### WARNING 1 - A legitimate follow-up user fact cannot be corrected and republished
 
-**Files:** `src/debugmate/diagnosis/extraction.py:321-330`,
-`src/debugmate/diagnosis/workflow.py:171-187`
+**Files:** `src/debugmate/diagnosis/extraction.py:401-419`,
+`src/debugmate/diagnosis/workflow.py:470-485`
 
-`validate_facts_against_extraction()` returns early when `extraction is None` after checking
-only that candidate-ID lists are empty. It does not require an extraction record for a
-workflow-produced outcome, and it does not require provenance-free facts to use
-`source_kinds=[user]`. Because `DiagnosisRunOutcome.extraction` is optional, an imported
-outcome can remove the complete extraction record, clear every candidate-ID list, relabel
-the facts as OCR/VLM sourced, recompute `facts_sha256`, `idempotency_key`, and `run_id`, and
-pass both shared validation and evidence publication.
+`apply_followup_answers()` intentionally creates facts with no extraction candidate,
+`provenance_candidate_ids=[]`, and `source_kinds=[user]`. This is the correct representation
+for an answer supplied after extraction. `apply_correction()` also accepts such a fact and
+creates a valid-looking next revision. However, `validate_facts_against_extraction()` handles
+every corrected field by looking up the first correction's old value only in
+`extraction.candidates`; when the original fact was a follow-up answer, that lookup is empty
+and validation raises `fact correction provenance does not bind its source value`.
 
-This leaves `extraction.json` absent from the published bundle while `case-facts.json`
-claims non-user source kinds that have no source record or locator. It is a direct bypass of
-the exact candidate/extraction binding introduced in `4b96f4c` and makes a forged fact graph
-look like a valid provider-derived diagnosis.
+The failure occurs after `DiagnosisWorkflow.rerun()` has already returned the new outcome,
+so callers receive an object that the public validator and publisher reject. This breaks the
+explicit combination of bounded follow-up facts and correction reruns and prevents a normal
+revision-1 follow-up / revision-2 correction chain from being serialized and published.
 
-**Confirmed reproduction:** a normal `module_not_found` completed outcome was transformed
-by setting `extraction=None`, setting every fact's `provenance_candidate_ids=[]` and
-`source_kinds=[vlm]`, and recomputing canonical identities. Both
-`validate_diagnosis_outcome()` and `publish_diagnosis_evidence()` accepted it and produced a
-verified bundle.
+**Confirmed reproduction:** run the committed `insufficient_information` fixture with
+`followup_answers={version: "3.13.5"}`. The result is revision 1 and contains a user-only
+`version` fact. Correct that fact to `3.13.6` through `DiagnosisWorkflow.rerun()`. The method
+returns a revision-2 `needs_information` outcome, but `validate_diagnosis_outcome()` rejects
+it with `ValueError: fact correction provenance does not bind its source value`; publication
+therefore also cannot succeed.
 
-**Action:** make the public workflow contract require an extraction record for every Phase 3
-outcome, or explicitly model a separate user-only import path. At minimum, the no-extraction
-branch must reject every non-user source and publication must reject a workflow outcome
-whose extraction stage has no extraction record. Add direct validator and publication tests
-for removed extraction, empty provenance with OCR/VLM source kinds, and extraction-summary
-omission.
+**Action:** model the initial source of a correction explicitly. For the first correction on
+a field, accept either (a) an exact extraction candidate set whose value/fact ID matches the
+old correction state, or (b) an existing provenance-free, user-only fact from the verified
+source revision. The latter must still be proven through the source bundle during
+publication, not inferred merely from an absent candidate. Add an end-to-end round-trip test
+covering follow-up revision 1, correction revision 2, JSON model round trips, source bundle
+publication, corrected bundle publication, and `verify_bundle()` for both bundles. Also
+make `rerun()` validate its newly assembled outcome before returning so future internal
+contract mismatches fail at the producing boundary.
 
-### WARNING 2 - Verified source bundles do not prove the declared correction history
+## Verified Closures and Invariants
 
-**Files:** `src/debugmate/diagnosis/extraction.py:187-194`,
-`src/debugmate/diagnosis/extraction.py:337-355`,
-`src/debugmate/diagnosis/workflow.py:195-210`,
-`src/debugmate/evidence.py:550-566`
-
-The new source-bundle check proves only that a bundle exists with the declared source
-run/revision/facts hash. The final facts validator still permits an incomplete or fabricated
-correction history:
-
-- it rejects only `len(applied_corrections) > revision`, rather than requiring one canonical
-  revision step per correction;
-- it never verifies `CorrectionProvenance.correction_id` from canonical correction fields;
-- it does not bind each correction's `base_facts_sha256` to the preceding revision, except
-  for the last record's equality to the top-level source hash;
-- per-field old/new hash chaining is insufficient to prove global revision history.
-
-Consequently a revision-2 outcome can reuse the single revision-1 correction, replace that
-record's `base_facts_sha256` with the verified revision-1 source hash, use an arbitrary
-pattern-valid correction ID, recompute canonical outcome identities, and publish as if a
-second correction occurred. The source bundle itself remains valid, so the publication
-boundary accepts the false history. Separately, changing only a correction ID and reason
-hash on a revision-1 outcome is also accepted and published.
-
-**Confirmed reproduction:** original and revision-1 bundles were published normally. A
-forged revision-2 outcome containing only one altered correction record, with
-`source_run_id/source_revision/source_facts_sha256` pointing to the real revision-1 bundle,
-passed `validate_diagnosis_outcome()` and `publish_diagnosis_evidence()` (`GAP_VALIDATED`,
-`GAP_PUBLISHED`).
-
-**Action:** enforce canonical correction history as a complete sequence. Require correction
-count/revision consistency for the Phase 3 origin contract, verify canonical correction IDs,
-and bind every correction base hash to the exact preceding revision. For imported corrected
-outcomes, validate the latest correction against the source bundle's fact state and preserve
-enough immutable source data to prove old fact ID/value and resulting new state; a manifest
-containing only the source facts digest cannot by itself prove the transition. Add validator,
-rerun, and publication tamper tests for revision gaps, arbitrary correction IDs/reason
-hashes, duplicated corrections, wrong base hashes, and multi-field/multi-revision ordering.
-
-## Closure of Earlier Findings
-
-1. **Original environment participation:** closed. Environment mappings are source-hashed,
-   affect identities, and now participate in extraction.
-2. **Original outcome/publication identity:** closed for top-level revision/hash, run,
-   idempotency, versions, and stage path.
-3. **Canonical `CaseFact`:** closed at the model boundary.
-4. **Inherited-stage presentation:** closed; inherited extraction stages are not reported as
-   newly executed.
-5. **Iteration-2 structured environment maps:** closed. `PYTHON`, `python`, and `DEVICE`
-   bare-value mappings produce deterministic version/device candidates and exact locators.
-6. **Iteration-2 top-level vs nested fact state:** closed.
-7. **Iteration-2 exact fact/extraction relationship:** partially closed; exact membership is
-   enforced only while the optional extraction record remains present (Warning 1).
-8. **Iteration-2 source-bundle relationship:** partially closed; source bundle existence and
-   manifest identity are verified, but the claimed transition/history is not (Warning 2).
+- Every Phase 3 workflow outcome requires an `ExtractionRecord`; removing it is rejected.
+- Extracted facts require the complete exact candidate-ID set and exact source-kind set.
+- Legitimate uncorrected follow-up facts remain accepted as provenance-free `user` facts.
+- `CaseFact` IDs remain canonical over normalized field/value pairs.
+- Correction reasons are privacy-scanned and hash-bound; correction IDs are deterministic
+  over canonical immutable correction fields.
+- Same-field revision 0 -> 1 -> 2 correction chains validate, serialize, publish, and verify.
+- Revision gaps, duplicated corrections, altered IDs/reasons/base hashes, and incomplete
+  correction prefixes are rejected.
+- Corrected publication verifies source manifest identity, correction prefix, source fact,
+  resulting fact, unchanged sibling facts, and allowed provenance/source transitions.
+- Normal workflow outcomes and correction outcomes survive strict Pydantic JSON round trips.
 
 ## Verification Evidence
 
-- Structured environment regression covers both `PYTHON` and `python` plus separate
-  `DEVICE`, including deterministic locator offsets.
-- Existing focused adversarial/workflow tests remain green.
-- `python -m pytest -q -m "not cloud and not ocr"`: **453 passed, 22 deselected**.
+- Focused extraction/sufficiency/workflow/evidence suite: **81 passed**.
+- Full offline suite, `python -m pytest -q -m "not cloud and not ocr"`:
+  **462 passed, 22 deselected**.
 - `python -m ruff check src tests`: **passed**.
 - `python -m pip check`: **passed**.
-- `git diff --check`: no implementation error; only the pre-existing line-ending warning
-  for `.planning/config.json`.
-- Manual public-boundary adversarial checks reproduced both warnings through the real
-  validator and publisher, not private helpers.
+- `git diff --check`: no implementation error; only pre-existing line-ending warnings for
+  `.planning/config.json` and the concurrently updated `03-SECURITY.md`.
+- Manual adversarial and normal-path checks used the real public workflow, validator,
+  publisher, JSON round trip, and bundle verifier rather than private helper-only assertions.
 
-## Required Tests Before Clean Status
+## Required Test Before Clean Status
 
-1. Validator and publication rejection when a workflow outcome removes its extraction or
-   claims OCR/VLM facts without exact candidate provenance.
-2. Canonical correction-ID and complete revision/history validation.
-3. Publication rejection for revision gaps, duplicated/altered correction records, wrong
-   per-step base hashes, and a transition not provable from the verified source bundle.
+1. A user-only follow-up fact can be corrected in the next contiguous revision, strictly
+   JSON-round-tripped, published against its verified source bundle, and verified without
+   weakening rejection of forged provenance-free OCR/VLM facts.
