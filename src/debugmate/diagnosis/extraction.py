@@ -188,6 +188,7 @@ class CorrectionProvenance(StrictFrozenModel):
     field_id: FieldId
     fact_id: str = Field(pattern=r"^fact_[0-9a-f]{32}$")
     source_kind: Literal[SourceKind.USER] = SourceKind.USER
+    base_facts_sha256: Sha256
     old_value_sha256: Sha256
     new_value_sha256: Sha256
     reason_sha256: Sha256

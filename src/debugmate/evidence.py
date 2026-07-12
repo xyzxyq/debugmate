@@ -476,9 +476,7 @@ def _validate_diagnosis_lineage(outcome: Any) -> None:
         raise ValueError("outcome facts hash does not match the immutable facts revision")
     if outcome.facts.revision != outcome.revision:
         raise ValueError("outcome revision does not match the immutable facts revision")
-    if any(
-        anchor.knowledge_build_id != outcome.knowledge_build_id for anchor in outcome.evidence
-    ):
+    if any(anchor.knowledge_build_id != outcome.knowledge_build_id for anchor in outcome.evidence):
         raise ValueError("evidence anchor does not match the workflow knowledge build")
     if outcome.status is WorkflowStatus.COMPLETED:
         if outcome.diagnosis is None or outcome.generation_failure is not None:
@@ -549,6 +547,25 @@ def _facts_summary(outcome: Any) -> dict[str, Any]:
     }
 
 
+def _validate_correction_source_bundle(outcome: Any, root: Path) -> None:
+    """Bind imported correction lineage to an already verified immutable source bundle."""
+
+    if not outcome.inherited_stages:
+        return
+    source_path = Path(root) / outcome.case_id / outcome.source_run_id
+    verification = verify_bundle(source_path)
+    manifest = verification.manifest
+    if not verification.ok or manifest is None:
+        raise ValueError("corrected outcome source bundle is missing or invalid")
+    if (
+        manifest.case_id != outcome.case_id
+        or manifest.run_id != outcome.source_run_id
+        or manifest.facts_revision != outcome.source_revision
+        or manifest.facts_sha256 != outcome.source_facts_sha256
+    ):
+        raise ValueError("corrected outcome source bundle does not match lineage")
+
+
 def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
     """Publish one workflow outcome as an atomic, summary-only immutable bundle."""
 
@@ -556,6 +573,7 @@ def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
 
     outcome = _strict_diagnosis_outcome(outcome)
     _validate_diagnosis_lineage(outcome)
+    _validate_correction_source_bundle(outcome, Path(root))
     bundle = EvidenceBundle.begin_run(Path(root), outcome.case_id, outcome.run_id)
     try:
         if outcome.extraction is not None:
@@ -575,9 +593,7 @@ def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
         if outcome.status is WorkflowStatus.COMPLETED:
             bundle.write_json("diagnosis.json", outcome.diagnosis.model_dump(mode="json"))
         elif outcome.status is WorkflowStatus.GENERATION_FAILED:
-            bundle.write_json(
-                "failure.json", outcome.generation_failure.model_dump(mode="json")
-            )
+            bundle.write_json("failure.json", outcome.generation_failure.model_dump(mode="json"))
 
         now = datetime.now(UTC)
         status = {

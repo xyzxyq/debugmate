@@ -42,9 +42,7 @@ class CorrectionOverlay(StrictFrozenModel):
     reason: str = Field(min_length=1, max_length=1_000, repr=False)
 
 
-def _correction_id(
-    overlay: CorrectionOverlay, *, new_value_sha256: str, reason_sha256: str
-) -> str:
+def _correction_id(overlay: CorrectionOverlay, *, new_value_sha256: str, reason_sha256: str) -> str:
     payload = {
         "case_id": overlay.case_id,
         "base_revision": overlay.base_revision,
@@ -97,6 +95,7 @@ def apply_correction(base: CaseFacts, overlay: CorrectionOverlay) -> CaseFacts:
         ),
         field_id=overlay.field_id,
         fact_id=overlay.fact_id,
+        base_facts_sha256=base.facts_sha256,
         old_value_sha256=actual_old_hash,
         new_value_sha256=new_value_hash,
         reason_sha256=reason_hash,
@@ -110,8 +109,7 @@ def apply_correction(base: CaseFacts, overlay: CorrectionOverlay) -> CaseFacts:
         confidence=1.0,
     )
     revised_facts = [
-        replacement_fact if fact.fact_id == target.fact_id else fact
-        for fact in base.facts
+        replacement_fact if fact.fact_id == target.fact_id else fact for fact in base.facts
     ]
     revised_facts.sort(key=lambda fact: fact.fact_id)
     if len({fact.fact_id for fact in revised_facts}) != len(revised_facts):

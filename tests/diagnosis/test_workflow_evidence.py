@@ -216,6 +216,75 @@ def test_corrected_runs_preserve_both_bundles(tmp_path: Path) -> None:
     assert corrected_manifest.node_states["facts_corrected"] == "completed"
 
 
+def _corrected_outcome(tmp_path: Path):
+    row = next(item for item in _rows() if item["case_key"] == "correction_rerun")
+    workflow, *_ = _workflow(row, tmp_path)
+    original = workflow.run(_approved(row["case_id"]))
+    target = next(fact for fact in original.facts.facts if fact.field_id is FieldId.EXCEPTION_TYPE)
+    overlay = CorrectionOverlay(
+        case_id=original.case_id,
+        base_revision=original.revision,
+        base_facts_sha256=original.facts_sha256,
+        field_id=target.field_id,
+        fact_id=target.fact_id,
+        old_value_sha256=sha256_bytes(target.value.encode()),
+        replacement="AttributeError",
+        reason="confirmed from redacted traceback",
+    )
+    return original, workflow.rerun(original, overlay)
+
+
+def test_corrected_publication_requires_verified_source_bundle(tmp_path: Path) -> None:
+    _, corrected = _corrected_outcome(tmp_path)
+
+    with pytest.raises(ValueError, match="source bundle"):
+        publish_diagnosis_evidence(corrected, tmp_path / "evidence")
+
+
+@pytest.mark.parametrize("source_run_id", [None])
+def test_corrected_lineage_rejects_arbitrary_or_missing_source_run(
+    source_run_id: str | None, tmp_path: Path
+) -> None:
+    _, corrected = _corrected_outcome(tmp_path)
+    forged = corrected.model_copy(update={"source_run_id": source_run_id})
+
+    with pytest.raises(ValueError, match="source|lineage"):
+        validate_diagnosis_outcome(forged)
+
+
+def test_corrected_publication_rejects_arbitrary_unverified_source_run(
+    tmp_path: Path,
+) -> None:
+    original, corrected = _corrected_outcome(tmp_path)
+    root = tmp_path / "evidence"
+    publish_diagnosis_evidence(original, root)
+    forged = corrected.model_copy(update={"source_run_id": "run_" + "f" * 32})
+
+    with pytest.raises(ValueError, match="source bundle"):
+        publish_diagnosis_evidence(forged, root)
+
+
+def test_corrected_lineage_rejects_self_source(tmp_path: Path) -> None:
+    _, corrected = _corrected_outcome(tmp_path)
+
+    with pytest.raises(ValueError, match="source"):
+        validate_diagnosis_outcome(corrected.model_copy(update={"source_run_id": corrected.run_id}))
+
+
+def test_revision_zero_cannot_claim_inherited_correction_lineage(tmp_path: Path) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    forged = outcome.model_copy(
+        update={
+            "inherited_stages": ["input_approved", "extracted", "facts_confirmed"],
+            "completed_stages": ["facts_corrected", *outcome.completed_stages[3:]],
+            "source_run_id": "run_" + "f" * 32,
+        }
+    )
+
+    with pytest.raises(ValueError, match="correction|revision|lineage"):
+        validate_diagnosis_outcome(forged)
+
+
 def test_duplicate_run_is_immutable(tmp_path: Path) -> None:
     outcome = _outcome("module_not_found", tmp_path)
     root = tmp_path / "evidence"

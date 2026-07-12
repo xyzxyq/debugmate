@@ -37,7 +37,7 @@ from debugmate.hashing import (
     sha256_file,
 )
 from debugmate.privacy.approval import ApprovalInvalid, verify_approval
-from debugmate.privacy.models import ApprovedRedactedInput
+from debugmate.privacy.models import ApprovedRedactedInput, Sha256
 
 SCHEMA_VERSION = "1.1.0"
 PROMPT_VERSION = "diagnosis-v1"
@@ -74,6 +74,8 @@ class DiagnosisRunOutcome(StrictFrozenModel):
     completed_stages: list[str]
     inherited_stages: list[str] = Field(default_factory=list)
     source_run_id: str | None = Field(default=None, pattern=r"^run_[0-9a-f]{32}$")
+    source_revision: int | None = Field(default=None, strict=True, ge=0)
+    source_facts_sha256: Sha256 | None = None
     extraction: ExtractionRecord | None = None
     facts: CaseFacts
     routing: RoutingDecision
@@ -193,9 +195,29 @@ def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
     if outcome.inherited_stages:
         if outcome.inherited_stages != expected_stages[:3] or outcome.source_run_id is None:
             raise ValueError("outcome inherited stages require valid correction lineage")
+        if outcome.source_run_id == outcome.run_id:
+            raise ValueError("outcome source run must be distinct from corrected run")
+        if (
+            outcome.revision < 1
+            or not outcome.facts.applied_corrections
+            or outcome.source_revision != outcome.revision - 1
+            or outcome.source_facts_sha256 is None
+            or not hmac.compare_digest(
+                outcome.source_facts_sha256,
+                outcome.facts.applied_corrections[-1].base_facts_sha256,
+            )
+        ):
+            raise ValueError("outcome correction lineage is not bound to its source revision")
         expected_stages = ["facts_corrected", *expected_stages[3:]]
-    elif outcome.source_run_id is not None:
-        raise ValueError("outcome source run requires inherited stages")
+    elif any(
+        value is not None
+        for value in (
+            outcome.source_run_id,
+            outcome.source_revision,
+            outcome.source_facts_sha256,
+        )
+    ):
+        raise ValueError("outcome source lineage requires inherited stages")
     if outcome.completed_stages != expected_stages:
         raise ValueError("outcome completed_stages do not match its status")
     if outcome.case_id != outcome.facts.case_id:
@@ -288,6 +310,8 @@ class DiagnosisWorkflow:
         followup_answers: dict[object, str] | None = None,
         inherited_stages: list[str] | None = None,
         source_run_id: str | None = None,
+        source_revision: int | None = None,
+        source_facts_sha256: str | None = None,
     ) -> DiagnosisRunOutcome:
         provisional = route_case(facts, decision_stage=DecisionStage.PROVISIONAL)
         stages.append("provisional_routed")
@@ -304,6 +328,8 @@ class DiagnosisWorkflow:
                 questions=list(sufficiency.questions),
                 inherited_stages=inherited_stages,
                 source_run_id=source_run_id,
+                source_revision=source_revision,
+                source_facts_sha256=source_facts_sha256,
             )
 
         if isinstance(sufficiency, NeedsInformation):
@@ -327,6 +353,8 @@ class DiagnosisWorkflow:
                 extraction=extraction,
                 inherited_stages=inherited_stages,
                 source_run_id=source_run_id,
+                source_revision=source_revision,
+                source_facts_sha256=source_facts_sha256,
             )
 
         evidence = self._retrieval_provider.retrieve(facts, final)
@@ -356,6 +384,8 @@ class DiagnosisWorkflow:
                 transport_attempts=getattr(generated, "transport_attempts", 0),
                 inherited_stages=inherited_stages,
                 source_run_id=source_run_id,
+                source_revision=source_revision,
+                source_facts_sha256=source_facts_sha256,
             )
         stages.extend(["validated", "published"])
         return self._outcome(
@@ -371,6 +401,8 @@ class DiagnosisWorkflow:
             transport_attempts=getattr(generated, "transport_attempts", 0),
             inherited_stages=inherited_stages,
             source_run_id=source_run_id,
+            source_revision=source_revision,
+            source_facts_sha256=source_facts_sha256,
         )
 
     def _outcome(
@@ -390,6 +422,8 @@ class DiagnosisWorkflow:
         transport_attempts: int = 0,
         inherited_stages: list[str] | None = None,
         source_run_id: str | None = None,
+        source_revision: int | None = None,
+        source_facts_sha256: str | None = None,
     ) -> DiagnosisRunOutcome:
         idempotency_key, run_id = derive_run_identities(
             facts, routing, self._retrieval_provider.knowledge_build_id
@@ -405,6 +439,8 @@ class DiagnosisWorkflow:
             completed_stages=list(stages),
             inherited_stages=list(inherited_stages or []),
             source_run_id=source_run_id,
+            source_revision=source_revision,
+            source_facts_sha256=source_facts_sha256,
             extraction=extraction,
             facts=facts,
             routing=routing,
@@ -437,4 +473,6 @@ class DiagnosisWorkflow:
             extraction=previous.extraction,
             inherited_stages=["input_approved", "extracted", "facts_confirmed"],
             source_run_id=previous.run_id,
+            source_revision=previous.revision,
+            source_facts_sha256=previous.facts_sha256,
         )
