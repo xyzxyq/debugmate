@@ -1,0 +1,10 @@
+{
+  "error_text": "Traceback (most recent call last):\nModuleNotFoundError: No module named 'fictional_pkg'",
+  "ocr_tokens": [
+    {"text": "ModuleNotFoundError: No module named 'fictional_pkg'", "box": [[10, 10], [610, 10], [610, 40], [10, 40]], "score": 0.99},
+    {"text": "Package: fictional_pkg", "box": [[10, 50], [300, 50], [300, 80], [10, 80]], "score": 0.98},
+    {"text": "Version: 1.2.3", "box": [[10, 90], [250, 90], [250, 120], [10, 120]], "score": 0.97},
+    {"text": "Device: cuda:0", "box": [[10, 130], [250, 130], [250, 160], [10, 160]], "score": 0.96},
+    {"text": "Path: workspace/model.pt", "box": [[10, 170], [360, 170], [360, 200], [10, 200]], "score": 0.95}
+  ]
+}
