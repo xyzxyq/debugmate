@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 from debugmate.adapters.base import (
     AudioSynthesisResult,
+    CandidateRunResult,
     CapabilityProbeResult,
     FileUploadResult,
-    WorkflowRunResult,
 )
-from debugmate.contracts import CapabilityStatus, DiagnosisRecord
+from debugmate.contracts import CapabilityStatus, CaseId
+
+_CASE_ID_ADAPTER = TypeAdapter(CaseId)
 
 
 class FixtureNotFound(FileNotFoundError):
@@ -46,21 +50,18 @@ class FixtureBackend:
             backend="fixture",
         )
 
-    def run_workflow(self, inputs: dict[str, object], user: str) -> WorkflowRunResult:
+    def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult:
         del user
         diagnosis_path = self._case_dir / "diagnosis.json"
         if not diagnosis_path.is_file():
             raise FixtureNotFound(f"fixture diagnosis not found: {self._case_name}")
 
         payload = json.loads(diagnosis_path.read_text(encoding="utf-8"))
-        payload["case_id"] = inputs.get("case_id")
-        diagnosis = DiagnosisRecord.model_validate_json(
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        )
-        return WorkflowRunResult(
+        payload["case_id"] = _CASE_ID_ADAPTER.validate_python(inputs.get("case_id"), strict=True)
+        return CandidateRunResult(
             run_id=f"fixture:{self._case_name}",
-            diagnosis=diagnosis,
             backend="fixture",
+            candidate_payload=payload,
         )
 
     def synthesize_audio(self, text: str, user: str) -> AudioSynthesisResult:

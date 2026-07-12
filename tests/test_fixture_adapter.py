@@ -8,13 +8,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from debugmate.adapters.base import DiagnosisBackend
+from debugmate.adapters.base import CandidateRunResult, DiagnosisBackend
 from debugmate.adapters.fixture import (
     FixtureBackend,
     FixtureCapabilityUnavailable,
     FixtureNotFound,
 )
-from debugmate.adapters.base import CandidateRunResult
 from debugmate.contracts import CapabilityStatus, new_case_id
 
 FIXTURES_ROOT = Path(__file__).parents[1] / "fixtures" / "cases"

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
+from tests.diagnosis.test_contract_v11 import valid_record
 
 from debugmate.adapters.base import CandidateRunResult, DiagnosisBackend
 from debugmate.adapters.dify import DifyBackend
@@ -18,7 +19,6 @@ from debugmate.diagnosis.generation import (
 )
 from debugmate.diagnosis.routing import DecisionStage, RoutingDecision
 from debugmate.settings import DebugMateSettings
-from tests.diagnosis.test_contract_v11 import valid_record
 
 
 @dataclass
@@ -39,7 +39,7 @@ class ScriptedCandidateBackend:
 
 def generation_request() -> GenerationRequest:
     payload = valid_record()
-    diagnosis = DiagnosisRecord.model_validate(payload, strict=True)
+    diagnosis = DiagnosisRecord.model_validate_json(json.dumps(payload), strict=True)
     return GenerationRequest(
         case_id=diagnosis.case_id,
         observed_facts=diagnosis.observed_facts,

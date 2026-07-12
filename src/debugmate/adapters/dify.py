@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -10,11 +9,11 @@ import httpx
 
 from debugmate.adapters.base import (
     AudioSynthesisResult,
+    CandidateRunResult,
     CapabilityProbeResult,
     FileUploadResult,
-    WorkflowRunResult,
 )
-from debugmate.contracts import CapabilityStatus, DiagnosisRecord
+from debugmate.contracts import CapabilityStatus
 from debugmate.settings import DebugMateSettings
 
 
@@ -101,7 +100,7 @@ class DifyBackend:
             raise DifyContractError("Dify upload response did not match the contract") from None
         return FileUploadResult(file_id=file_id, filename=filename, backend="dify")
 
-    def run_workflow(self, inputs: dict[str, object], user: str) -> WorkflowRunResult:
+    def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult:
         response = self._request(
             "POST",
             "/workflows/run",
@@ -109,26 +108,32 @@ class DifyBackend:
         )
         try:
             payload = response.json()
+            if not isinstance(payload, dict):
+                raise TypeError
             data = payload.get("data", {})
+            if not isinstance(data, dict):
+                raise TypeError
             outputs = data.get("outputs", {})
-            raw_diagnosis = outputs["diagnosis"]
-            if isinstance(raw_diagnosis, str):
-                diagnosis = DiagnosisRecord.model_validate_json(raw_diagnosis)
-            else:
-                diagnosis = DiagnosisRecord.model_validate_json(
-                    json.dumps(raw_diagnosis, ensure_ascii=False)
-                )
-            run_id = str(
+            if not isinstance(outputs, dict):
+                raise TypeError
+            candidate_payload = outputs["diagnosis"]
+            run_id = (
                 payload.get("workflow_run_id")
                 or data.get("workflow_run_id")
                 or payload.get("task_id")
                 or data["id"]
             )
-        except Exception:
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise TypeError
+            return CandidateRunResult(
+                run_id=run_id,
+                backend="dify",
+                candidate_payload=candidate_payload,
+            )
+        except (ValueError, KeyError, TypeError):
             raise DifyContractError(
-                "Dify workflow response did not match DiagnosisRecord"
+                "Dify workflow response did not match candidate envelope"
             ) from None
-        return WorkflowRunResult(run_id=run_id, diagnosis=diagnosis, backend="dify")
 
     def synthesize_audio(self, text: str, user: str) -> AudioSynthesisResult:
         response = self._request(
