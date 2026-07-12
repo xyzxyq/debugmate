@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -106,6 +107,12 @@ class RunManifest(EvidenceRecord):
     probe_capabilities: list[CapabilityEvidence]
     error_code: Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{1,63}$")] | None = None
     safe_message: str | None = None
+    facts_revision: Annotated[int, Field(ge=0)] | None = None
+    facts_sha256: Sha256 | None = None
+    routing_rule_version: str | None = None
+    knowledge_build_id: Sha256 | None = None
+    generation_attempts: Annotated[int, Field(ge=0)] | None = None
+    transport_attempts: Annotated[int, Field(ge=0)] | None = None
 
     @model_validator(mode="after")
     def validate_manifest_state(self) -> RunManifest:
@@ -127,6 +134,16 @@ class RunManifest(EvidenceRecord):
                 )
         if self.status is RunStatus.FAILED and not (self.error_code and self.safe_message):
             raise ValueError("failed manifests require an error code and safe message")
+        phase3 = (
+            self.facts_revision,
+            self.facts_sha256,
+            self.routing_rule_version,
+            self.knowledge_build_id,
+            self.generation_attempts,
+            self.transport_attempts,
+        )
+        if any(value is not None for value in phase3) and any(value is None for value in phase3):
+            raise ValueError("diagnosis manifests require complete lineage metadata")
         return self
 
 
@@ -159,6 +176,29 @@ class EvidenceBundle:
             raise FileExistsError(f"evidence bundle already exists for {case_id}")
         temp_path.mkdir()
         return cls(root, case_id, temp_path, final_path)
+
+    @classmethod
+    def begin_run(cls, root: Path, case_id: str, run_id: str) -> EvidenceBundle:
+        """Begin an immutable run-specific bundle below its stable case directory."""
+
+        if re.fullmatch(r"case_[0-9a-f]{32}", case_id) is None:
+            raise ValueError("invalid case_id")
+        if re.fullmatch(r"run_[0-9a-f]{32}", run_id) is None:
+            raise ValueError("invalid run_id")
+        case_root = root / case_id
+        case_root.mkdir(parents=True, exist_ok=True)
+        temp_path = case_root / f".tmp-{run_id}"
+        final_path = case_root / run_id
+        if temp_path.exists() or final_path.exists():
+            raise FileExistsError(f"evidence bundle already exists for {case_id}/{run_id}")
+        temp_path.mkdir()
+        return cls(root, case_id, temp_path, final_path)
+
+    def abort(self) -> None:
+        """Remove only this unpublished temporary sibling after a fail-closed error."""
+
+        if self.temp_path.exists() and not self.final_path.exists():
+            shutil.rmtree(self.temp_path)
 
     def write_json(self, relative_path: str | Path, value: Any) -> Path:
         _assert_safe_export(value)
@@ -348,8 +388,12 @@ def verify_bundle(path: Path) -> BundleVerification:
         return BundleVerification(ok=False, issues=["manifest.json is invalid"])
 
     issues: list[str] = []
-    if manifest.case_id != path.name:
+    run_directory = re.fullmatch(r"run_[0-9a-f]{32}", path.name) is not None
+    expected_case_directory = path.parent.name if run_directory else path.name
+    if manifest.case_id != expected_case_directory:
         issues.append("manifest case_id does not match directory")
+    if run_directory and manifest.run_id != path.name:
+        issues.append("manifest run_id does not match directory")
     if manifest.status is RunStatus.RUNNING:
         issues.append("published manifest cannot have running status")
 
@@ -410,6 +454,170 @@ def verify_bundle(path: Path) -> BundleVerification:
         issues.append(f"unlisted artifact: {unlisted}")
 
     return BundleVerification(ok=not issues, issues=issues, manifest=manifest)
+
+
+def _strict_diagnosis_outcome(value: Any) -> Any:
+    from debugmate.diagnosis.workflow import DiagnosisRunOutcome
+
+    if not isinstance(value, DiagnosisRunOutcome):
+        raise TypeError("outcome must be a DiagnosisRunOutcome")
+    return DiagnosisRunOutcome.model_validate(value.model_dump(), strict=True)
+
+
+def _validate_diagnosis_lineage(outcome: Any) -> None:
+    """Recheck the validated local graph immediately before evidence publication."""
+
+    from debugmate.diagnosis.workflow import WorkflowStatus
+
+    if outcome.facts.facts_sha256 != outcome.facts_sha256:
+        raise ValueError("outcome facts hash does not match the immutable facts revision")
+    if outcome.facts.revision != outcome.revision:
+        raise ValueError("outcome revision does not match the immutable facts revision")
+    if any(
+        anchor.knowledge_build_id != outcome.knowledge_build_id for anchor in outcome.evidence
+    ):
+        raise ValueError("evidence anchor does not match the workflow knowledge build")
+    if outcome.status is WorkflowStatus.COMPLETED:
+        if outcome.diagnosis is None or outcome.generation_failure is not None:
+            raise ValueError("completed outcome requires only a validated diagnosis")
+        if outcome.diagnosis.case_id != outcome.case_id:
+            raise ValueError("diagnosis case ID does not match workflow outcome")
+        if outcome.diagnosis.category != outcome.routing.category:
+            raise ValueError("diagnosis routing does not match workflow outcome")
+        diagnosis_evidence = [item.model_dump(mode="json") for item in outcome.diagnosis.evidence]
+        outcome_evidence = [item.model_dump(mode="json") for item in outcome.evidence]
+        if diagnosis_evidence != outcome_evidence:
+            raise ValueError("diagnosis evidence does not match workflow evidence anchors")
+        facts = {item.fact_id: item.value for item in outcome.facts.facts}
+        observed = {item.fact_id: item.value for item in outcome.diagnosis.observed_facts}
+        if facts != observed:
+            raise ValueError("diagnosis facts do not match workflow facts")
+    elif outcome.diagnosis is not None:
+        raise ValueError("non-completed outcome cannot publish a diagnosis")
+    if outcome.status is WorkflowStatus.GENERATION_FAILED:
+        if outcome.generation_failure is None:
+            raise ValueError("generation-failed outcome requires a typed failure")
+    elif outcome.generation_failure is not None:
+        raise ValueError("only generation-failed outcomes can publish a generation failure")
+
+
+def _extraction_summary(outcome: Any) -> dict[str, Any]:
+    extraction = outcome.extraction
+    return {
+        "case_id": outcome.case_id,
+        "extraction_id": extraction.extraction_id if extraction is not None else None,
+        "source_hashes": [
+            {"source": source, "sha256": digest}
+            for source, digest in sorted(extraction.source_hashes.items())
+        ]
+        if extraction
+        else [],
+        "candidates": [
+            {
+                "candidate_id": item.candidate_id,
+                "field_id": item.field_id.value,
+                "source_kind": item.source_kind.value,
+                "confidence": item.confidence,
+                "locator": item.locator.model_dump(mode="json"),
+            }
+            for item in (extraction.candidates if extraction is not None else [])
+        ],
+    }
+
+
+def _facts_summary(outcome: Any) -> dict[str, Any]:
+    return {
+        "case_id": outcome.case_id,
+        "revision": outcome.revision,
+        "facts_sha256": outcome.facts_sha256,
+        "facts": [
+            {
+                "fact_id": item.fact_id,
+                "field_id": item.field_id.value,
+                "source_kinds": [source.value for source in item.source_kinds],
+                "confidence": item.confidence,
+                "provenance_candidate_ids": item.provenance_candidate_ids,
+            }
+            for item in outcome.facts.facts
+        ],
+        "applied_corrections": [
+            item.model_dump(mode="json") for item in outcome.facts.applied_corrections
+        ],
+    }
+
+
+def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
+    """Publish one workflow outcome as an atomic, summary-only immutable bundle."""
+
+    from debugmate.diagnosis.workflow import PROMPT_VERSION, SCHEMA_VERSION, WorkflowStatus
+
+    outcome = _strict_diagnosis_outcome(outcome)
+    _validate_diagnosis_lineage(outcome)
+    bundle = EvidenceBundle.begin_run(Path(root), outcome.case_id, outcome.run_id)
+    try:
+        if outcome.extraction is not None:
+            bundle.write_json("extraction.json", _extraction_summary(outcome))
+        bundle.write_json("case-facts.json", _facts_summary(outcome))
+        bundle.write_json("sufficiency.json", outcome.sufficiency.model_dump(mode="json"))
+        bundle.write_json("routing.json", outcome.routing.model_dump(mode="json"))
+        if outcome.evidence:
+            bundle.write_json(
+                "retrieval.json",
+                {
+                    "case_id": outcome.case_id,
+                    "knowledge_build_id": outcome.knowledge_build_id,
+                    "anchors": [item.model_dump(mode="json") for item in outcome.evidence],
+                },
+            )
+        if outcome.status is WorkflowStatus.COMPLETED:
+            bundle.write_json("diagnosis.json", outcome.diagnosis.model_dump(mode="json"))
+        elif outcome.status is WorkflowStatus.GENERATION_FAILED:
+            bundle.write_json(
+                "failure.json", outcome.generation_failure.model_dump(mode="json")
+            )
+
+        now = datetime.now(UTC)
+        status = {
+            WorkflowStatus.COMPLETED: RunStatus.PASSED,
+            WorkflowStatus.GENERATION_FAILED: RunStatus.FAILED,
+            WorkflowStatus.NEEDS_INFORMATION: RunStatus.BLOCKED,
+            WorkflowStatus.INSUFFICIENT_INFORMATION: RunStatus.BLOCKED,
+        }[outcome.status]
+        node_states = {stage: "completed" for stage in outcome.completed_stages}
+        manifest = RunManifest(
+            manifest_version=MANIFEST_VERSION,
+            case_id=outcome.case_id,
+            status=status,
+            created_at_utc=bundle._created_at,
+            completed_at_utc=now,
+            backend=outcome.backend,
+            workflow_version=outcome.workflow_version,
+            prompt_version=PROMPT_VERSION,
+            schema_version=SCHEMA_VERSION,
+            knowledge_version=outcome.knowledge_build_id,
+            input_sha256=outcome.facts_sha256,
+            run_id=outcome.run_id,
+            node_states=node_states,
+            latency_ms=max(0, int((now - bundle._created_at).total_seconds() * 1000)),
+            token_usage={},
+            estimated_cost=0.0,
+            artifacts=[],
+            probe_capabilities=[],
+            error_code="E_GENERATION_FAILED" if status is RunStatus.FAILED else None,
+            safe_message=(
+                "diagnosis generation failed safely" if status is RunStatus.FAILED else None
+            ),
+            facts_revision=outcome.revision,
+            facts_sha256=outcome.facts_sha256,
+            routing_rule_version=outcome.routing.rule_version,
+            knowledge_build_id=outcome.knowledge_build_id,
+            generation_attempts=outcome.generation_attempts,
+            transport_attempts=outcome.transport_attempts,
+        )
+        return bundle.finalize(manifest)
+    except Exception:
+        bundle.abort()
+        raise
 
 
 def _unsafe_manifest_value(value: Any) -> bool:

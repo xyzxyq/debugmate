@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
 
+from debugmate.cli import main
 from debugmate.contracts import EvidenceAnchor
 from debugmate.diagnosis.correction import CorrectionOverlay
 from debugmate.diagnosis.extraction import FieldId
@@ -14,7 +16,6 @@ from debugmate.evidence import (
     verify_bundle,
 )
 from debugmate.hashing import sha256_bytes
-from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
 
 
 def _outcome(case_key: str, tmp_path: Path):
@@ -29,22 +30,50 @@ def _outcome(case_key: str, tmp_path: Path):
     [
         (
             "module_not_found",
-            {"extraction.json", "case-facts.json", "sufficiency.json", "routing.json", "retrieval.json", "diagnosis.json", "manifest.json"},
+            {
+                "extraction.json",
+                "case-facts.json",
+                "sufficiency.json",
+                "routing.json",
+                "retrieval.json",
+                "diagnosis.json",
+                "manifest.json",
+            },
             {"failure.json"},
         ),
         (
             "needs_information",
-            {"extraction.json", "case-facts.json", "sufficiency.json", "routing.json", "manifest.json"},
+            {
+                "extraction.json",
+                "case-facts.json",
+                "sufficiency.json",
+                "routing.json",
+                "manifest.json",
+            },
             {"retrieval.json", "diagnosis.json", "failure.json"},
         ),
         (
-            "insufficient_after_one_round",
-            {"extraction.json", "case-facts.json", "sufficiency.json", "routing.json", "manifest.json"},
+            "insufficient_information",
+            {
+                "extraction.json",
+                "case-facts.json",
+                "sufficiency.json",
+                "routing.json",
+                "manifest.json",
+            },
             {"retrieval.json", "diagnosis.json", "failure.json"},
         ),
         (
             "generation_failed",
-            {"extraction.json", "case-facts.json", "sufficiency.json", "routing.json", "retrieval.json", "failure.json", "manifest.json"},
+            {
+                "extraction.json",
+                "case-facts.json",
+                "sufficiency.json",
+                "routing.json",
+                "retrieval.json",
+                "failure.json",
+                "manifest.json",
+            },
             {"diagnosis.json"},
         ),
     ],
@@ -97,7 +126,7 @@ def test_artifact_hashes_are_recomputed_and_tampering_is_detected(tmp_path: Path
 
     result = verify_bundle(published)
     assert result.ok is False
-    assert any("sha256 mismatch: routing.json" == issue for issue in result.issues)
+    assert any(issue == "sha256 mismatch: routing.json" for issue in result.issues)
 
 
 def test_privacy_failure_removes_temporary_bundle_and_publishes_nothing(tmp_path: Path) -> None:
@@ -172,3 +201,24 @@ def test_duplicate_run_is_immutable(tmp_path: Path) -> None:
 
     with pytest.raises(FileExistsError):
         publish_diagnosis_evidence(outcome, root)
+
+
+def test_cli_publishes_strict_outcome_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    source = tmp_path / "outcome.json"
+    source.write_text(outcome.model_dump_json(), encoding="utf-8")
+    root = tmp_path / "evidence"
+
+    assert main(["diagnosis-publish", str(source), "--output", str(root)]) == 0
+
+    response = json.loads(capsys.readouterr().out)
+    published = Path(response["bundle_path"])
+    assert response == {
+        "backend": "fixture",
+        "bundle_path": str(published.resolve()),
+        "run_id": outcome.run_id,
+        "status": "completed",
+    }
+    assert verify_bundle(published).ok is True

@@ -13,7 +13,7 @@ import httpx
 from debugmate.contracts import diagnosis_schema
 from debugmate.diagnosis.extraction import CaseFacts, ExtractionRecord, FieldId
 from debugmate.diagnosis.workflow import DiagnosisRunOutcome
-from debugmate.evidence import verify_bundle
+from debugmate.evidence import publish_diagnosis_evidence, verify_bundle
 from debugmate.hashing import canonical_json_bytes
 from debugmate.knowledge.build import build_knowledge
 from debugmate.knowledge.coverage import coverage_report
@@ -83,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_sync.add_argument("--confirm-delete", action="store_true")
     diagnosis_view = commands.add_parser("diagnosis-view")
     diagnosis_view.add_argument("path", type=Path)
+    diagnosis_publish = commands.add_parser("diagnosis-publish")
+    diagnosis_publish.add_argument("path", type=Path)
+    diagnosis_publish.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -214,6 +217,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(canonical_json_bytes(diagnosis_schema()) + b"\n")
         print(json.dumps({"schema_path": str(args.output.resolve())}, sort_keys=True))
+        return 0
+    if args.command == "diagnosis-publish":
+        outcome = DiagnosisRunOutcome.model_validate_json(
+            args.path.read_text(encoding="utf-8"), strict=True
+        )
+        published = publish_diagnosis_evidence(outcome, args.output)
+        print(
+            _ascii_json(
+                {
+                    "backend": outcome.backend,
+                    "bundle_path": str(published.resolve()),
+                    "run_id": outcome.run_id,
+                    "status": outcome.status.value,
+                }
+            )
+        )
         return 0
     if args.command == "knowledge-build":
         return _run_knowledge_build(args)

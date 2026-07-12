@@ -40,6 +40,7 @@ from debugmate.privacy.models import ApprovedRedactedInput
 
 SCHEMA_VERSION = "1.1.0"
 PROMPT_VERSION = "diagnosis-v1"
+WORKFLOW_VERSION = "diagnosis-workflow-v1"
 
 
 class RetrievalProvider(Protocol):
@@ -78,6 +79,12 @@ class DiagnosisRunOutcome(StrictFrozenModel):
     evidence: list[EvidenceAnchor] = Field(default_factory=list)
     diagnosis: DiagnosisRecord | None = None
     generation_failure: GenerationFailed | None = None
+    knowledge_build_id: str
+    schema_version: str = SCHEMA_VERSION
+    prompt_version: str = PROMPT_VERSION
+    workflow_version: str = WORKFLOW_VERSION
+    generation_attempts: int = Field(strict=True, ge=0)
+    transport_attempts: int = Field(strict=True, ge=0)
 
 
 def _observed_facts(facts: CaseFacts) -> list[ObservedFact]:
@@ -238,6 +245,8 @@ class DiagnosisWorkflow:
                 extraction=extraction,
                 evidence=evidence,
                 generation_failure=generated,
+                generation_attempts=generated.generation_attempts,
+                transport_attempts=getattr(generated, "transport_attempts", 0),
             )
         stages.extend(["validated", "published"])
         return self._outcome(
@@ -249,6 +258,8 @@ class DiagnosisWorkflow:
             extraction=extraction,
             evidence=evidence,
             diagnosis=generated.diagnosis,
+            generation_attempts=generated.generation_attempts,
+            transport_attempts=getattr(generated, "transport_attempts", 0),
         )
 
     def _outcome(
@@ -264,6 +275,8 @@ class DiagnosisWorkflow:
         evidence: list[EvidenceAnchor] | None = None,
         diagnosis: DiagnosisRecord | None = None,
         generation_failure: GenerationFailed | None = None,
+        generation_attempts: int = 0,
+        transport_attempts: int = 0,
     ) -> DiagnosisRunOutcome:
         idempotency_key, run_id = _identities(
             facts, routing, self._retrieval_provider.knowledge_build_id
@@ -285,7 +298,17 @@ class DiagnosisWorkflow:
             evidence=evidence or [],
             diagnosis=diagnosis,
             generation_failure=generation_failure,
+            knowledge_build_id=self._retrieval_provider.knowledge_build_id,
+            generation_attempts=generation_attempts,
+            transport_attempts=transport_attempts,
         )
+
+    def publish(self, outcome: DiagnosisRunOutcome, output_root: Path) -> Path:
+        """Publish an already produced outcome through the fail-closed evidence boundary."""
+
+        from debugmate.evidence import publish_diagnosis_evidence
+
+        return publish_diagnosis_evidence(outcome, output_root)
 
     def rerun(
         self, previous: DiagnosisRunOutcome, overlay: CorrectionOverlay

@@ -138,6 +138,12 @@ def _ignored_secret_rules(key: object | None, value: str) -> set[str]:
     if key is None:
         return set()
     normalized = str(key).lower()
+    if normalized.endswith("fact_ids") and re.fullmatch(r"fact_[0-9a-f]{32}", value):
+        return {item.rule_id for item in scan_text("metadata", value)}
+    if normalized.endswith("candidate_ids") and re.fullmatch(
+        r"candidate_[0-9a-f]{32}", value
+    ):
+        return {item.rule_id for item in scan_text("metadata", value)}
     if normalized == "case_id" and re.fullmatch(r"case_[0-9a-f]{32}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
     if normalized in {
@@ -147,9 +153,19 @@ def _ignored_secret_rules(key: object | None, value: str) -> set[str]:
         "evidence_ids",
         "candidate_id",
         "candidate_ids",
+        "provenance_candidate_ids",
+        "extraction_id",
+        "question_id",
+        "correction_id",
     } and re.fullmatch(r"(?:fact|evidence|candidate)_[0-9a-f]{32}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
+    if normalized in {"extraction_id", "question_id", "correction_id"} and re.fullmatch(
+        r"(?:extraction|question|correction)_[0-9a-f]{32}", value
+    ):
+        return {item.rule_id for item in scan_text("metadata", value)}
     if normalized in {"knowledge_build_id"} and re.fullmatch(r"[0-9a-f]{64}", value):
+        return {item.rule_id for item in scan_text("metadata", value)}
+    if normalized == "locator" and re.fullmatch(r"fact:fact_[0-9a-f]{32}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
     if normalized.endswith("sha256") and re.fullmatch(r"[0-9a-f]{64}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
