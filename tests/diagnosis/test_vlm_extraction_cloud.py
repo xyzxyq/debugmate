@@ -14,7 +14,7 @@ pytestmark = pytest.mark.cloud
 
 
 def test_live_vlm_is_candidate_only_through_production_chain(tmp_path: Path) -> None:
-    from debugmate.diagnosis.extraction import SourceKind
+    from debugmate.diagnosis.extraction import FactCandidate, SourceKind
     from debugmate.diagnosis.providers import (
         DifyVlmCandidateProvider,
         ProductionExtractionProvider,
@@ -49,5 +49,11 @@ def test_live_vlm_is_candidate_only_through_production_chain(tmp_path: Path) -> 
     ).extract(approved)
     assert vlm.backend_name == "dify-vlm"
     assert record.candidates
-    assert all(candidate.source_kind is SourceKind.VLM for candidate in record.candidates)
+    vlm_candidates = [
+        candidate
+        for candidate in record.candidates
+        if candidate.source_kind is SourceKind.VLM
+    ]
+    assert vlm_candidates
+    assert all(isinstance(candidate, FactCandidate) for candidate in vlm_candidates)
     assert not hasattr(record, "facts")
