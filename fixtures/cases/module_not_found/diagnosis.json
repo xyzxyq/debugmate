@@ -48,7 +48,7 @@
   ],
   "checks": [
     {
-      "command": "python -c \"import sys; print(sys.executable)\"",
+      "command": "python -c \"print(__import__('sys').executable)\"",
       "platform": "windows_powershell",
       "impact": "read-only",
       "expected_result": "The active Python executable path is displayed.",
