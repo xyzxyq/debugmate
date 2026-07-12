@@ -5,6 +5,8 @@ depth: deep
 reviewed_at: 2026-07-12
 files_reviewed: 41
 original_findings:
+  closed: 4
+iteration_2_findings:
   closed: 2
   partially_closed: 2
 findings:
@@ -14,106 +16,126 @@ findings:
   total: 2
 ---
 
-# Phase 3 Software Quality Re-review
+# Phase 3 Final Software Quality Re-review
 
 ## Result
 
-Phase 3 is still not clean after the first fix iteration. The canonical `CaseFact`
-checks and ordinary correction-stage presentation are materially improved, and the
-full offline suite remains green. However, the environment extraction fix does not
-handle the project's established key/value environment shape, and the shared outcome
-validator still permits forged correction lineage and top-level revision/hash state.
+The three iteration-2 implementation commits close the established structured-environment
+defect, bind top-level fact state, reject mismatched candidate provenance, and require a
+verified source bundle for corrected publication. The full offline suite remains green.
+
+The phase is nevertheless **not clean**. Two public-boundary bypasses remain: extraction
+provenance can be removed wholesale, and correction history can be made internally false
+while retaining a verified source bundle. Both were reproduced by rebuilding the canonical
+facts hash, run ID, and idempotency key and then publishing through the normal public API.
 
 ## Findings
 
-### WARNING 1 — Structured environment keys are discarded before extraction
+### WARNING 1 - Removing the extraction record bypasses exact fact provenance validation
 
-**Files:** `src/debugmate/diagnosis/providers.py:111-114`,
-`src/debugmate/diagnosis/providers.py:180-189`
+**Files:** `src/debugmate/diagnosis/extraction.py:321-330`,
+`src/debugmate/diagnosis/workflow.py:171-187`
 
-The source hash correctly binds the complete environment mapping, but
-`_text_candidates()` concatenates only mapping values. This discards the semantic keys
-that identify otherwise bare values. Existing Phase 2 inputs use shapes such as
-`{"PYTHON": "3.13.5"}` and `{"python": "3.13"}`; the analogous
-`{"PYTHON": "3.13.5", "DEVICE": "cpu"}` produces no candidates at all. The new
-tests avoid the defect by putting `Version:` and `Device:` labels inside a single
-`runtime` value, which is not the established input contract.
+`validate_facts_against_extraction()` returns early when `extraction is None` after checking
+only that candidate-ID lists are empty. It does not require an extraction record for a
+workflow-produced outcome, and it does not require provenance-free facts to use
+`source_kinds=[user]`. Because `DiagnosisRunOutcome.extraction` is optional, an imported
+outcome can remove the complete extraction record, clear every candidate-ID list, relabel
+the facts as OCR/VLM sourced, recompute `facts_sha256`, `idempotency_key`, and `run_id`, and
+pass both shared validation and evidence publication.
 
-Consequences:
+This leaves `extraction.json` absent from the published bundle while `case-facts.json`
+claims non-user source kinds that have no source record or locator. It is a direct bypass of
+the exact candidate/extraction binding introduced in `4b96f4c` and makes a forged fact graph
+look like a valid provider-derived diagnosis.
 
-- approved structured environment data remains unavailable to sufficiency and routing;
-- a common environment-only submission is source-hashed but yields no version/device
-  facts, so it can still stop as information-poor;
-- the original environment finding is only partially closed despite the passing
-  environment tests.
+**Confirmed reproduction:** a normal `module_not_found` completed outcome was transformed
+by setting `extraction=None`, setting every fact's `provenance_candidate_ids=[]` and
+`source_kinds=[vlm]`, and recomputing canonical identities. Both
+`validate_diagnosis_outcome()` and `publish_diagnosis_evidence()` accepted it and produced a
+verified bundle.
 
-**Reproduction:** invoking `ProductionExtractionProvider.extract()` with
-`environment={"PYTHON": "3.13.5", "DEVICE": "cpu"}` returned `candidates=[]` while
-the environment source hash was present.
+**Action:** make the public workflow contract require an extraction record for every Phase 3
+outcome, or explicitly model a separate user-only import path. At minimum, the no-extraction
+branch must reject every non-user source and publication must reject a workflow outcome
+whose extraction stage has no extraction record. Add direct validator and publication tests
+for removed extraction, empty provenance with OCR/VLM source kinds, and extraction-summary
+omission.
 
-**Action:** serialize each environment entry into a deterministic key-aware extraction
-view (for example `PYTHON: 3.13.5` and `DEVICE: cpu`) and preserve locators that identify
-the corresponding mapping entry. Map the supported environment keys explicitly to the
-six fields rather than relying only on labels embedded inside values. Add regression
-tests using the Phase 2 `PYTHON`/`python` shape and a separate `DEVICE` key.
+### WARNING 2 - Verified source bundles do not prove the declared correction history
 
-### WARNING 2 — Shared outcome validation still accepts forged revision and correction lineage
+**Files:** `src/debugmate/diagnosis/extraction.py:187-194`,
+`src/debugmate/diagnosis/extraction.py:337-355`,
+`src/debugmate/diagnosis/workflow.py:195-210`,
+`src/debugmate/evidence.py:550-566`
 
-**Files:** `src/debugmate/diagnosis/workflow.py:168-194`,
-`src/debugmate/diagnosis/workflow.py:421-433`,
-`src/debugmate/evidence.py:475-478`, `src/debugmate/evidence.py:589-620`
+The new source-bundle check proves only that a bundle exists with the declared source
+run/revision/facts hash. The final facts validator still permits an incomplete or fabricated
+correction history:
 
-`validate_diagnosis_outcome()` recomputes run identities from the nested `facts`, but it
-does not require top-level `revision`/`facts_sha256` to equal that nested immutable
-revision. Those checks remain private to evidence publication. Consequently,
-`DiagnosisWorkflow.rerun()` accepts a previous outcome whose top-level revision and
-facts hash were forged, because rerun calls only the incomplete shared validator.
+- it rejects only `len(applied_corrections) > revision`, rather than requiring one canonical
+  revision step per correction;
+- it never verifies `CorrectionProvenance.correction_id` from canonical correction fields;
+- it does not bind each correction's `base_facts_sha256` to the preceding revision, except
+  for the last record's equality to the top-level source hash;
+- per-field old/new hash chaining is insufficient to prove global revision history.
 
-The same validator treats any syntactically valid `source_run_id` plus the three fixed
-inherited stages as valid correction lineage. It does not require a corrected revision,
-an applied correction, a distinct source run, or consistency with extraction/fact
-history. Evidence publication therefore accepts and records a revision-0, zero-
-correction outcome as `facts_corrected`, with an arbitrary source run ID.
+Consequently a revision-2 outcome can reuse the single revision-1 correction, replace that
+record's `base_facts_sha256` with the verified revision-1 source hash, use an arbitrary
+pattern-valid correction ID, recompute canonical outcome identities, and publish as if a
+second correction occurred. The source bundle itself remains valid, so the publication
+boundary accepts the false history. Separately, changing only a correction ID and reason
+hash on a revision-1 outcome is also accepted and published.
 
-**Reproductions:** both were confirmed against the fixed tree:
+**Confirmed reproduction:** original and revision-1 bundles were published normally. A
+forged revision-2 outcome containing only one altered correction record, with
+`source_run_id/source_revision/source_facts_sha256` pointing to the real revision-1 bundle,
+passed `validate_diagnosis_outcome()` and `publish_diagnosis_evidence()` (`GAP_VALIDATED`,
+`GAP_PUBLISHED`).
 
-1. `validate_diagnosis_outcome()` accepted copies with `revision=999` and with an
-   all-`f` top-level `facts_sha256`; `rerun()` then accepted the combined forged outcome.
-2. A normal completed revision-0 outcome modified to declare inherited stages,
-   `facts_corrected`, and `source_run_id=run_ffff...` was successfully published; its
-   manifest reported `facts_corrected=completed` despite zero applied corrections.
+**Action:** enforce canonical correction history as a complete sequence. Require correction
+count/revision consistency for the Phase 3 origin contract, verify canonical correction IDs,
+and bind every correction base hash to the exact preceding revision. For imported corrected
+outcomes, validate the latest correction against the source bundle's fact state and preserve
+enough immutable source data to prove old fact ID/value and resulting new state; a manifest
+containing only the source facts digest cannot by itself prove the transition. Add validator,
+rerun, and publication tamper tests for revision gaps, arbitrary correction IDs/reason
+hashes, duplicated corrections, wrong base hashes, and multi-field/multi-revision ordering.
 
-**Action:** make the shared validator the single complete semantic boundary: compare
-top-level revision/hash to `outcome.facts`, validate extraction/fact provenance where
-present, and require inherited correction lineage to have `revision >= 1`, at least one
-canonical correction, a distinct source run ID, and an allowed correction-stage path.
-If arbitrary imported lineage must be supported, require a separately verified source
-manifest rather than accepting an unbound run-shaped string. Add direct validator,
-rerun, and publication tamper tests for all of these cases.
+## Closure of Earlier Findings
 
-## Original Finding Closure
-
-1. **Environment binding:** partially closed — full mapping is hashed, but established
-   structured key/value inputs are not extracted.
-2. **Publication identity and stage history:** partially closed — run/idempotency and
-   version checks exist, but the shared validator and correction lineage remain
-   bypassable as described above.
-3. **Canonical `CaseFact`:** closed — normalized values, stable IDs, privacy scanning,
-   and deterministic provenance ordering are enforced at reconstruction.
-4. **Inherited rerun stages:** presentation is improved, but semantic lineage validation
-   remains part of Warning 2.
+1. **Original environment participation:** closed. Environment mappings are source-hashed,
+   affect identities, and now participate in extraction.
+2. **Original outcome/publication identity:** closed for top-level revision/hash, run,
+   idempotency, versions, and stage path.
+3. **Canonical `CaseFact`:** closed at the model boundary.
+4. **Inherited-stage presentation:** closed; inherited extraction stages are not reported as
+   newly executed.
+5. **Iteration-2 structured environment maps:** closed. `PYTHON`, `python`, and `DEVICE`
+   bare-value mappings produce deterministic version/device candidates and exact locators.
+6. **Iteration-2 top-level vs nested fact state:** closed.
+7. **Iteration-2 exact fact/extraction relationship:** partially closed; exact membership is
+   enforced only while the optional extraction record remains present (Warning 1).
+8. **Iteration-2 source-bundle relationship:** partially closed; source bundle existence and
+   manifest identity are verified, but the claimed transition/history is not (Warning 2).
 
 ## Verification Evidence
 
-- `python -m pytest -q -m "not cloud and not ocr"`: **442 passed, 22 deselected**.
+- Structured environment regression covers both `PYTHON` and `python` plus separate
+  `DEVICE`, including deterministic locator offsets.
+- Existing focused adversarial/workflow tests remain green.
+- `python -m pytest -q -m "not cloud and not ocr"`: **453 passed, 22 deselected**.
 - `python -m ruff check src tests`: **passed**.
 - `python -m pip check`: **passed**.
-- `git diff --check`: **passed** apart from the pre-existing line-ending notice for
-  `.planning/config.json`.
+- `git diff --check`: no implementation error; only the pre-existing line-ending warning
+  for `.planning/config.json`.
+- Manual public-boundary adversarial checks reproduced both warnings through the real
+  validator and publisher, not private helpers.
 
 ## Required Tests Before Clean Status
 
-1. Key-aware environment extraction for existing `PYTHON`/`python` and `DEVICE` maps.
-2. Direct shared-validator and rerun rejection of top-level revision/facts-hash tampering.
-3. Publication rejection of revision-0/no-correction inherited lineage, self-source
-   lineage, and arbitrary unverified source-run lineage.
+1. Validator and publication rejection when a workflow outcome removes its extraction or
+   claims OCR/VLM facts without exact candidate provenance.
+2. Canonical correction-ID and complete revision/history validation.
+3. Publication rejection for revision gaps, duplicated/altered correction records, wrong
+   per-step base hashes, and a transition not provable from the verified source bundle.
