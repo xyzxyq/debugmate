@@ -171,6 +171,8 @@ _STAGES_BY_STATUS: dict[WorkflowStatus, list[str]] = {
 def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
     """Validate public workflow identity, versions, and the exact legal stage path."""
 
+    outcome = DiagnosisRunOutcome.model_validate(outcome.model_dump(), strict=True)
+
     expected_versions = (SCHEMA_VERSION, PROMPT_VERSION, WORKFLOW_VERSION)
     actual_versions = (
         outcome.schema_version,
@@ -185,6 +187,8 @@ def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
         raise ValueError("outcome facts hash does not match immutable facts")
     if outcome.extraction is None:
         raise ValueError("workflow outcome requires its extraction record")
+    if outcome.inherited_stages and not outcome.facts.applied_corrections:
+        raise ValueError("outcome correction lineage requires correction history")
     validate_facts_against_extraction(outcome.facts, outcome.extraction)
     expected_idempotency, expected_run = derive_run_identities(
         outcome.facts, outcome.routing, outcome.knowledge_build_id

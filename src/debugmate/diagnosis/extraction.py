@@ -185,6 +185,7 @@ def extraction_id_for(
 
 class CorrectionProvenance(StrictFrozenModel):
     correction_id: str = Field(pattern=r"^correction_[0-9a-f]{32}$")
+    base_revision: int = Field(strict=True, ge=0)
     field_id: FieldId
     fact_id: str = Field(pattern=r"^fact_[0-9a-f]{32}$")
     source_kind: Literal[SourceKind.USER] = SourceKind.USER
@@ -192,6 +193,31 @@ class CorrectionProvenance(StrictFrozenModel):
     old_value_sha256: Sha256
     new_value_sha256: Sha256
     reason_sha256: Sha256
+    reason: str = Field(min_length=1, max_length=1_000, repr=False)
+
+    @model_validator(mode="after")
+    def require_canonical_reason(self) -> Self:
+        try:
+            assert_export_safe(self.reason)
+        except UnsafeExport as error:
+            raise ValueError("correction reason is unsafe") from error
+        if self.reason_sha256 != sha256_bytes(self.reason.encode("utf-8")):
+            raise ValueError("correction reason hash is not canonical")
+        return self
+
+
+def correction_id_for(case_id: str, correction: CorrectionProvenance) -> str:
+    payload = {
+        "case_id": case_id,
+        "base_revision": correction.base_revision,
+        "base_facts_sha256": correction.base_facts_sha256,
+        "field_id": correction.field_id.value,
+        "fact_id": correction.fact_id,
+        "old_value_sha256": correction.old_value_sha256,
+        "new_value_sha256": correction.new_value_sha256,
+        "reason_sha256": correction.reason_sha256,
+    }
+    return f"correction_{sha256_bytes(canonical_json_bytes(payload))[:32]}"
 
 
 class CaseFact(StrictFrozenModel):
@@ -245,6 +271,20 @@ class CaseFacts(StrictFrozenModel):
         ids = [fact.fact_id for fact in self.facts]
         if ids != sorted(ids) or len(ids) != len(set(ids)):
             raise ValueError("facts must be unique and sorted by stable ID")
+        if len(self.applied_corrections) > self.revision:
+            raise ValueError("correction history exceeds facts revision")
+        correction_start = self.revision - len(self.applied_corrections)
+        base_hashes: set[str] = set()
+        for base_revision, correction in enumerate(
+            self.applied_corrections, start=correction_start
+        ):
+            if correction.base_revision != base_revision:
+                raise ValueError("correction history revisions must be contiguous")
+            if correction.correction_id != correction_id_for(self.case_id, correction):
+                raise ValueError("correction_id does not match canonical correction data")
+            if correction.base_facts_sha256 in base_hashes:
+                raise ValueError("correction history cannot reuse a base facts hash")
+            base_hashes.add(correction.base_facts_sha256)
         try:
             assert_export_safe([fact.value for fact in self.facts])
         except UnsafeExport as error:

@@ -234,6 +234,24 @@ def _corrected_outcome(tmp_path: Path):
     return original, workflow.rerun(original, overlay)
 
 
+def _twice_corrected_outcome(tmp_path: Path):
+    original, first = _corrected_outcome(tmp_path)
+    row = next(item for item in _rows() if item["case_key"] == "correction_rerun")
+    workflow, *_ = _workflow(row, tmp_path)
+    target = next(fact for fact in first.facts.facts if fact.field_id is FieldId.EXCEPTION_TYPE)
+    overlay = CorrectionOverlay(
+        case_id=first.case_id,
+        base_revision=first.revision,
+        base_facts_sha256=first.facts_sha256,
+        field_id=target.field_id,
+        fact_id=target.fact_id,
+        old_value_sha256=sha256_bytes(target.value.encode()),
+        replacement="KeyError",
+        reason="second review confirmed the exception",
+    )
+    return original, first, workflow.rerun(first, overlay)
+
+
 def test_corrected_publication_requires_verified_source_bundle(tmp_path: Path) -> None:
     _, corrected = _corrected_outcome(tmp_path)
 
@@ -283,6 +301,88 @@ def test_revision_zero_cannot_claim_inherited_correction_lineage(tmp_path: Path)
 
     with pytest.raises(ValueError, match="correction|revision|lineage"):
         validate_diagnosis_outcome(forged)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"correction_id": "correction_" + "f" * 32},
+        {"reason_sha256": "f" * 64},
+        {"reason": "altered after the correction was recorded"},
+        {"base_facts_sha256": "f" * 64},
+    ],
+)
+def test_correction_history_rejects_noncanonical_records(
+    mutation: dict[str, str], tmp_path: Path
+) -> None:
+    _, corrected = _corrected_outcome(tmp_path)
+    altered = corrected.facts.applied_corrections[0].model_copy(update=mutation)
+    forged_facts = corrected.facts.model_copy(
+        update={
+            "applied_corrections": [altered],
+            "facts_sha256": facts_hash(
+                corrected.case_id, corrected.revision, corrected.facts.facts, [altered]
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="correction|lineage|canonical"):
+        validate_diagnosis_outcome(_rehash_outcome(corrected, forged_facts))
+
+
+def test_correction_history_count_must_equal_revision(tmp_path: Path) -> None:
+    _, corrected = _corrected_outcome(tmp_path)
+    forged_facts = corrected.facts.model_copy(
+        update={
+            "applied_corrections": [],
+            "facts_sha256": facts_hash(
+                corrected.case_id, corrected.revision, corrected.facts.facts, []
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="correction|revision|lineage"):
+        validate_diagnosis_outcome(_rehash_outcome(corrected, forged_facts))
+
+
+def test_revision_two_requires_complete_correction_prefix_and_source_transition(
+    tmp_path: Path,
+) -> None:
+    original, first, second = _twice_corrected_outcome(tmp_path)
+    root = tmp_path / "evidence"
+    publish_diagnosis_evidence(original, root)
+    publish_diagnosis_evidence(first, root)
+    published_second = publish_diagnosis_evidence(second, root)
+    assert verify_bundle(published_second).ok is True
+    only_latest = [second.facts.applied_corrections[-1]]
+    forged_facts = second.facts.model_copy(
+        update={
+            "applied_corrections": only_latest,
+            "facts_sha256": facts_hash(
+                second.case_id, second.revision, second.facts.facts, only_latest
+            ),
+        }
+    )
+    forged = _rehash_outcome(second, forged_facts)
+
+    with pytest.raises(ValueError, match="correction|revision|source"):
+        publish_diagnosis_evidence(forged, root)
+
+
+def test_revision_two_rejects_duplicated_or_gapped_correction_records(tmp_path: Path) -> None:
+    _, _, second = _twice_corrected_outcome(tmp_path)
+    first = second.facts.applied_corrections[0]
+    for history in ([first, first], [second.facts.applied_corrections[-1]]):
+        forged_facts = second.facts.model_copy(
+            update={
+                "applied_corrections": history,
+                "facts_sha256": facts_hash(
+                    second.case_id, second.revision, second.facts.facts, history
+                ),
+            }
+        )
+        with pytest.raises(ValueError, match="correction|revision|lineage|provenance"):
+            validate_diagnosis_outcome(_rehash_outcome(second, forged_facts))
 
 
 def test_duplicate_run_is_immutable(tmp_path: Path) -> None:

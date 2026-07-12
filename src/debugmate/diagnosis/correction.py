@@ -14,11 +14,12 @@ from debugmate.diagnosis.extraction import (
     FieldId,
     SourceKind,
     StrictFrozenModel,
+    correction_id_for,
     fact_id_for,
     facts_hash,
     normalize_value,
 )
-from debugmate.hashing import canonical_json_bytes, sha256_bytes
+from debugmate.hashing import sha256_bytes
 from debugmate.privacy.models import Sha256
 from debugmate.privacy.output_scan import UnsafeExport, assert_export_safe
 
@@ -40,20 +41,6 @@ class CorrectionOverlay(StrictFrozenModel):
     old_value_sha256: Sha256
     replacement: str = Field(min_length=1, max_length=2_000, repr=False)
     reason: str = Field(min_length=1, max_length=1_000, repr=False)
-
-
-def _correction_id(overlay: CorrectionOverlay, *, new_value_sha256: str, reason_sha256: str) -> str:
-    payload = {
-        "case_id": overlay.case_id,
-        "base_revision": overlay.base_revision,
-        "base_facts_sha256": overlay.base_facts_sha256,
-        "field_id": overlay.field_id.value,
-        "fact_id": overlay.fact_id,
-        "old_value_sha256": overlay.old_value_sha256,
-        "new_value_sha256": new_value_sha256,
-        "reason_sha256": reason_sha256,
-    }
-    return f"correction_{sha256_bytes(canonical_json_bytes(payload))[:32]}"
 
 
 def apply_correction(base: CaseFacts, overlay: CorrectionOverlay) -> CaseFacts:
@@ -89,16 +76,22 @@ def apply_correction(base: CaseFacts, overlay: CorrectionOverlay) -> CaseFacts:
 
     new_value_hash = sha256_bytes(replacement.encode("utf-8"))
     reason_hash = sha256_bytes(overlay.reason.encode("utf-8"))
-    provenance = CorrectionProvenance(
-        correction_id=_correction_id(
-            overlay, new_value_sha256=new_value_hash, reason_sha256=reason_hash
-        ),
+    provisional = CorrectionProvenance.model_construct(
+        correction_id="correction_" + "0" * 32,
+        base_revision=overlay.base_revision,
         field_id=overlay.field_id,
         fact_id=overlay.fact_id,
         base_facts_sha256=base.facts_sha256,
         old_value_sha256=actual_old_hash,
         new_value_sha256=new_value_hash,
         reason_sha256=reason_hash,
+        reason=overlay.reason,
+    )
+    provenance = CorrectionProvenance(
+        **{
+            **provisional.model_dump(),
+            "correction_id": correction_id_for(overlay.case_id, provisional),
+        }
     )
     replacement_fact = CaseFact(
         fact_id=fact_id_for(overlay.field_id, replacement),

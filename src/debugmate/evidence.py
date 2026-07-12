@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import re
 import shutil
@@ -535,6 +536,7 @@ def _facts_summary(outcome: Any) -> dict[str, Any]:
             {
                 "fact_id": item.fact_id,
                 "field_id": item.field_id.value,
+                "value_sha256": sha256_bytes(item.value.encode("utf-8")),
                 "source_kinds": [source.value for source in item.source_kinds],
                 "confidence": item.confidence,
                 "provenance_candidate_ids": item.provenance_candidate_ids,
@@ -542,7 +544,8 @@ def _facts_summary(outcome: Any) -> dict[str, Any]:
             for item in outcome.facts.facts
         ],
         "applied_corrections": [
-            item.model_dump(mode="json") for item in outcome.facts.applied_corrections
+            {key: value for key, value in item.model_dump(mode="json").items() if key != "reason"}
+            for item in outcome.facts.applied_corrections
         ],
     }
 
@@ -564,6 +567,66 @@ def _validate_correction_source_bundle(outcome: Any, root: Path) -> None:
         or manifest.facts_sha256 != outcome.source_facts_sha256
     ):
         raise ValueError("corrected outcome source bundle does not match lineage")
+
+    try:
+        source_facts = json.loads((source_path / "case-facts.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("corrected outcome source facts are unreadable") from error
+    corrections = outcome.facts.applied_corrections
+    latest = corrections[-1]
+    correction_summaries = [
+        {key: value for key, value in item.model_dump(mode="json").items() if key != "reason"}
+        for item in corrections
+    ]
+    if source_facts.get("applied_corrections") != correction_summaries[:-1]:
+        raise ValueError("corrected outcome history does not extend the verified source")
+    if latest.base_revision != outcome.source_revision or not hmac.compare_digest(
+        latest.base_facts_sha256, outcome.source_facts_sha256
+    ):
+        raise ValueError("latest correction does not bind the verified source state")
+
+    source_items = source_facts.get("facts")
+    if not isinstance(source_items, list):
+        raise ValueError("corrected outcome source fact inventory is invalid")
+    source_target = next(
+        (
+            item
+            for item in source_items
+            if isinstance(item, dict)
+            and item.get("fact_id") == latest.fact_id
+            and item.get("field_id") == latest.field_id.value
+        ),
+        None,
+    )
+    if source_target is None or not hmac.compare_digest(
+        str(source_target.get("value_sha256", "")), latest.old_value_sha256
+    ):
+        raise ValueError("latest correction does not match its verified source fact")
+
+    final_summary = _facts_summary(outcome)
+    final_items = final_summary["facts"]
+    final_target = next(
+        (
+            item
+            for item in final_items
+            if item["field_id"] == latest.field_id.value
+            and hmac.compare_digest(item["value_sha256"], latest.new_value_sha256)
+        ),
+        None,
+    )
+    if final_target is None:
+        raise ValueError("latest correction does not match the resulting fact state")
+    expected_sources = sorted({*source_target["source_kinds"], "user"})
+    if (
+        final_target["provenance_candidate_ids"] != source_target["provenance_candidate_ids"]
+        or final_target["source_kinds"] != expected_sources
+        or final_target["confidence"] != 1.0
+    ):
+        raise ValueError("latest correction changed data outside the allowed transition")
+    unaffected_source = [item for item in source_items if item is not source_target]
+    unaffected_final = [item for item in final_items if item is not final_target]
+    if unaffected_source != unaffected_final:
+        raise ValueError("latest correction changed unrelated verified source facts")
 
 
 def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
