@@ -203,6 +203,30 @@ def test_duplicate_run_is_immutable(tmp_path: Path) -> None:
         publish_diagnosis_evidence(outcome, root)
 
 
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"run_id": "run_" + "f" * 32}, "run_id"),
+        ({"idempotency_key": "idem_" + "f" * 32}, "idempotency"),
+        ({"schema_version": "9.9.9"}, "version"),
+        ({"prompt_version": "forged"}, "version"),
+        ({"workflow_version": "forged"}, "version"),
+        ({"completed_stages": ["input_approved", "published"]}, "stages"),
+    ],
+)
+def test_publication_rejects_tampered_identity_versions_and_stages(
+    changes: dict[str, object], message: str, tmp_path: Path
+) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    tampered = outcome.model_copy(update=changes)
+    root = tmp_path / "evidence"
+
+    with pytest.raises(ValueError, match=message):
+        publish_diagnosis_evidence(tampered, root)
+
+    assert not root.exists() or not any(root.rglob("manifest.json"))
+
+
 def test_cli_publishes_strict_outcome_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -467,7 +467,9 @@ def _strict_diagnosis_outcome(value: Any) -> Any:
 def _validate_diagnosis_lineage(outcome: Any) -> None:
     """Recheck the validated local graph immediately before evidence publication."""
 
-    from debugmate.diagnosis.workflow import WorkflowStatus
+    from debugmate.diagnosis.workflow import WorkflowStatus, validate_diagnosis_outcome
+
+    validate_diagnosis_outcome(outcome)
 
     if outcome.facts.facts_sha256 != outcome.facts_sha256:
         raise ValueError("outcome facts hash does not match the immutable facts revision")
@@ -549,7 +551,7 @@ def _facts_summary(outcome: Any) -> dict[str, Any]:
 def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
     """Publish one workflow outcome as an atomic, summary-only immutable bundle."""
 
-    from debugmate.diagnosis.workflow import PROMPT_VERSION, SCHEMA_VERSION, WorkflowStatus
+    from debugmate.diagnosis.workflow import WorkflowStatus
 
     outcome = _strict_diagnosis_outcome(outcome)
     _validate_diagnosis_lineage(outcome)
@@ -592,8 +594,8 @@ def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
             completed_at_utc=now,
             backend=outcome.backend,
             workflow_version=outcome.workflow_version,
-            prompt_version=PROMPT_VERSION,
-            schema_version=SCHEMA_VERSION,
+            prompt_version=outcome.prompt_version,
+            schema_version=outcome.schema_version,
             knowledge_version=outcome.knowledge_build_id,
             input_sha256=outcome.facts_sha256,
             run_id=outcome.run_id,

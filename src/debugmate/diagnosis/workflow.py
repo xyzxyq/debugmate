@@ -104,7 +104,9 @@ def _observed_facts(facts: CaseFacts) -> list[ObservedFact]:
     return observed
 
 
-def _identities(facts: CaseFacts, routing: RoutingDecision, build_id: str) -> tuple[str, str]:
+def derive_run_identities(
+    facts: CaseFacts, routing: RoutingDecision, build_id: str
+) -> tuple[str, str]:
     identity = {
         "facts_sha256": facts.facts_sha256,
         "rule_version": routing.rule_version,
@@ -118,6 +120,90 @@ def _identities(facts: CaseFacts, routing: RoutingDecision, build_id: str) -> tu
         )
     )
     return f"idem_{digest[:32]}", f"run_{run_digest[:32]}"
+
+
+_STAGES_BY_STATUS: dict[WorkflowStatus, list[str]] = {
+    WorkflowStatus.NEEDS_INFORMATION: [
+        "input_approved",
+        "extracted",
+        "facts_confirmed",
+        "provisional_routed",
+        "sufficiency_checked",
+    ],
+    WorkflowStatus.INSUFFICIENT_INFORMATION: [
+        "input_approved",
+        "extracted",
+        "facts_confirmed",
+        "provisional_routed",
+        "sufficiency_checked",
+        "final_routed",
+    ],
+    WorkflowStatus.GENERATION_FAILED: [
+        "input_approved",
+        "extracted",
+        "facts_confirmed",
+        "provisional_routed",
+        "sufficiency_checked",
+        "final_routed",
+        "retrieved",
+        "generated",
+    ],
+    WorkflowStatus.COMPLETED: [
+        "input_approved",
+        "extracted",
+        "facts_confirmed",
+        "provisional_routed",
+        "sufficiency_checked",
+        "final_routed",
+        "retrieved",
+        "generated",
+        "validated",
+        "published",
+    ],
+}
+
+
+def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
+    """Validate public workflow identity, versions, and the exact legal stage path."""
+
+    expected_versions = (SCHEMA_VERSION, PROMPT_VERSION, WORKFLOW_VERSION)
+    actual_versions = (
+        outcome.schema_version,
+        outcome.prompt_version,
+        outcome.workflow_version,
+    )
+    if actual_versions != expected_versions:
+        raise ValueError("outcome version metadata does not match publisher contract")
+    expected_idempotency, expected_run = derive_run_identities(
+        outcome.facts, outcome.routing, outcome.knowledge_build_id
+    )
+    if not hmac.compare_digest(outcome.idempotency_key, expected_idempotency):
+        raise ValueError("outcome idempotency_key does not match immutable workflow state")
+    if not hmac.compare_digest(outcome.run_id, expected_run):
+        raise ValueError("outcome run_id does not match immutable workflow state")
+    if outcome.completed_stages != _STAGES_BY_STATUS[outcome.status]:
+        raise ValueError("outcome completed_stages do not match its status")
+    if outcome.case_id != outcome.facts.case_id:
+        raise ValueError("outcome case ID does not match immutable facts")
+    if outcome.extraction is not None and outcome.extraction.case_id != outcome.case_id:
+        raise ValueError("outcome extraction does not match its case")
+    if outcome.status is WorkflowStatus.NEEDS_INFORMATION:
+        if not isinstance(outcome.sufficiency, NeedsInformation) or not outcome.questions:
+            raise ValueError("needs-information outcome requires issued questions")
+        if outcome.evidence or outcome.diagnosis or outcome.generation_failure:
+            raise ValueError("needs-information outcome contains downstream fields")
+    elif outcome.status is WorkflowStatus.INSUFFICIENT_INFORMATION:
+        if not isinstance(outcome.sufficiency, InsufficientInformation):
+            raise ValueError("insufficient-information outcome requires final insufficiency")
+        if outcome.questions or outcome.evidence or outcome.diagnosis or outcome.generation_failure:
+            raise ValueError("insufficient-information outcome contains downstream fields")
+    elif outcome.status is WorkflowStatus.GENERATION_FAILED:
+        if outcome.generation_failure is None or outcome.diagnosis is not None:
+            raise ValueError("generation-failed outcome requires only a typed failure")
+        if outcome.questions:
+            raise ValueError("generation-failed outcome cannot retain questions")
+    elif outcome.diagnosis is None or outcome.generation_failure is not None or outcome.questions:
+        raise ValueError("completed outcome requires only a validated diagnosis")
 
 
 class DiagnosisWorkflow:
@@ -278,7 +364,7 @@ class DiagnosisWorkflow:
         generation_attempts: int = 0,
         transport_attempts: int = 0,
     ) -> DiagnosisRunOutcome:
-        idempotency_key, run_id = _identities(
+        idempotency_key, run_id = derive_run_identities(
             facts, routing, self._retrieval_provider.knowledge_build_id
         )
         return DiagnosisRunOutcome(
