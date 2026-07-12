@@ -54,11 +54,12 @@ No accepted risks.
 
 ## Verification Evidence
 
-- Final focused security suite: `180 passed` across workflow evidence, correction, end-to-end workflow, command safety, candidate repair, evidence binding, approval/privacy and generic evidence tests.
-- Final full offline suite: `462 passed, 22 deselected` using `pytest -m "not cloud and not ocr"`.
+- Final post-gap focused security suite (2026-07-13): `258 passed` across the strict contract, extraction providers/correction, sufficiency/router, workflow evidence and end-to-end flow, command safety, candidate repair, evidence binding, approval/output privacy and generic evidence tests.
+- Final post-gap full offline suite (2026-07-13): `468 passed, 22 deselected` using `pytest -m "not cloud and not ocr"`.
 - Static quality gate: Ruff and `pip check` passed; `git diff --check` reported no implementation error (only the pre-existing `.planning/config.json` line-ending warning).
 - Environment-only `Version`/`Device` extraction, environment source hashing, run/idempotency identity changes, imported outcome version/identity/stage rejection, privacy scan cleanup, and validation before `EvidenceBundle.begin_run` all passed review and tests.
 - Provenance stripping and relabelling are fail-closed: workflow outcomes cannot omit extraction; candidate-backed facts cannot erase or replace their exact candidate IDs or source kinds, including relabelling as user-only.
+- The USER-only follow-up correction path remains fail-closed after `9f1d1ad`: an empty candidate set is accepted only with canonical `[user]` source state, OCR/VLM relabelling and nonexistent candidate IDs are rejected, and corrected publication requires the exact verified source bundle before any new evidence run is created. The normal revision-1 follow-up to revision-2 correction path also survives strict JSON round trips and verifies both immutable bundles.
 - Correction history is canonical and transition-bound: gaps, duplicates, arbitrary correction IDs, altered reason/reason hash, wrong base hashes and incomplete revision histories are rejected. Verified revision-1 and revision-2 source bundles prove the complete prefix plus the exact old-value-to-new-value transition before a corrected run can publish.
 - Source capability search found no product `subprocess`, `os.system`, `Popen`, `shell=True`, `eval`, `exec`, `Start-Process`, or `Invoke-Expression` execution path; the only `run` match is the domain retrieval function and CLI call.
 - Six executed summaries contain no unresolved threat flag; `03-01-SUMMARY.md` explicitly reports no unresolved issue and the remaining summaries add no open security disposition.
@@ -72,6 +73,7 @@ No accepted risks.
 | 2026-07-12 | 9 | 9 | 0 | gsd-security-auditor |
 | 2026-07-12 (post-review-fix) | 9 | 7 | 2 | gsd-security-auditor |
 | 2026-07-12 (final assurance) | 9 | 9 | 0 | gsd-security-auditor |
+| 2026-07-13 (post-gap regression assurance) | 9 | 9 | 0 | gsd-security-auditor |
 
 ## Security Audit 2026-07-12 (Post-Review-Fix)
 
