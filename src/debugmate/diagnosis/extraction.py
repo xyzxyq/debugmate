@@ -326,6 +326,8 @@ def validate_facts_against_extraction(
     if extraction is None:
         if any(fact.provenance_candidate_ids for fact in facts.facts):
             raise ValueError("fact provenance requires an extraction record")
+        if any(fact.source_kinds != [SourceKind.USER] for fact in facts.facts):
+            raise ValueError("facts without extraction must be explicitly user sourced")
         return
     if extraction.case_id != facts.case_id:
         raise ValueError("fact provenance extraction does not match its case")
@@ -378,8 +380,7 @@ def validate_facts_against_extraction(
             expected_sources = sorted(
                 {*(item.source_kind for item in initial), SourceKind.USER}, key=str
             )
-        elif fact.provenance_candidate_ids:
-            matching = grouped.get((fact.field_id, fact.value), [])
+        elif matching := grouped.get((fact.field_id, fact.value), []):
             expected_candidates = sorted(item.candidate_id for item in matching)
             expected_sources = sorted({item.source_kind for item in matching}, key=str)
         else:

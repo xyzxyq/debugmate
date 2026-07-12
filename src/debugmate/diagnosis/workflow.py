@@ -183,6 +183,8 @@ def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
         raise ValueError("outcome revision does not match immutable facts")
     if not hmac.compare_digest(outcome.facts_sha256, outcome.facts.facts_sha256):
         raise ValueError("outcome facts hash does not match immutable facts")
+    if outcome.extraction is None:
+        raise ValueError("workflow outcome requires its extraction record")
     validate_facts_against_extraction(outcome.facts, outcome.extraction)
     expected_idempotency, expected_run = derive_run_identities(
         outcome.facts, outcome.routing, outcome.knowledge_build_id

@@ -390,6 +390,59 @@ def test_fact_source_kinds_must_exactly_match_extraction_candidates(tmp_path: Pa
         validate_diagnosis_outcome(_rehash_outcome(outcome, forged_facts))
 
 
+def test_workflow_outcome_cannot_remove_its_extraction_record(tmp_path: Path) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    stripped_items = [
+        fact.model_copy(
+            update={
+                "provenance_candidate_ids": [],
+                "source_kinds": [SourceKind.VLM],
+            }
+        )
+        for fact in outcome.facts.facts
+    ]
+    stripped = outcome.facts.model_copy(
+        update={
+            "facts": stripped_items,
+            "facts_sha256": facts_hash(
+                outcome.case_id,
+                outcome.revision,
+                stripped_items,
+                outcome.facts.applied_corrections,
+            ),
+        }
+    )
+    forged = _rehash_outcome(outcome.model_copy(update={"extraction": None}), stripped)
+
+    with pytest.raises(ValueError, match="extraction|provenance"):
+        validate_diagnosis_outcome(forged)
+    with pytest.raises(ValueError, match="extraction|provenance"):
+        publish_diagnosis_evidence(forged, tmp_path / "evidence")
+
+
+def test_matching_extraction_candidate_cannot_be_relabelled_user_only(tmp_path: Path) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    target = next(fact for fact in outcome.facts.facts if fact.provenance_candidate_ids)
+    stripped_fact = target.model_copy(
+        update={"provenance_candidate_ids": [], "source_kinds": [SourceKind.USER]}
+    )
+    items = [
+        stripped_fact if fact.fact_id == target.fact_id else fact for fact in outcome.facts.facts
+    ]
+    items.sort(key=lambda fact: fact.fact_id)
+    stripped = outcome.facts.model_copy(
+        update={
+            "facts": items,
+            "facts_sha256": facts_hash(
+                outcome.case_id, outcome.revision, items, outcome.facts.applied_corrections
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="provenance"):
+        validate_diagnosis_outcome(_rehash_outcome(outcome, stripped))
+
+
 def test_cli_publishes_strict_outcome_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
