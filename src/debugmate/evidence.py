@@ -113,6 +113,7 @@ class RunManifest(EvidenceRecord):
     knowledge_build_id: Sha256 | None = None
     generation_attempts: Annotated[int, Field(ge=0)] | None = None
     transport_attempts: Annotated[int, Field(ge=0)] | None = None
+    source_run_id: str | None = Field(default=None, pattern=r"^run_[0-9a-f]{32}$")
 
     @model_validator(mode="after")
     def validate_manifest_state(self) -> RunManifest:
@@ -585,7 +586,8 @@ def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
             WorkflowStatus.NEEDS_INFORMATION: RunStatus.BLOCKED,
             WorkflowStatus.INSUFFICIENT_INFORMATION: RunStatus.BLOCKED,
         }[outcome.status]
-        node_states = {stage: "completed" for stage in outcome.completed_stages}
+        node_states = {stage: "inherited" for stage in outcome.inherited_stages}
+        node_states.update({stage: "completed" for stage in outcome.completed_stages})
         manifest = RunManifest(
             manifest_version=MANIFEST_VERSION,
             case_id=outcome.case_id,
@@ -615,6 +617,7 @@ def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
             knowledge_build_id=outcome.knowledge_build_id,
             generation_attempts=outcome.generation_attempts,
             transport_attempts=outcome.transport_attempts,
+            source_run_id=outcome.source_run_id,
         )
         return bundle.finalize(manifest)
     except Exception:

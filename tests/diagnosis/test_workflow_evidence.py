@@ -192,6 +192,13 @@ def test_corrected_runs_preserve_both_bundles(tmp_path: Path) -> None:
     assert original.revision != corrected.revision
     assert original.run_id != corrected.run_id
     assert original.facts_sha256 != corrected.facts_sha256
+    corrected_manifest = verify_bundle(second).manifest
+    assert corrected_manifest is not None
+    assert corrected_manifest.source_run_id == original.run_id
+    assert corrected_manifest.node_states["input_approved"] == "inherited"
+    assert corrected_manifest.node_states["extracted"] == "inherited"
+    assert corrected_manifest.node_states["facts_confirmed"] == "inherited"
+    assert corrected_manifest.node_states["facts_corrected"] == "completed"
 
 
 def test_duplicate_run_is_immutable(tmp_path: Path) -> None:

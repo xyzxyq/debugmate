@@ -71,6 +71,8 @@ class DiagnosisRunOutcome(StrictFrozenModel):
     run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     idempotency_key: str = Field(pattern=r"^idem_[0-9a-f]{32}$")
     completed_stages: list[str]
+    inherited_stages: list[str] = Field(default_factory=list)
+    source_run_id: str | None = Field(default=None, pattern=r"^run_[0-9a-f]{32}$")
     extraction: ExtractionRecord | None = None
     facts: CaseFacts
     routing: RoutingDecision
@@ -181,7 +183,14 @@ def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
         raise ValueError("outcome idempotency_key does not match immutable workflow state")
     if not hmac.compare_digest(outcome.run_id, expected_run):
         raise ValueError("outcome run_id does not match immutable workflow state")
-    if outcome.completed_stages != _STAGES_BY_STATUS[outcome.status]:
+    expected_stages = _STAGES_BY_STATUS[outcome.status]
+    if outcome.inherited_stages:
+        if outcome.inherited_stages != expected_stages[:3] or outcome.source_run_id is None:
+            raise ValueError("outcome inherited stages require valid correction lineage")
+        expected_stages = ["facts_corrected", *expected_stages[3:]]
+    elif outcome.source_run_id is not None:
+        raise ValueError("outcome source run requires inherited stages")
+    if outcome.completed_stages != expected_stages:
         raise ValueError("outcome completed_stages do not match its status")
     if outcome.case_id != outcome.facts.case_id:
         raise ValueError("outcome case ID does not match immutable facts")
@@ -271,6 +280,8 @@ class DiagnosisWorkflow:
         stages: list[str],
         extraction: ExtractionRecord | None,
         followup_answers: dict[object, str] | None = None,
+        inherited_stages: list[str] | None = None,
+        source_run_id: str | None = None,
     ) -> DiagnosisRunOutcome:
         provisional = route_case(facts, decision_stage=DecisionStage.PROVISIONAL)
         stages.append("provisional_routed")
@@ -285,6 +296,8 @@ class DiagnosisWorkflow:
                 stages,
                 extraction=extraction,
                 questions=list(sufficiency.questions),
+                inherited_stages=inherited_stages,
+                source_run_id=source_run_id,
             )
 
         if isinstance(sufficiency, NeedsInformation):
@@ -306,6 +319,8 @@ class DiagnosisWorkflow:
                 final_sufficiency,
                 stages,
                 extraction=extraction,
+                inherited_stages=inherited_stages,
+                source_run_id=source_run_id,
             )
 
         evidence = self._retrieval_provider.retrieve(facts, final)
@@ -333,6 +348,8 @@ class DiagnosisWorkflow:
                 generation_failure=generated,
                 generation_attempts=generated.generation_attempts,
                 transport_attempts=getattr(generated, "transport_attempts", 0),
+                inherited_stages=inherited_stages,
+                source_run_id=source_run_id,
             )
         stages.extend(["validated", "published"])
         return self._outcome(
@@ -346,6 +363,8 @@ class DiagnosisWorkflow:
             diagnosis=generated.diagnosis,
             generation_attempts=generated.generation_attempts,
             transport_attempts=getattr(generated, "transport_attempts", 0),
+            inherited_stages=inherited_stages,
+            source_run_id=source_run_id,
         )
 
     def _outcome(
@@ -363,6 +382,8 @@ class DiagnosisWorkflow:
         generation_failure: GenerationFailed | None = None,
         generation_attempts: int = 0,
         transport_attempts: int = 0,
+        inherited_stages: list[str] | None = None,
+        source_run_id: str | None = None,
     ) -> DiagnosisRunOutcome:
         idempotency_key, run_id = derive_run_identities(
             facts, routing, self._retrieval_provider.knowledge_build_id
@@ -376,6 +397,8 @@ class DiagnosisWorkflow:
             run_id=run_id,
             idempotency_key=idempotency_key,
             completed_stages=list(stages),
+            inherited_stages=list(inherited_stages or []),
+            source_run_id=source_run_id,
             extraction=extraction,
             facts=facts,
             routing=routing,
@@ -400,9 +423,12 @@ class DiagnosisWorkflow:
         self, previous: DiagnosisRunOutcome, overlay: CorrectionOverlay
     ) -> DiagnosisRunOutcome:
         previous = DiagnosisRunOutcome.model_validate(previous.model_dump(), strict=True)
+        validate_diagnosis_outcome(previous)
         revised = apply_correction(previous.facts, overlay)
         return self._from_facts(
             revised,
-            stages=["input_approved", "extracted", "facts_confirmed"],
+            stages=["facts_corrected"],
             extraction=previous.extraction,
+            inherited_stages=["input_approved", "extracted", "facts_confirmed"],
+            source_run_id=previous.run_id,
         )

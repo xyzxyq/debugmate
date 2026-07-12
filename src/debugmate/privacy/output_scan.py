@@ -169,7 +169,7 @@ def _ignored_secret_rules(key: object | None, value: str) -> set[str]:
         return {item.rule_id for item in scan_text("metadata", value)}
     if normalized.endswith("sha256") and re.fullmatch(r"[0-9a-f]{64}", value):
         return {item.rule_id for item in scan_text("metadata", value)}
-    if normalized in {"run_id", "file_id"}:
+    if normalized in {"run_id", "source_run_id", "file_id"}:
         return {"HIGH_ENTROPY_TOKEN"}
     return set()
 

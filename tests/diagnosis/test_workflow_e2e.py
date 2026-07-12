@@ -347,4 +347,8 @@ def test_correction_rerun_is_immutable_and_revision_bound(tmp_path: Path) -> Non
     assert rerun.facts_sha256 != original.facts_sha256
     assert rerun.idempotency_key != original.idempotency_key
     assert rerun.run_id != original.run_id
+    assert rerun.source_run_id == original.run_id
+    assert rerun.inherited_stages == ["input_approved", "extracted", "facts_confirmed"]
+    assert rerun.completed_stages[0] == "facts_corrected"
+    assert "extracted" not in rerun.completed_stages
     assert original.model_dump_json().encode() == original_bytes
