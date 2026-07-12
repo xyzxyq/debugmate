@@ -9,7 +9,8 @@ from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
 from debugmate.cli import main
 from debugmate.contracts import EvidenceAnchor
 from debugmate.diagnosis.correction import CorrectionOverlay
-from debugmate.diagnosis.extraction import FieldId
+from debugmate.diagnosis.extraction import FieldId, SourceKind, facts_hash
+from debugmate.diagnosis.workflow import derive_run_identities, validate_diagnosis_outcome
 from debugmate.evidence import (
     UnsafeEvidenceContent,
     publish_diagnosis_evidence,
@@ -23,6 +24,20 @@ def _outcome(case_key: str, tmp_path: Path):
     workflow, *_ = _workflow(row, tmp_path)
     answers = {FieldId(key): value for key, value in row.get("answers", {}).items()}
     return workflow.run(_approved(row["case_id"]), followup_answers=answers or None)
+
+
+def _rehash_outcome(outcome, facts):
+    routing = outcome.routing
+    idempotency_key, run_id = derive_run_identities(facts, routing, outcome.knowledge_build_id)
+    return outcome.model_copy(
+        update={
+            "revision": facts.revision,
+            "facts_sha256": facts.facts_sha256,
+            "facts": facts,
+            "idempotency_key": idempotency_key,
+            "run_id": run_id,
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -232,6 +247,78 @@ def test_publication_rejects_tampered_identity_versions_and_stages(
         publish_diagnosis_evidence(tampered, root)
 
     assert not root.exists() or not any(root.rglob("manifest.json"))
+
+
+@pytest.mark.parametrize("changes", [{"revision": 999}, {"facts_sha256": "f" * 64}])
+def test_shared_validator_rejects_top_level_fact_state_tampering(
+    changes: dict[str, object], tmp_path: Path
+) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+
+    with pytest.raises(ValueError, match="revision|facts hash"):
+        validate_diagnosis_outcome(outcome.model_copy(update=changes))
+
+
+def test_fact_provenance_must_match_exact_extraction_candidate(tmp_path: Path) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    assert outcome.extraction is not None
+    target = next(fact for fact in outcome.facts.facts if fact.provenance_candidate_ids)
+    unrelated = next(
+        candidate
+        for candidate in outcome.extraction.candidates
+        if candidate.field_id is not target.field_id
+    )
+    forged_fact = target.model_copy(
+        update={
+            "provenance_candidate_ids": [unrelated.candidate_id],
+            "source_kinds": [unrelated.source_kind],
+        }
+    )
+    forged_items = [
+        forged_fact if item.fact_id == target.fact_id else item for item in outcome.facts.facts
+    ]
+    forged_items.sort(key=lambda item: item.fact_id)
+    forged_facts = outcome.facts.model_copy(
+        update={
+            "facts": forged_items,
+            "facts_sha256": facts_hash(
+                outcome.case_id,
+                outcome.facts.revision,
+                forged_items,
+                outcome.facts.applied_corrections,
+            ),
+        }
+    )
+    forged = _rehash_outcome(outcome, forged_facts)
+
+    with pytest.raises(ValueError, match="provenance"):
+        validate_diagnosis_outcome(forged)
+    with pytest.raises(ValueError, match="provenance"):
+        publish_diagnosis_evidence(forged, tmp_path / "evidence")
+
+
+def test_fact_source_kinds_must_exactly_match_extraction_candidates(tmp_path: Path) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    target = next(fact for fact in outcome.facts.facts if fact.provenance_candidate_ids)
+    forged_fact = target.model_copy(update={"source_kinds": [SourceKind.VLM]})
+    forged_items = [
+        forged_fact if item.fact_id == target.fact_id else item for item in outcome.facts.facts
+    ]
+    forged_items.sort(key=lambda item: item.fact_id)
+    forged_facts = outcome.facts.model_copy(
+        update={
+            "facts": forged_items,
+            "facts_sha256": facts_hash(
+                outcome.case_id,
+                outcome.facts.revision,
+                forged_items,
+                outcome.facts.applied_corrections,
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="provenance"):
+        validate_diagnosis_outcome(_rehash_outcome(outcome, forged_facts))
 
 
 def test_cli_publishes_strict_outcome_json(

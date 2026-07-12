@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import re
 from enum import StrEnum
 from typing import Annotated, Literal, Self
@@ -141,9 +142,7 @@ def make_candidate(
 ) -> FactCandidate:
     normalized = normalize_value(field_id, value)
     return FactCandidate(
-        candidate_id=candidate_id_for(
-            field_id, normalized, source_kind, confidence, locator
-        ),
+        candidate_id=candidate_id_for(field_id, normalized, source_kind, confidence, locator),
         field_id=field_id,
         value=normalized,
         source_kind=source_kind,
@@ -222,9 +221,8 @@ class CaseFact(StrictFrozenModel):
             )
         ):
             raise ValueError("candidate provenance IDs must be canonical, unique, and sorted")
-        if (
-            self.source_kinds != sorted(self.source_kinds, key=str)
-            or len(self.source_kinds) != len(set(self.source_kinds))
+        if self.source_kinds != sorted(self.source_kinds, key=str) or len(self.source_kinds) != len(
+            set(self.source_kinds)
         ):
             raise ValueError("fact source kinds must be unique and sorted")
         return self
@@ -317,3 +315,80 @@ def build_case_facts(record: ExtractionRecord) -> CaseFacts:
         facts=facts,
         applied_corrections=[],
     )
+
+
+def validate_facts_against_extraction(
+    facts: CaseFacts, extraction: ExtractionRecord | None
+) -> None:
+    """Cross-bind every fact provenance edge to its exact extraction candidate set."""
+
+    if extraction is None:
+        if any(fact.provenance_candidate_ids for fact in facts.facts):
+            raise ValueError("fact provenance requires an extraction record")
+        return
+    if extraction.case_id != facts.case_id:
+        raise ValueError("fact provenance extraction does not match its case")
+
+    candidates_by_id = {item.candidate_id: item for item in extraction.candidates}
+    grouped: dict[tuple[FieldId, str], list[FactCandidate]] = {}
+    for candidate in extraction.candidates:
+        grouped.setdefault((candidate.field_id, candidate.value), []).append(candidate)
+
+    corrections_by_field: dict[FieldId, list[CorrectionProvenance]] = {}
+    for correction in facts.applied_corrections:
+        corrections_by_field.setdefault(correction.field_id, []).append(correction)
+    if len(facts.applied_corrections) > facts.revision:
+        raise ValueError("fact correction history exceeds its revision")
+
+    corrected_fields: set[FieldId] = set()
+    for field_id, corrections in corrections_by_field.items():
+        for previous, current in zip(corrections, corrections[1:], strict=False):
+            if not hmac.compare_digest(previous.new_value_sha256, current.old_value_sha256):
+                raise ValueError("fact correction provenance chain is inconsistent")
+        corrected_fields.add(field_id)
+
+    for fact in facts.facts:
+        provenance = []
+        for candidate_id in fact.provenance_candidate_ids:
+            candidate = candidates_by_id.get(candidate_id)
+            if candidate is None:
+                raise ValueError("fact provenance candidate is absent from extraction")
+            provenance.append(candidate)
+
+        corrections = corrections_by_field.get(fact.field_id, [])
+        if corrections:
+            if not hmac.compare_digest(
+                corrections[-1].new_value_sha256, sha256_bytes(fact.value.encode("utf-8"))
+            ):
+                raise ValueError("fact correction provenance does not bind the final value")
+            initial = [
+                item
+                for item in extraction.candidates
+                if item.field_id is fact.field_id
+                and hmac.compare_digest(
+                    sha256_bytes(item.value.encode("utf-8")), corrections[0].old_value_sha256
+                )
+            ]
+            if not initial or corrections[0].fact_id != fact_id_for(
+                fact.field_id, initial[0].value
+            ):
+                raise ValueError("fact correction provenance does not bind its source value")
+            expected_candidates = sorted(item.candidate_id for item in initial)
+            expected_sources = sorted(
+                {*(item.source_kind for item in initial), SourceKind.USER}, key=str
+            )
+        elif fact.provenance_candidate_ids:
+            matching = grouped.get((fact.field_id, fact.value), [])
+            expected_candidates = sorted(item.candidate_id for item in matching)
+            expected_sources = sorted({item.source_kind for item in matching}, key=str)
+        else:
+            expected_candidates = []
+            expected_sources = [SourceKind.USER]
+
+        if fact.provenance_candidate_ids != expected_candidates:
+            raise ValueError("fact provenance candidates do not exactly match extraction")
+        if fact.source_kinds != expected_sources:
+            raise ValueError("fact provenance source kinds do not exactly match extraction")
+
+    if corrected_fields - {fact.field_id for fact in facts.facts}:
+        raise ValueError("fact correction provenance has no current fact")

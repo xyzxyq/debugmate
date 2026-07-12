@@ -375,6 +375,10 @@ def test_correction_rerun_is_immutable_and_revision_bound(tmp_path: Path) -> Non
         replacement="AttributeError",
         reason="confirmed from redacted traceback",
     )
+    with pytest.raises(ValueError, match="revision"):
+        workflow.rerun(original.model_copy(update={"revision": 999}), overlay)
+    with pytest.raises(ValueError, match="facts hash"):
+        workflow.rerun(original.model_copy(update={"facts_sha256": "f" * 64}), overlay)
     rerun = workflow.rerun(original, overlay)
     assert rerun.case_id == original.case_id
     assert rerun.revision == original.revision + 1

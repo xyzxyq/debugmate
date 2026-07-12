@@ -17,6 +17,7 @@ from debugmate.diagnosis.extraction import (
     SourceKind,
     StrictFrozenModel,
     build_case_facts,
+    validate_facts_against_extraction,
 )
 from debugmate.diagnosis.generation import GenerationFailed, GenerationRequest
 from debugmate.diagnosis.providers import ExtractionProvider
@@ -176,6 +177,11 @@ def validate_diagnosis_outcome(outcome: DiagnosisRunOutcome) -> None:
     )
     if actual_versions != expected_versions:
         raise ValueError("outcome version metadata does not match publisher contract")
+    if outcome.revision != outcome.facts.revision:
+        raise ValueError("outcome revision does not match immutable facts")
+    if not hmac.compare_digest(outcome.facts_sha256, outcome.facts.facts_sha256):
+        raise ValueError("outcome facts hash does not match immutable facts")
+    validate_facts_against_extraction(outcome.facts, outcome.extraction)
     expected_idempotency, expected_run = derive_run_identities(
         outcome.facts, outcome.routing, outcome.knowledge_build_id
     )
