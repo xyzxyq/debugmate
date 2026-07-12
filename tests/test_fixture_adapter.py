@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,8 @@ from debugmate.adapters.fixture import (
     FixtureCapabilityUnavailable,
     FixtureNotFound,
 )
-from debugmate.contracts import CapabilityStatus, DiagnosisRecord, new_case_id
+from debugmate.adapters.base import CandidateRunResult
+from debugmate.contracts import CapabilityStatus, new_case_id
 
 FIXTURES_ROOT = Path(__file__).parents[1] / "fixtures" / "cases"
 
@@ -24,7 +26,7 @@ def test_fixture_backend_implements_runtime_protocol() -> None:
     assert isinstance(backend, DiagnosisBackend)
 
 
-def test_fixture_diagnosis_is_schema_valid_and_propagates_case_id() -> None:
+def test_fixture_returns_untrusted_candidate_and_propagates_case_id() -> None:
     backend = FixtureBackend(FIXTURES_ROOT)
     case_id = new_case_id()
 
@@ -32,17 +34,22 @@ def test_fixture_diagnosis_is_schema_valid_and_propagates_case_id() -> None:
 
     assert result.backend == "fixture"
     assert result.run_id == "fixture:module_not_found"
-    assert isinstance(result.diagnosis, DiagnosisRecord)
-    assert result.diagnosis.case_id == case_id
-    assert result.diagnosis.category.value == "dependency_environment"
-    assert "demo_missing_pkg" in result.diagnosis.observed_facts[0].value
+    assert isinstance(result, CandidateRunResult)
+    assert isinstance(result.candidate_payload, dict)
+    assert result.candidate_payload["case_id"] == case_id
+    assert result.candidate_payload["category"] == "dependency_environment"
+    assert "demo_missing_pkg" in result.candidate_payload["observed_facts"][0]["value"]
 
 
 def test_fixture_content_is_stable_apart_from_case_id() -> None:
     backend = FixtureBackend(FIXTURES_ROOT)
 
-    first = backend.run_workflow({"case_id": new_case_id()}, user="one").diagnosis.model_dump()
-    second = backend.run_workflow({"case_id": new_case_id()}, user="two").diagnosis.model_dump()
+    first = backend.run_workflow({"case_id": new_case_id()}, user="one").candidate_payload
+    second = backend.run_workflow({"case_id": new_case_id()}, user="two").candidate_payload
+    assert isinstance(first, dict)
+    assert isinstance(second, dict)
+    first = deepcopy(first)
+    second = deepcopy(second)
     first.pop("case_id")
     second.pop("case_id")
 
@@ -108,7 +115,7 @@ def test_fixture_files_and_results_contain_no_sensitive_patterns() -> None:
         path.read_text(encoding="utf-8")
         for path in (FIXTURES_ROOT / "module_not_found").glob("*.json")
     )
-    serialized = result.diagnosis.model_dump_json()
+    serialized = json.dumps(result.candidate_payload, ensure_ascii=False)
     forbidden = [
         r"sk-[A-Za-z0-9_-]{8,}",
         r"Bearer ",
