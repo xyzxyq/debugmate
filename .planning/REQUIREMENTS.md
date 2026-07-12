@@ -8,8 +8,8 @@
 ### 输入与抽取
 
 - [x] **INP-01**: 用户可以提交报错文本、终端截图、代码片段和基础环境信息，且文本或截图至少提供一项。
-- [ ] **INP-02**: 系统可以从截图中抽取异常类型、Traceback关键行、包名、版本、设备和路径候选，并向用户回显抽取结果。
-- [ ] **INP-03**: 系统可以检测影响诊断的缺失信息，并只追问最多三项高价值信息；信息仍不足时允许以“不足以确定”结束。
+- [x] **INP-02**: 系统可以从截图中抽取异常类型、Traceback关键行、包名、版本、设备和路径候选，并向用户回显抽取结果。
+- [x] **INP-03**: 系统可以检测影响诊断的缺失信息，并只追问最多三项高价值信息；信息仍不足时允许以“不足以确定”结束。
 - [ ] **INP-04**: 系统为每次诊断生成唯一 `case_id`，并在输入、诊断和全部输出产物之间保持关联。
 
 ### 安全与隐私
@@ -17,7 +17,7 @@
 - [x] **SAFE-01**: 系统在任何输入离开本机前遮蔽 Token、密码、邮箱、用户名、绝对路径和常见私有标识，并保存脱敏审计结果。
 - [x] **SAFE-02**: 系统在结果展示和证据导出前再次扫描文本、PNG元数据、音频讲稿和日志，阻止敏感内容进入课程材料。
 - [x] **SAFE-03**: 系统把日志、截图、代码和知识文档都视为不可信数据，禁止其中的文本覆盖系统指令或触发外部动作。
-- [ ] **SAFE-04**: 系统不自动执行诊断生成的修复命令；每条命令标注适用平台、影响、预期结果和必要的回退说明。
+- [x] **SAFE-04**: 系统不自动执行诊断生成的修复命令；每条命令标注适用平台、影响、预期结果和必要的回退说明。
 
 ### 专属知识库
 
@@ -29,12 +29,12 @@
 
 ### 诊断工作流
 
-- [ ] **DIAG-01**: 系统可以把案例路由到依赖/环境、路径/权限、Python运行时、张量形状/类型、CUDA/显存、模型加载六类之一或“未知”。
-- [ ] **DIAG-02**: 系统可以根据结构化输入和知识检索结果生成符合 `DiagnosisRecord v1` JSON Schema 的诊断对象。
-- [ ] **DIAG-03**: 每个根因候选都绑定观察证据和知识片段；无法由引用支持的内容必须标记为推断而非事实。
-- [ ] **DIAG-04**: 诊断对象包含根因候选、检查步骤、修复步骤、验证命令、缺失信息、置信度、局限和适用环境。
-- [ ] **DIAG-05**: 系统在 JSON 结构不合规时最多进行一次受控修复重试；仍失败则显式失败，不拼接伪造结果。
-- [ ] **DIAG-06**: 用户可以看到影响结论的关键抽取字段并纠正 OCR/VLM 误读，然后重新运行诊断。
+- [x] **DIAG-01**: 系统可以把案例路由到依赖/环境、路径/权限、Python运行时、张量形状/类型、CUDA/显存、模型加载六类之一或“未知”。
+- [x] **DIAG-02**: 系统可以根据结构化输入和知识检索结果生成符合 `DiagnosisRecord v1` JSON Schema 的诊断对象。
+- [x] **DIAG-03**: 每个根因候选都绑定观察证据和知识片段；无法由引用支持的内容必须标记为推断而非事实。
+- [x] **DIAG-04**: 诊断对象包含根因候选、检查步骤、修复步骤、验证命令、缺失信息、置信度、局限和适用环境。
+- [x] **DIAG-05**: 系统在 JSON 结构不合规时最多进行一次受控修复重试；仍失败则显式失败，不拼接伪造结果。
+- [x] **DIAG-06**: 用户可以看到影响结论的关键抽取字段并纠正 OCR/VLM 误读，然后重新运行诊断。
 
 ### 多模态输出
 
@@ -102,24 +102,24 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | INP-01 | Phase 2 | Complete |
-| INP-02 | Phase 3 | Pending |
-| INP-03 | Phase 3 | Pending |
+| INP-02 | Phase 3 | Complete |
+| INP-03 | Phase 3 | Complete |
 | INP-04 | Phase 1 | Pending |
 | SAFE-01 | Phase 2 | Complete |
 | SAFE-02 | Phase 2 | Complete |
 | SAFE-03 | Phase 2 | Complete |
-| SAFE-04 | Phase 3 | Pending |
+| SAFE-04 | Phase 3 | Complete |
 | KNOW-01 | Phase 2 | Complete |
 | KNOW-02 | Phase 2 | Complete |
 | KNOW-03 | Phase 2 | Complete |
 | KNOW-04 | Phase 2 | Complete |
 | KNOW-05 | Phase 2 | Complete |
-| DIAG-01 | Phase 3 | Pending |
-| DIAG-02 | Phase 3 | Pending |
-| DIAG-03 | Phase 3 | Pending |
-| DIAG-04 | Phase 3 | Pending |
-| DIAG-05 | Phase 3 | Pending |
-| DIAG-06 | Phase 3 | Pending |
+| DIAG-01 | Phase 3 | Complete |
+| DIAG-02 | Phase 3 | Complete |
+| DIAG-03 | Phase 3 | Complete |
+| DIAG-04 | Phase 3 | Complete |
+| DIAG-05 | Phase 3 | Complete |
+| DIAG-06 | Phase 3 | Complete |
 | MULTI-01 | Phase 4 | Pending |
 | MULTI-02 | Phase 4 | Pending |
 | MULTI-03 | Phase 4 | Pending |
@@ -147,4 +147,4 @@
 
 ---
 *Requirements defined: 2026-07-10*  
-*Last updated: 2026-07-10 after roadmap creation*
+*Last updated: 2026-07-13 after Phase 3 verification*
