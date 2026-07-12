@@ -4,75 +4,116 @@ status: issues_found
 depth: deep
 reviewed_at: 2026-07-12
 files_reviewed: 41
+original_findings:
+  closed: 2
+  partially_closed: 2
 findings:
   critical: 0
-  warning: 3
-  info: 1
-  total: 4
+  warning: 2
+  info: 0
+  total: 2
 ---
 
-# Phase 3 Software Quality Review
+# Phase 3 Software Quality Re-review
 
 ## Result
 
-Phase 3 is not clean. The full offline test suite and Ruff pass, and the main happy-path workflow is deterministic, but three correctness/traceability gaps remain at public boundaries.
+Phase 3 is still not clean after the first fix iteration. The canonical `CaseFact`
+checks and ordinary correction-stage presentation are materially improved, and the
+full offline suite remains green. However, the environment extraction fix does not
+handle the project's established key/value environment shape, and the shared outcome
+validator still permits forged correction lineage and top-level revision/hash state.
 
 ## Findings
 
-### WARNING 1 — Approved `environment` content is never extracted or source-bound
+### WARNING 1 — Structured environment keys are discarded before extraction
 
-**Files:** `src/debugmate/diagnosis/providers.py:103-109`, `src/debugmate/diagnosis/providers.py:173-178`
+**Files:** `src/debugmate/diagnosis/providers.py:111-114`,
+`src/debugmate/diagnosis/providers.py:180-189`
 
-`ProductionExtractionProvider.extract()` hashes only `error_text`, `code`, and the optional screenshot. `_text_candidates()` likewise iterates only `error_text` and `code`. The approved input's `environment` field is ignored even though version/device/package facts are commonly supplied there and Phase 3's sufficiency matrices explicitly depend on those fields.
+The source hash correctly binds the complete environment mapping, but
+`_text_candidates()` concatenates only mapping values. This discards the semantic keys
+that identify otherwise bare values. Existing Phase 2 inputs use shapes such as
+`{"PYTHON": "3.13.5"}` and `{"python": "3.13"}`; the analogous
+`{"PYTHON": "3.13.5", "DEVICE": "cpu"}` produces no candidates at all. The new
+tests avoid the defect by putting `Version:` and `Device:` labels inside a single
+`runtime` value, which is not the established input contract.
 
 Consequences:
 
-- a complete approved submission can incorrectly stop at `needs_information` or `insufficient_information`;
-- changes to environment data do not change `ExtractionRecord.source_hashes`, `extraction_id`, facts, or run identity;
-- the diagnosis can be generated without audit evidence that the submitted environment was considered.
+- approved structured environment data remains unavailable to sufficiency and routing;
+- a common environment-only submission is source-hashed but yields no version/device
+  facts, so it can still stop as information-poor;
+- the original environment finding is only partially closed despite the passing
+  environment tests.
 
-**Action:** include `environment` in both `source_hashes` and `_text_candidates()` using `TextLocator(input_field="environment", ...)`. Add an end-to-end test where the only `Version:`/`Device:` evidence is in `environment`, plus a test proving an environment-only change changes extraction/facts/run identity.
+**Reproduction:** invoking `ProductionExtractionProvider.extract()` with
+`environment={"PYTHON": "3.13.5", "DEVICE": "cpu"}` returned `candidates=[]` while
+the environment source hash was present.
 
-### WARNING 2 — Evidence publication trusts caller-supplied run identity and stage history
+**Action:** serialize each environment entry into a deterministic key-aware extraction
+view (for example `PYTHON: 3.13.5` and `DEVICE: cpu`) and preserve locators that identify
+the corresponding mapping entry. Map the supported environment keys explicitly to the
+six fields rather than relying only on labels embedded inside values. Add regression
+tests using the Phase 2 `PYTHON`/`python` shape and a separate `DEVICE` key.
 
-**Files:** `src/debugmate/evidence.py:467-501`, `src/debugmate/evidence.py:549-617`, `src/debugmate/diagnosis/workflow.py:65-87`, `src/debugmate/diagnosis/workflow.py:107-120`
+### WARNING 2 — Shared outcome validation still accepts forged revision and correction lineage
 
-`publish_diagnosis_evidence()` strictly reconstructs `DiagnosisRunOutcome`, but `_validate_diagnosis_lineage()` never recomputes `_identities()` and never validates `idempotency_key`, `run_id`, or the legal `completed_stages` sequence for the declared status. It also writes module constants for prompt/schema versions rather than checking the outcome fields. A syntactically valid imported `DiagnosisRunOutcome` can therefore select an arbitrary valid-looking run directory, claim impossible stages (for example `published` on a blocked outcome), or carry version metadata that is silently replaced in the manifest.
+**Files:** `src/debugmate/diagnosis/workflow.py:168-194`,
+`src/debugmate/diagnosis/workflow.py:421-433`,
+`src/debugmate/evidence.py:475-478`, `src/debugmate/evidence.py:589-620`
 
-This weakens the evidence bundle's core claim that directory identity and node history are derived from the immutable workflow state. The JSON/CLI publication boundary makes this more than an internal-only concern.
+`validate_diagnosis_outcome()` recomputes run identities from the nested `facts`, but it
+does not require top-level `revision`/`facts_sha256` to equal that nested immutable
+revision. Those checks remain private to evidence publication. Consequently,
+`DiagnosisWorkflow.rerun()` accepts a previous outcome whose top-level revision and
+facts hash were forged, because rerun calls only the incomplete shared validator.
 
-**Action:** move identity derivation and stage-transition validation into a shared public validator. Before `EvidenceBundle.begin_run`, recompute and constant-time compare `run_id` and `idempotency_key`; validate status-specific field presence and the exact allowed stage prefix; require outcome schema/prompt/workflow versions to match the publisher contract (or explicitly migrate them). Add tamper tests for each field.
+The same validator treats any syntactically valid `source_run_id` plus the three fixed
+inherited stages as valid correction lineage. It does not require a corrected revision,
+an applied correction, a distinct source run, or consistency with extraction/fact
+history. Evidence publication therefore accepts and records a revision-0, zero-
+correction outcome as `facts_corrected`, with an arbitrary source run ID.
 
-### WARNING 3 — `CaseFact` accepts non-canonical stable IDs and inconsistent provenance
+**Reproductions:** both were confirmed against the fixed tree:
 
-**Files:** `src/debugmate/diagnosis/extraction.py:186-220`, `src/debugmate/diagnosis/extraction.py:237-256`, `src/debugmate/diagnosis/correction.py:61-127`
+1. `validate_diagnosis_outcome()` accepted copies with `revision=999` and with an
+   all-`f` top-level `facts_sha256`; `rerun()` then accepted the combined forged outcome.
+2. A normal completed revision-0 outcome modified to declare inherited stages,
+   `facts_corrected`, and `source_run_id=run_ffff...` was successfully published; its
+   manifest reported `facts_corrected=completed` despite zero applied corrections.
 
-`CaseFacts` verifies only that its aggregate hash matches the serialized payload and that fact IDs are sorted/unique. `CaseFact` does not verify `fact_id == fact_id_for(field_id, normalized value)`, does not normalize/reject unsafe values at reconstruction, and does not validate provenance IDs/source ordering. A caller can construct a self-consistent hash over a forged fact ID; correction and rerun then accept that ID as the stable target, while downstream support links and evidence use it as authoritative.
+**Action:** make the shared validator the single complete semantic boundary: compare
+top-level revision/hash to `outcome.facts`, validate extraction/fact provenance where
+present, and require inherited correction lineage to have `revision >= 1`, at least one
+canonical correction, a distinct source run ID, and an allowed correction-stage path.
+If arbitrary imported lineage must be supported, require a separately verified source
+manifest rather than accepting an unbound run-shaped string. Add direct validator,
+rerun, and publication tamper tests for all of these cases.
 
-This contradicts the Phase 3 stable-ID contract and means strict Pydantic reconstruction is not equivalent to semantic validation.
+## Original Finding Closure
 
-**Action:** add a `CaseFact` validator for canonical normalized value and fact ID, validate/deduplicate/sort provenance candidate IDs and source kinds, and privacy-scan values at the public `CaseFacts` reconstruction boundary. If legacy/imported facts require exceptions, use a distinct migrated model rather than weakening the current fact contract. Add JSON-boundary tests with a recomputed `facts_sha256` over a forged ID/value.
+1. **Environment binding:** partially closed — full mapping is hashed, but established
+   structured key/value inputs are not extracted.
+2. **Publication identity and stage history:** partially closed — run/idempotency and
+   version checks exist, but the shared validator and correction lineage remain
+   bypassable as described above.
+3. **Canonical `CaseFact`:** closed — normalized values, stable IDs, privacy scanning,
+   and deterministic provenance ordering are enforced at reconstruction.
+4. **Inherited rerun stages:** presentation is improved, but semantic lineage validation
+   remains part of Warning 2.
 
-### INFO 1 — Corrected reruns report extraction as newly completed
+## Verification Evidence
 
-**File:** `src/debugmate/diagnosis/workflow.py:313-322`
-
-`rerun()` does not invoke extraction, but starts its stage list with `input_approved`, `extracted`, and `facts_confirmed`, and reuses the original `ExtractionRecord`. This is understandable as lineage, but the manifest's `node_states` labels every entry `completed`, so consumers cannot distinguish “reused from prior revision” from “executed in this run.”
-
-**Action:** represent reused stages explicitly (`reused`/`inherited`) or start reruns at `facts_corrected` and retain the source run/extraction ID as lineage metadata.
-
-## Clean Evidence
-
-- `python -m pytest -q -m "not cloud and not ocr"`: **429 passed, 22 deselected**.
+- `python -m pytest -q -m "not cloud and not ocr"`: **442 passed, 22 deselected**.
 - `python -m ruff check src tests`: **passed**.
-- Contract generation performs schema, privacy, semantic fact/evidence set, category, and knowledge-build checks with at most one repair.
-- Sufficiency is bounded to one follow-up round and at most three deterministic questions.
-- Correction uses optimistic locking and preserves immutable revision/facts hashes.
-- Evidence publication is atomic, allowlisted, privacy-scanned, hash-manifested, and rejects Phase 4 audio artifacts.
+- `python -m pip check`: **passed**.
+- `git diff --check`: **passed** apart from the pre-existing line-ending notice for
+  `.planning/config.json`.
 
-## Test Gaps to Close
+## Required Tests Before Clean Status
 
-1. Environment-only extraction and environment-change identity tests.
-2. Imported outcome tampering tests for run/idempotency IDs, versions, stages, and status-specific fields.
-3. Self-consistent forged `CaseFact` ID/value/provenance tests at JSON and rerun boundaries.
-4. Manifest semantics for inherited correction-rerun stages.
+1. Key-aware environment extraction for existing `PYTHON`/`python` and `DEVICE` maps.
+2. Direct shared-validator and rerun rejection of top-level revision/facts-hash tampering.
+3. Publication rejection of revision-0/no-correction inherited lineage, self-source
+   lineage, and arbitrary unverified source-run lineage.
