@@ -61,6 +61,10 @@ _PACKAGE = re.compile(
 _VERSION = re.compile(r"\bVersion\s*:\s*([^\s,;]+)", re.IGNORECASE)
 _DEVICE = re.compile(r"\bDevice\s*:\s*([^\s,;]+)", re.IGNORECASE)
 _PATH = re.compile(r"\bPath\s*:\s*(\S+)", re.IGNORECASE)
+_ENVIRONMENT_FIELD_KEYS = {
+    "python": FieldId.VERSION,
+    "device": FieldId.DEVICE,
+}
 
 
 def _mapped_values(text: str) -> list[tuple[FieldId, str, int, int]]:
@@ -180,13 +184,6 @@ class ProductionExtractionProvider:
         fields = (
             ("error_text", approved.redacted.error_text),
             ("code", approved.redacted.code),
-            (
-                "environment",
-                "\n".join(
-                    value for _, value in sorted(approved.redacted.environment.items())
-                )
-                or None,
-            ),
         )
         for input_field, content in fields:
             if content is None:
@@ -207,6 +204,34 @@ class ProductionExtractionProvider:
                             ),
                         )
                     )
+        environment = approved.redacted.environment
+        serialized = "\n".join(f"{key}: {value}" for key, value in sorted(environment.items()))
+        offset = 0
+        for key, value in sorted(environment.items()):
+            line = f"{key}: {value}"
+            value_start = offset + len(key) + 2
+            mapped_field = _ENVIRONMENT_FIELD_KEYS.get(key.casefold())
+            mapped = (
+                [(mapped_field, value, value_start, value_start + len(value))]
+                if mapped_field is not None
+                else [
+                    (field_id, item, offset + start, offset + end)
+                    for field_id, item, start, end in _mapped_values(line)
+                ]
+            )
+            for field_id, item, start, end in mapped:
+                candidates.append(
+                    make_candidate(
+                        field_id=field_id,
+                        value=item,
+                        source_kind=SourceKind.TEXT,
+                        confidence=1.0,
+                        locator=TextLocator(
+                            input_field="environment", start=start, end=end
+                        ),
+                    )
+                )
+            offset += len(line) + (1 if offset + len(line) < len(serialized) else 0)
         return candidates
 
     @staticmethod

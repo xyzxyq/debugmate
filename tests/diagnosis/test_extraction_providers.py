@@ -63,6 +63,29 @@ def test_environment_is_extracted_and_bound_to_record_identity(tmp_path: Path) -
     assert len(environment_locators) == 2
 
 
+@pytest.mark.parametrize("python_key", ["PYTHON", "python"])
+def test_structured_environment_keys_map_bare_values_with_stable_locators(
+    tmp_path: Path, python_key: str
+) -> None:
+    from debugmate.diagnosis.extraction import FieldId, TextLocator
+    from debugmate.diagnosis.providers import ProductionExtractionProvider
+
+    record = ProductionExtractionProvider(
+        redacted_root=tmp_path, ocr_backend=FakeOcr([])
+    ).extract(_approved(tmp_path, environment={python_key: "3.13.5", "DEVICE": "cpu"}))
+
+    by_field = {candidate.field_id: candidate for candidate in record.candidates}
+    assert by_field[FieldId.VERSION].value == "3.13.5"
+    assert by_field[FieldId.DEVICE].value == "cpu"
+    assert by_field[FieldId.DEVICE].locator == TextLocator(
+        input_field="environment", start=len("DEVICE: "), end=len("DEVICE: cpu")
+    )
+    python_start = len(f"DEVICE: cpu\n{python_key}: ")
+    assert by_field[FieldId.VERSION].locator == TextLocator(
+        input_field="environment", start=python_start, end=python_start + len("3.13.5")
+    )
+
+
 class FakeOcr:
     def __init__(self, tokens: list[OcrToken]) -> None:
         self.tokens = tokens
