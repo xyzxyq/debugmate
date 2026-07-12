@@ -21,6 +21,27 @@ from debugmate.evidence import RunStatus, verify_bundle
 from debugmate.probe import CAPABILITY_IDS, run_cloud_probe, run_fixture_probe
 from debugmate.settings import DebugMateSettings
 
+
+def test_extraction_cli_view_has_six_explicit_slots_and_correction_ids() -> None:
+    from debugmate.cli import extraction_cli_view
+    from debugmate.diagnosis.extraction import (
+        ExtractionRecord, FieldId, SourceKind, TextLocator, extraction_id_for,
+        make_candidate,
+    )
+    candidate = make_candidate(field_id=FieldId.EXCEPTION_TYPE,
+        value="ModuleNotFoundError", source_kind=SourceKind.TEXT, confidence=1.0,
+        locator=TextLocator(input_field="error_text", start=0, end=19))
+    record = ExtractionRecord(case_id="case_00000000000000000000000000000000",
+        extraction_id=extraction_id_for("case_00000000000000000000000000000000",
+            {"error_text":"1"*64}, [candidate]), source_hashes={"error_text":"1"*64},
+        candidates=[candidate])
+    view = extraction_cli_view(record)
+    assert list(view["slots"]) == ["exception_type", "traceback_key_line", "package",
+        "version", "device", "path"]
+    assert view["slots"]["exception_type"]["candidate_id"] == candidate.candidate_id
+    assert view["slots"]["exception_type"]["correction_field_id"] == "exception_type"
+    assert view["slots"]["path"] == {"state":"missing", "field_id":"path"}
+
 SENTINEL = "SECRET_SENTINEL_DO_NOT_LOG"
 FIXTURE_DIAGNOSIS = Path("fixtures/cases/module_not_found/diagnosis.json")
 

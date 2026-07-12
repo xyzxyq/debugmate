@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "cases": [
+    {"case_id":"case_10000000000000000000000000000001","case_key":"path_permission","facts":{"exception_type":"PermissionError","traceback_key_line":"PermissionError: access is denied Path: [REDACTED:WINDOWS_PATH]","path":"[REDACTED:WINDOWS_PATH]"},"expected_category":"path_permission","expected_status":"completed"},
+    {"case_id":"case_10000000000000000000000000000002","case_key":"python_runtime","facts":{"exception_type":"TypeError","traceback_key_line":"TypeError: fixture object is not callable"},"expected_category":"python_runtime","expected_status":"completed"},
+    {"case_id":"case_10000000000000000000000000000003","case_key":"tensor_shape_dtype","facts":{"traceback_key_line":"RuntimeError: shapes cannot be multiplied"},"expected_category":"tensor_shape_dtype","expected_status":"completed"},
+    {"case_id":"case_10000000000000000000000000000004","case_key":"cuda_memory","facts":{"traceback_key_line":"RuntimeError: CUDA out of memory","device":"cuda:0"},"expected_category":"cuda_memory","expected_status":"completed"},
+    {"case_id":"case_10000000000000000000000000000005","case_key":"model_loading","facts":{"traceback_key_line":"RuntimeError: loading state_dict failed","path":"[REDACTED:WINDOWS_PATH]"},"expected_category":"model_loading","expected_status":"completed"},
+    {"case_id":"case_10000000000000000000000000000006","case_key":"unknown","facts":{"exception_type":"RuntimeError","traceback_key_line":"RuntimeError: fictional ambiguous failure"},"expected_category":"unknown","expected_status":"completed"},
+    {"case_id":"case_10000000000000000000000000000007","case_key":"needs_information","facts":{"exception_type":"PermissionError"},"expected_category":"path_permission","expected_status":"needs_information"},
+    {"case_id":"case_10000000000000000000000000000008","case_key":"insufficient_information","facts":{"exception_type":"PermissionError"},"answers":{"version":"3.13.5"},"expected_category":"path_permission","expected_status":"insufficient_information"},
+    {"case_id":"case_10000000000000000000000000000009","case_key":"generation_failed","facts":{"exception_type":"TypeError","traceback_key_line":"TypeError: fixture failure"},"expected_category":"python_runtime","expected_status":"generation_failed"},
+    {"case_id":"case_10000000000000000000000000000010","case_key":"correction_rerun","facts":{"exception_type":"TypeError","traceback_key_line":"TypeError: fixture failure"},"expected_category":"python_runtime","expected_status":"completed","correction":{"field_id":"exception_type","replacement":"AttributeError","reason":"confirmed from redacted traceback"}}
+  ]
+}
