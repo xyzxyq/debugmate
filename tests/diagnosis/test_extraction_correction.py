@@ -4,12 +4,14 @@ import pytest
 from pydantic import ValidationError
 
 from debugmate.diagnosis.extraction import (
+    CaseFacts,
     ExtractionRecord,
     FieldId,
     SourceKind,
     TextLocator,
     build_case_facts,
     extraction_id_for,
+    facts_hash,
     make_candidate,
 )
 from debugmate.hashing import sha256_bytes
@@ -152,3 +154,39 @@ def test_correction_overlay_is_strict_and_case_bound() -> None:
         CorrectionOverlay.model_validate(
             {**_overlay(base).model_dump(), "extra": "not allowed"}, strict=True
         )
+
+
+@pytest.mark.parametrize(
+    "fact_changes",
+    [
+        {"fact_id": "fact_" + "f" * 32},
+        {"value": "  fictional_pkg  "},
+        {"provenance_candidate_ids": ["candidate_" + "f" * 32, "bad"]},
+        {"source_kinds": [SourceKind.USER, SourceKind.TEXT]},
+        {"value": "student@example.test"},
+    ],
+)
+def test_case_facts_json_boundary_rejects_forged_semantics(
+    fact_changes: dict[str, object],
+) -> None:
+    base = _base_facts()
+    payload = base.model_dump()
+    payload["facts"][0].update(fact_changes)
+    provisional = CaseFacts.model_construct(
+        case_id=base.case_id,
+        revision=base.revision,
+        facts_sha256="0" * 64,
+        facts=[],
+        applied_corrections=[],
+    )
+    # Recompute the aggregate digest to prove nested semantic validation, not the
+    # outer hash check, rejects the imported payload.
+    from debugmate.diagnosis.extraction import CaseFact
+
+    forged_fact = CaseFact.model_construct(**payload["facts"][0])
+    payload["facts_sha256"] = facts_hash(
+        provisional.case_id, provisional.revision, [forged_fact], []
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        CaseFacts.model_validate(payload, strict=True)

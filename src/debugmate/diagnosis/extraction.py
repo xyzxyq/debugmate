@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Annotated, Literal, Self
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from debugmate.contracts import CaseId
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.privacy.models import Sha256
-from debugmate.privacy.output_scan import assert_export_safe
+from debugmate.privacy.output_scan import UnsafeExport, assert_export_safe
 
 
 class FieldId(StrEnum):
@@ -201,6 +202,33 @@ class CaseFact(StrictFrozenModel):
     source_kinds: list[SourceKind]
     confidence: float = Field(strict=True, ge=0.0, le=1.0)
 
+    @model_validator(mode="after")
+    def require_canonical_fact_and_provenance(self) -> Self:
+        try:
+            normalized = normalize_value(self.field_id, self.value)
+        except ValueError as error:
+            raise ValueError("fact value is not canonical") from error
+        if self.value != normalized:
+            raise ValueError("fact value must use canonical normalization")
+        if self.fact_id != fact_id_for(self.field_id, normalized):
+            raise ValueError("fact_id does not match canonical fact data")
+        candidate_ids = self.provenance_candidate_ids
+        if (
+            candidate_ids != sorted(candidate_ids)
+            or len(candidate_ids) != len(set(candidate_ids))
+            or any(
+                re.fullmatch(r"candidate_[0-9a-f]{32}", candidate_id) is None
+                for candidate_id in candidate_ids
+            )
+        ):
+            raise ValueError("candidate provenance IDs must be canonical, unique, and sorted")
+        if (
+            self.source_kinds != sorted(self.source_kinds, key=str)
+            or len(self.source_kinds) != len(set(self.source_kinds))
+        ):
+            raise ValueError("fact source kinds must be unique and sorted")
+        return self
+
 
 class CaseFacts(StrictFrozenModel):
     case_id: CaseId
@@ -218,6 +246,10 @@ class CaseFacts(StrictFrozenModel):
         ids = [fact.fact_id for fact in self.facts]
         if ids != sorted(ids) or len(ids) != len(set(ids)):
             raise ValueError("facts must be unique and sorted by stable ID")
+        try:
+            assert_export_safe([fact.value for fact in self.facts])
+        except UnsafeExport as error:
+            raise ValueError("case facts contain unsafe export content") from error
         return self
 
 
