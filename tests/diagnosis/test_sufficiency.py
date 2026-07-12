@@ -18,7 +18,6 @@ from debugmate.diagnosis.sufficiency import (
     evaluate_sufficiency,
 )
 
-
 CASE_ID = "case_44444444444444444444444444444444"
 
 
@@ -65,9 +64,7 @@ def test_each_provisional_category_selects_a_bounded_matrix(values: dict[str, st
     assert result.status in {"ready", "needs_information"}
     if result.status == "needs_information":
         assert 1 <= len(result.questions) <= MAX_QUESTIONS
-        assert len({question.field_id for question in result.questions}) == len(
-            result.questions
-        )
+        assert len({question.field_id for question in result.questions}) == len(result.questions)
         assert all(question.question_id for question in result.questions)
         assert all(question.expected_format.strip() for question in result.questions)
         assert all(question.reason.strip() for question in result.questions)
@@ -101,7 +98,7 @@ def test_more_than_three_missing_fields_are_ranked_and_capped() -> None:
     assert [question.field_id for question in result.questions] == [
         FieldId.EXCEPTION_TYPE,
         FieldId.TRACEBACK_KEY_LINE,
-        FieldId.DEVICE,
+        FieldId.VERSION,
     ]
 
 
