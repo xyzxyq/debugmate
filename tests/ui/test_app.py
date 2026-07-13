@@ -19,6 +19,7 @@ from debugmate.results.contracts import (
     ResultViewState,
 )
 from debugmate.ui.app import build_app
+from debugmate.ui.serve import _local_service
 
 
 def _completed_state() -> ResultViewState:
@@ -88,6 +89,12 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "overflow-x: hidden" not in app.css
+
+
+def test_local_service_configures_a_real_result_composer_for_replay(tmp_path: Path) -> None:
+    service = _local_service(runtime_root=tmp_path / "runtime")
+
+    assert callable(service._composer)
 
 
 def _free_port() -> int:
