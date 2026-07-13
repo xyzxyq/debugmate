@@ -424,13 +424,45 @@ class ResultApplicationService:
         except Exception:
             raise ResultServiceError("source_bundle_invalid") from None
 
-    def _source_for_stored_outcome(
-        self, outcome: DiagnosisRunOutcome, state: ResultViewState | None
-    ) -> LoadedDiagnosisSource:
-        """Recover a source for correction without accepting a caller path."""
+    def _verified_parent_for_correction(
+        self, outcome: DiagnosisRunOutcome
+    ) -> tuple[ResultManifest, LoadedDiagnosisSource]:
+        """Recover correction provenance from public verified result records."""
 
-        if state is not None and state.mode is ResultMode.REPLAY and state.fixture_id is not None:
-            _row, indexed, fixture_source = self._load_fixture_source(state.fixture_id)
+        try:
+            root = _trusted_root_path(self._results_root)
+            case_root = root / outcome.case_id
+            if not case_root.is_dir() or case_root.is_symlink():
+                raise ValueError("case root")
+            matches: list[ResultManifest] = []
+            for candidate in case_root.iterdir():
+                if _RESULT_ID.fullmatch(candidate.name) is None:
+                    continue
+                verified = verify_result_bundle(candidate)
+                manifest = verified.manifest
+                if manifest.identity.source_run_id == outcome.run_id:
+                    matches.append(manifest)
+            if not matches:
+                raise ValueError("parent")
+            provenance = {
+                (item.mode, item.fixture_id, item.fixture_name) for item in matches
+            }
+            if len(provenance) != 1:
+                raise ValueError("provenance")
+            manifest = matches[0]
+            return manifest, self._source_for_verified_result(manifest)
+        except ResultServiceError:
+            raise
+        except (OSError, ResultVerificationError, ValueError):
+            raise ResultServiceError("source_bundle_invalid") from None
+
+    def _source_for_stored_outcome(
+        self, outcome: DiagnosisRunOutcome, parent: ResultManifest
+    ) -> LoadedDiagnosisSource:
+        """Recover a source for correction from a verified parent provenance."""
+
+        if parent.mode is ResultMode.REPLAY and parent.fixture_id is not None:
+            _row, indexed, fixture_source = self._load_fixture_source(parent.fixture_id)
             if indexed.run_id == outcome.run_id:
                 if canonical_json_bytes(indexed.model_dump(mode="json")) != canonical_json_bytes(
                     outcome.model_dump(mode="json")
@@ -449,9 +481,7 @@ class ResultApplicationService:
             raise ResultServiceError("correction_invalid")
         try:
             outcome = self._outcome_store.read(previous_run_id)
-            source = self._source_for_stored_outcome(
-                outcome, self._run_results.get(previous_run_id)
-            )
+            parent, source = self._verified_parent_for_correction(outcome)
             if source.source_run_id != previous_run_id:
                 raise ValueError("identity")
             values = {fact.field_id: fact.value for fact in source.outcome.facts.facts}
@@ -500,15 +530,19 @@ class ResultApplicationService:
             return self._failure("workflow_not_configured")
         try:
             previous = self._outcome_store.read(previous_run_id)
-            source = self._source_for_stored_outcome(previous, existing)
+            parent, source = self._verified_parent_for_correction(previous)
             target = next(
                 item for item in previous.facts.facts if item.field_id is checked.field_id
             )
             from debugmate.diagnosis.extraction import normalize_value
 
             if normalize_value(checked.field_id, checked.replacement) == target.value:
-                return existing if existing is not None else self._failure("correction_invalid")
-            if existing is not None and existing.mode is ResultMode.REPLAY:
+                return existing if existing is not None else self._state_from_manifest(parent)
+            fixture_parent = False
+            if parent.mode is ResultMode.REPLAY and parent.fixture_id is not None:
+                _row, indexed, _fixture_source = self._load_fixture_source(parent.fixture_id)
+                fixture_parent = indexed.run_id == previous.run_id
+            if fixture_parent:
                 # The fixture remains the read-only replay source.  Phase 3's
                 # correction evidence contract also requires an immutable local
                 # parent bundle, so publish an identical verified source copy
@@ -537,9 +571,9 @@ class ResultApplicationService:
             del source
             return self._compose(
                 revised,
-                mode=existing.mode if existing is not None else ResultMode.LIVE,
-                fixture_id=existing.fixture_id if existing is not None else None,
-                fixture_name=existing.fixture_name if existing is not None else None,
+                mode=parent.mode,
+                fixture_id=parent.fixture_id,
+                fixture_name=parent.fixture_name,
             )
         except (ResultLoadError, ResultServiceError, StopIteration, ValueError, TypeError):
             return self._failure("correction_invalid")
