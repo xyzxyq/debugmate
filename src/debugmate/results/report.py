@@ -242,13 +242,14 @@ def _citation_rows(presentation: PresentationModel) -> tuple[CitationRow, ...]:
         if not set(candidate.fact_ids) <= facts or not set(candidate.evidence_ids) <= evidence:
             raise ValueError("invalid candidate graph")
         if candidate.claim_label == "有依据":
-            has_complete_edge = any(
-                set(candidate.fact_ids) == set(link.fact_ids)
-                and set(candidate.evidence_ids) == set(link.evidence_ids)
+            matching_edges = sum(
+                1
                 for link in presentation.support_links
+                if set(candidate.fact_ids) == set(link.fact_ids)
+                and set(candidate.evidence_ids) == set(link.evidence_ids)
             )
-            if not has_complete_edge:
-                raise ValueError("grounded candidate requires one complete support edge")
+            if matching_edges != 1:
+                raise ValueError("grounded candidate requires exactly one complete support edge")
 
     rows: list[CitationRow] = []
     for item in sorted(presentation.citations, key=lambda value: value.evidence_id):
