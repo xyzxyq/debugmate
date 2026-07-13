@@ -171,6 +171,24 @@ def test_png_verifier_rejects_crc_duplicate_split_and_order_attacks(tmp_path: Pa
             verify_card_png(target, expected_size=(1600, 10))
 
 
+def test_png_parser_rejects_hidden_iend_and_abnormal_ihdr_payloads(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", (1600, 10), "white").save(source)
+    parts = _chunks(source.read_bytes())
+    ihdr = next(item for item in parts if item[0] == b"IHDR")
+    idat = next(item for item in parts if item[0] == b"IDAT")
+    attacks = (
+        _png([ihdr, idat, (b"IEND", b"HIDDEN")]),
+        _png([(b"IHDR", ihdr[1] + b"X"), idat, (b"IEND", b"")]),
+    )
+    for index, payload in enumerate(attacks):
+        target = tmp_path / f"payload-attack-{index}.png"
+        target.write_bytes(payload)
+        with pytest.raises(CardRenderFailure, match="png_verify_failed") as caught:
+            verify_card_png(target, expected_size=(1600, 10))
+        assert "HIDDEN" not in str(caught.value)
+
+
 def test_png_resource_limits_are_checked_before_decode(tmp_path: Path) -> None:
     oversized = tmp_path / "oversized.png"
     with oversized.open("wb") as stream:
