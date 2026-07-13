@@ -14,6 +14,7 @@ from debugmate.results.tts.base import (
     TtsAdapterError,
     TtsRequestIdentity,
 )
+from debugmate.results.tts.validation import validate_tts_request
 
 
 class EdgeTtsAdapter:
@@ -28,7 +29,7 @@ class EdgeTtsAdapter:
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
     ) -> AudioCandidate:
-        del request_identity
+        text, request_identity = validate_tts_request(text, request_identity)
         try:
             asyncio.run(
                 edge_tts.Communicate(text.text, self.voice, rate=self._RATES[rate_profile]).save(
@@ -39,5 +40,9 @@ class EdgeTtsAdapter:
             target.unlink(missing_ok=True)
             raise TtsAdapterError() from None
         return AudioCandidate(
-            backend=self.backend, rate_profile=rate_profile, path=target, voice=self.voice
+            backend=self.backend,
+            rate_profile=rate_profile,
+            path=target,
+            request_identity=request_identity,
+            voice=self.voice,
         )

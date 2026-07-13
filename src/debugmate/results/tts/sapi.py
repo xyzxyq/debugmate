@@ -13,6 +13,7 @@ from debugmate.results.tts.base import (
     TtsAdapterError,
     TtsRequestIdentity,
 )
+from debugmate.results.tts.validation import validate_tts_request
 
 
 class SapiTtsAdapter:
@@ -41,7 +42,7 @@ class SapiTtsAdapter:
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
     ) -> AudioCandidate:
-        del request_identity
+        text, request_identity = validate_tts_request(text, request_identity)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             with tempfile.TemporaryDirectory(prefix="sapi-", dir=target.parent) as temp_name:
@@ -99,5 +100,9 @@ class SapiTtsAdapter:
             target.unlink(missing_ok=True)
             raise TtsAdapterError() from None
         return AudioCandidate(
-            backend=self.backend, rate_profile=rate_profile, path=target, voice=self.voice
+            backend=self.backend,
+            rate_profile=rate_profile,
+            path=target,
+            request_identity=request_identity,
+            voice=self.voice,
         )

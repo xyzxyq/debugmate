@@ -13,6 +13,7 @@ from debugmate.results.tts.base import (
     TtsAdapterError,
     TtsRequestIdentity,
 )
+from debugmate.results.tts.validation import validate_tts_request
 from debugmate.settings import DebugMateSettings
 
 
@@ -37,7 +38,7 @@ class DifyTtsAdapter:
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
     ) -> AudioCandidate:
-        del request_identity
+        text, request_identity = validate_tts_request(text, request_identity)
         if self._settings.dify_api_key is None:
             raise TtsAdapterError("tts_not_configured")
         try:
@@ -65,4 +66,9 @@ class DifyTtsAdapter:
         if not payload:
             raise TtsAdapterError() from None
         target.write_bytes(payload)
-        return AudioCandidate(backend=self.backend, rate_profile=rate_profile, path=target)
+        return AudioCandidate(
+            backend=self.backend,
+            rate_profile=rate_profile,
+            path=target,
+            request_identity=request_identity,
+        )

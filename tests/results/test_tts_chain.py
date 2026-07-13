@@ -18,6 +18,15 @@ from debugmate.settings import DebugMateSettings
 
 
 def _recap() -> SafeRecapText:
+    units = (
+        "phenomenon: ModuleNotFoundError",
+        "cause: missing dependency",
+        "check: inspect environment",
+        "fix: restore locked dependency",
+        "verify: rerun minimal import",
+        "limitation: confirm in the real environment",
+    )
+    text = "\n".join(units)
     return SafeRecapText.model_construct(
         identity=ArtifactIdentity(
             case_id="case_" + "1" * 32,
@@ -26,12 +35,9 @@ def _recap() -> SafeRecapText:
             schema_version="1.1.0",
             generation_version="gen_" + "4" * 32,
         ),
-        text=(
-            "现象：ModuleNotFoundError。主要原因：缺少 numpy。首次检查：检查环境。"
-            "首次修复：安装依赖。验证：重新导入。限制：仍需确认环境。"
-        ),
-        sha256="a" * 64,
-        units=("a", "b", "c", "d", "e", "f"),
+        text=text,
+        sha256=sha256_bytes(text.encode("utf-8")),
+        units=units,
         word_budget_version="recap_budget_v1",
     )
 
@@ -57,12 +63,13 @@ class FakeAdapter:
 
 
 def _identity() -> TtsRequestIdentity:
+    recap = _recap()
     return TtsRequestIdentity(
         case_id="case_" + "1" * 32,
         source_run_id="run_" + "2" * 32,
         diagnosis_sha256="3" * 64,
         generation_version="gen_" + "4" * 32,
-        recap_sha256="a" * 64,
+        recap_sha256=recap.sha256,
     )
 
 
