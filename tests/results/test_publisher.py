@@ -36,6 +36,24 @@ def test_publisher_requires_factory_issued_root_and_private_candidate_snapshot(
     assert (bundle.path / "report.md").read_bytes() == expected_report
 
 
+def test_publisher_rejects_a_concurrent_candidate_checkout(candidates, tmp_path: Path):
+    from debugmate.results.consistency import (
+        checkout_verified_candidate_for_publication,
+        release_verified_candidate_checkout,
+        validate_result_candidates,
+    )
+
+    candidate = validate_result_candidates(*candidates)
+    checkout_verified_candidate_for_publication(candidate)
+    try:
+        with pytest.raises(publisher_module.ResultPublishError, match="candidate_busy"):
+            publisher_module.publish_result_bundle(
+                _trusted_root(tmp_path / "results"), candidate
+            )
+    finally:
+        release_verified_candidate_checkout(candidate)
+
+
 def test_temp_directory_reparse_race_never_writes_external_target(
     candidates, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

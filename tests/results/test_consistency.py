@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from dataclasses import replace
 
 import pytest
@@ -156,6 +157,10 @@ def test_gate_rejects_copied_or_concurrently_checked_out_candidate(candidates):
     validated = consistency_module.validate_result_candidates(*candidates)
     with pytest.raises(consistency_module.ResultConsistencyError, match="candidate_invalid"):
         consistency_module.checkout_verified_candidate_for_publication(replace(validated))
+
+    pickled = pickle.loads(pickle.dumps(validated))
+    with pytest.raises(consistency_module.ResultConsistencyError, match="candidate_invalid"):
+        consistency_module.checkout_verified_candidate_for_publication(pickled)
 
     consistency_module.checkout_verified_candidate_for_publication(validated)
     try:
