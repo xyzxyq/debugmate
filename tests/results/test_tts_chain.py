@@ -14,9 +14,9 @@ from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import MediaProbe, MediaProbeError
 from debugmate.results.recap import SafeRecapText
+from debugmate.results.tts import edge as edge_module
 from debugmate.results.tts.base import AudioCandidate, RateProfile, TtsRequestIdentity
 from debugmate.results.tts.dify import DifyTtsAdapter
-from debugmate.results.tts import edge as edge_module
 from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
 from debugmate.settings import DebugMateSettings

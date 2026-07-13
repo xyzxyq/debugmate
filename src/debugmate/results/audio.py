@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,8 +83,7 @@ class TtsFallbackChain:
         attempts: list[AudioAttempt] = []
         try:
             _require_safe_directory(target_root)
-            with tempfile.TemporaryDirectory(prefix="debugmate-tts-", dir=target_root) as temp_name:
-                temp = Path(temp_name)
+            with _allocate_leased_temp_directory(target_root) as temp:
                 _require_safe_directory(target_root)
                 _require_safe_directory(temp)
                 for backend_index, adapter in enumerate(self._adapters):
@@ -130,8 +128,8 @@ class TtsFallbackChain:
                             if final_probe != published_probe:
                                 raise _CandidateInvalid
                         except _TargetInvalid:
-                            _safe_unlink(candidate_path)
-                            _safe_unlink(final_path)
+                            _safe_unlink(candidate_path, target_root)
+                            _safe_unlink(final_path, target_root)
                             raise ValueError("tts_target_invalid") from None
                         except _CandidateInvalid:
                             attempts.append(
@@ -142,8 +140,8 @@ class TtsFallbackChain:
                                     safe_error_code="tts_candidate_invalid",
                                 )
                             )
-                            _safe_unlink(candidate_path)
-                            _safe_unlink(final_path)
+                            _safe_unlink(candidate_path, target_root)
+                            _safe_unlink(final_path, target_root)
                             break
                         except MediaProbeError as exc:
                             code = getattr(exc, "code", str(exc))
@@ -157,8 +155,8 @@ class TtsFallbackChain:
                                     else "audio_invalid",
                                 )
                             )
-                            _safe_unlink(candidate_path)
-                            _safe_unlink(final_path)
+                            _safe_unlink(candidate_path, target_root)
+                            _safe_unlink(final_path, target_root)
                             if code == "duration_out_of_range" and rate is RateProfile.NORMAL:
                                 continue
                             break
@@ -171,8 +169,8 @@ class TtsFallbackChain:
                                     safe_error_code="tts_backend_failed",
                                 )
                             )
-                            _safe_unlink(candidate_path)
-                            _safe_unlink(final_path)
+                            _safe_unlink(candidate_path, target_root)
+                            _safe_unlink(final_path, target_root)
                             break
                         attempts.append(
                             AudioAttempt(
@@ -317,6 +315,7 @@ def _acquire_directory_lease(path: Path) -> _DirectoryLease:
         import ctypes
 
         generic_read = 0x80000000
+        delete = 0x00010000
         file_share_read_write = 0x00000001 | 0x00000002
         open_existing = 3
         file_flag_backup_semantics = 0x02000000
@@ -334,7 +333,7 @@ def _acquire_directory_lease(path: Path) -> _DirectoryLease:
         create_file.restype = ctypes.c_void_p
         handle = create_file(
             str(path),
-            generic_read,
+            generic_read | delete,
             file_share_read_write,
             None,
             open_existing,
@@ -355,6 +354,105 @@ def _acquire_directory_lease(path: Path) -> _DirectoryLease:
             raise
     except (AttributeError, OSError, ValueError):
         raise _TargetInvalid from None
+
+
+@dataclass
+class _LeasedTempDirectory:
+    """A private temporary child whose exact directory stays non-renamable."""
+
+    path: Path
+    lease: _DirectoryLease
+
+    def __enter__(self) -> Path:
+        return self.path
+
+    def __exit__(self, *_arguments: object) -> None:
+        # Never delegate to ``TemporaryDirectory.cleanup()``: after a directory
+        # substitution it may invoke recursive removal on an attacker-selected
+        # reparse point. The active no-delete lease makes this exact child stable
+        # while we remove only direct, regular files we can still prove are safe.
+        _cleanup_leased_temp_directory(self.path, self.lease)
+        self.lease.close()
+
+
+def _allocate_leased_temp_directory(root: Path) -> _LeasedTempDirectory:
+    """Create and lease a temp child before exposing any adapter target path."""
+
+    temp: Path | None = None
+    lease: _DirectoryLease | None = None
+    try:
+        _require_safe_directory(root)
+        temp = Path(tempfile.mkdtemp(prefix="debugmate-tts-", dir=root))
+        _require_safe_directory(root)
+        _require_safe_directory(temp)
+        lease = _acquire_directory_lease(temp)
+        _require_safe_directory(root)
+        _require_safe_directory(temp)
+        return _LeasedTempDirectory(path=temp, lease=lease)
+    except (OSError, _TargetInvalid):
+        if lease is not None:
+            lease.close()
+        # If the initial create/lease handoff was attacked, intentionally leave
+        # the uncertain directory in the private root rather than recursively
+        # traversing an untrusted reparse point during cleanup.
+        raise _TargetInvalid from None
+
+
+def _cleanup_leased_temp_directory(path: Path, lease: _DirectoryLease) -> None:
+    """Best-effort, non-recursive cleanup while the original child is leased."""
+
+    try:
+        _require_safe_directory(path)
+        entries = tuple(path.iterdir())
+        for entry in entries:
+            _require_safe_directory(path)
+            _require_safe_file_path(entry, path)
+            entry.unlink()
+        _require_safe_directory(path)
+        _mark_leased_empty_directory_for_deletion(path, lease)
+    except (OSError, _TargetInvalid):
+        # Cleanup failure is deliberately value-free and cannot change a
+        # synthesis result. Leaving a private orphan is safer than following a
+        # substituted directory or exposing an OS error/path to the caller.
+        return
+
+
+def _mark_leased_empty_directory_for_deletion(path: Path, lease: _DirectoryLease) -> None:
+    """Delete only the leased empty directory; never reopen an untrusted path."""
+
+    if os.name != "nt":
+        try:
+            path.rmdir()
+        except OSError:
+            return
+        return
+    if lease.handle is None:
+        return
+    try:
+        import ctypes
+
+        # FileDispositionInfo marks the already-open, DELETE-capable directory
+        # for removal once its non-delete lease closes. No second path lookup or
+        # recursive deletion is performed after the lease is released.
+        file_disposition_info = 4
+        delete_file = ctypes.c_byte(1)
+        set_information = ctypes.windll.kernel32.SetFileInformationByHandle
+        set_information.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        set_information.restype = ctypes.c_int
+        if not set_information(
+            ctypes.c_void_p(lease.handle),
+            file_disposition_info,
+            ctypes.byref(delete_file),
+            ctypes.sizeof(delete_file),
+        ):
+            return
+    except (AttributeError, OSError, ValueError):
+        return
 
 
 class _CandidateInvalid(Exception):
@@ -433,9 +531,14 @@ def _require_safe_file_path(path: Path, root: Path) -> None:
         raise _TargetInvalid
 
 
-def _safe_unlink(path: Path) -> None:
-    with suppress(OSError):
-        path.unlink(missing_ok=True)
+def _safe_unlink(path: Path, root: Path) -> None:
+    """Remove only a proven regular candidate; never follow a reparse point."""
+
+    try:
+        _require_safe_file_path(path, root)
+        path.unlink()
+    except (OSError, _TargetInvalid):
+        return
 
 
 def _candidate_matches(
