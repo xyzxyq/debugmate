@@ -151,6 +151,27 @@ def test_gate_issued_candidate_has_a_private_immutable_business_snapshot(candida
         consistency_module.release_verified_candidate_checkout(validated)
 
 
+def test_public_checkout_cannot_mutate_the_registry_canonical_snapshot(candidates, tmp_path):
+    """A snapshot handed to an observer must never be the publisher's source."""
+
+    from debugmate.results import consistency as consistency_module
+    from debugmate.results import publisher as publisher_module
+
+    validated = consistency_module.validate_result_candidates(*candidates)
+    original_report = validated.report_bytes
+    observed = consistency_module.checkout_verified_candidate_for_publication(validated)
+    try:
+        object.__setattr__(observed, "report_bytes", b"forged observer report")
+        object.__setattr__(observed.identity, "case_id", "case_" + "f" * 32)
+    finally:
+        consistency_module.release_verified_candidate_checkout(validated)
+
+    bundle = publisher_module.publish_result_bundle(
+        publisher_module.TrustedResultRoot.for_testing(tmp_path / "results"), validated
+    )
+    assert (bundle.path / "report.md").read_bytes() == original_report
+
+
 def test_gate_rejects_copied_or_concurrently_checked_out_candidate(candidates):
     from debugmate.results import consistency as consistency_module
 

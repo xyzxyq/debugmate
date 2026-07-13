@@ -18,6 +18,19 @@ def _trusted_root(path: Path):
     return publisher_module.TrustedResultRoot.for_testing(path)
 
 
+def _rewrite_publication_archive_hash(bundle, archive_bytes: bytes) -> None:
+    from debugmate.hashing import canonical_json_bytes, sha256_bytes
+
+    archive = bundle.path / bundle.archive_name
+    os.chmod(archive, stat.S_IWRITE)
+    archive.write_bytes(archive_bytes)
+    publication = bundle.path / "publication.json"
+    payload = json.loads(publication.read_text(encoding="utf-8"))
+    payload["archive_sha256"] = sha256_bytes(archive_bytes)
+    os.chmod(publication, stat.S_IWRITE)
+    publication.write_bytes(canonical_json_bytes(payload))
+
+
 def test_publisher_requires_factory_issued_root_and_private_candidate_snapshot(
     candidates, tmp_path: Path
 ):
@@ -52,6 +65,60 @@ def test_publisher_rejects_a_concurrent_candidate_checkout(candidates, tmp_path:
             )
     finally:
         release_verified_candidate_checkout(candidate)
+
+
+def test_audio_handoff_is_not_consumed_until_after_transaction_begin(
+    candidates, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from debugmate.results.audio import AudioHandoff
+    from debugmate.results.consistency import validate_result_candidates
+
+    calls: list[str] = []
+    original_take = AudioHandoff.take_verified_bytes
+
+    def tracked_take(self, audio):
+        calls.append("take")
+        return original_take(self, audio)
+
+    monkeypatch.setattr(AudioHandoff, "take_verified_bytes", tracked_take)
+    candidate = validate_result_candidates(*candidates)
+    assert calls == []
+
+    def transaction_failure(*_arguments, **_kwargs):
+        raise publisher_module.ResultPublishError("transaction_failed")
+
+    monkeypatch.setattr(publisher_module, "_begin_transaction", transaction_failure)
+    with pytest.raises(publisher_module.ResultPublishError, match="transaction_failed"):
+        publisher_module.publish_result_bundle(_trusted_root(tmp_path / "results"), candidate)
+    assert calls == []
+
+
+def test_audio_handoff_consumes_once_after_safe_transaction_starts(
+    candidates, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from debugmate.results.audio import AudioHandoff
+    from debugmate.results.consistency import validate_result_candidates
+
+    events: list[str] = []
+    original_take = AudioHandoff.take_verified_bytes
+    original_begin = publisher_module._begin_transaction
+
+    def tracked_take(self, audio):
+        events.append("take")
+        return original_take(self, audio)
+
+    def tracked_begin(*arguments, **kwargs):
+        transaction = original_begin(*arguments, **kwargs)
+        events.append("transaction")
+        return transaction
+
+    monkeypatch.setattr(AudioHandoff, "take_verified_bytes", tracked_take)
+    monkeypatch.setattr(publisher_module, "_begin_transaction", tracked_begin)
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
+    )
+    assert events == ["transaction", "take"]
+    assert (bundle.path / "recap.mp3").is_file()
 
 
 def test_temp_directory_reparse_race_never_writes_external_target(
@@ -488,6 +555,45 @@ def test_zip_bomb_metadata_rejects_before_any_member_open(
     with pytest.raises(verifier_module.ResultVerificationError, match="archive_verify_failed"):
         verifier_module.verify_result_bundle(bundle.path)
     assert opened is False
+
+
+@pytest.mark.parametrize(
+    ("prefix", "suffix"),
+    [(b"SFX", b""), (b"", b"unexpected trailing bytes")],
+)
+def test_verifier_rejects_rehashed_zip_preamble_and_trailing_bytes(
+    candidates, tmp_path: Path, prefix: bytes, suffix: bytes
+):
+    from debugmate.results.consistency import validate_result_candidates
+
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
+    )
+    archive = (bundle.path / bundle.archive_name).read_bytes()
+    _rewrite_publication_archive_hash(bundle, prefix + archive + suffix)
+
+    with pytest.raises(verifier_module.ResultVerificationError, match="archive_verify_failed"):
+        verifier_module.verify_result_bundle(bundle.path)
+
+
+def test_verifier_rejects_rehashed_oversize_archive_before_hash_or_zip_open(
+    candidates, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from debugmate.results.consistency import validate_result_candidates
+
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
+    )
+    archive = (bundle.path / bundle.archive_name).read_bytes()
+    oversized = b"P" * (publisher_module.MAX_TOTAL_BYTES + 1) + archive
+    _rewrite_publication_archive_hash(bundle, oversized)
+
+    def unexpected_zip_open(*_arguments, **_kwargs):
+        raise AssertionError("ZipFile must not open an oversized raw archive")
+
+    monkeypatch.setattr(verifier_module.zipfile, "ZipFile", unexpected_zip_open)
+    with pytest.raises(verifier_module.ResultVerificationError, match="archive_verify_failed"):
+        verifier_module.verify_result_bundle(bundle.path)
 
 
 def test_verifier_rejects_stale_version_and_download_file_swap(candidates, tmp_path: Path):
