@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import inspect
 import os
+import pickle
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -586,6 +588,117 @@ def test_handoff_reprobe_failure_is_value_free_and_releases_private_candidate(
     assert caught.value.args == ("audio_handoff_invalid",)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    assert not list(root.rglob("recap.mp3"))
+
+
+def test_handoff_cannot_be_pickled_or_reconstructed_from_copied_slots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the factory-issued handoff instance can consume its private candidate."""
+
+    def matching_probe(path: Path, **_kwargs: object) -> MediaProbe:
+        payload = path.read_bytes()
+        return MediaProbe(
+            duration_ms=45_000,
+            codec="mp3",
+            channels=1,
+            bytes=len(payload),
+            sha256=sha256_bytes(payload),
+        )
+
+    monkeypatch.setattr(audio_module, "probe_mp3", matching_probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", _canonicalize)
+    outcome = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], []),
+            FakeAdapter("edge_tts", ["ok"], []),
+            FakeAdapter("sapi", ["ok"], []),
+        )
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
+
+    assert outcome.handoff is not None
+    with pytest.raises(TypeError):
+        pickle.dumps(outcome.handoff)
+
+    forged = object.__new__(AudioHandoff)
+    for slot in AudioHandoff.__slots__:
+        if slot != "__weakref__":
+            object.__setattr__(forged, slot, object.__getattribute__(outcome.handoff, slot))
+    forged_outcome = type(outcome)(audio=outcome.audio.model_copy(), handoff=forged)
+
+    with pytest.raises(AudioHandoffError, match="^audio_handoff_invalid$") as caught:
+        forged_outcome.handoff.take_verified_bytes(forged_outcome.audio)
+
+    assert caught.value.args == ("audio_handoff_invalid",)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert str(tmp_path) not in repr(forged)
+    assert str(tmp_path) not in repr(caught.value)
+    assert outcome.handoff.take_verified_bytes(outcome.audio).startswith(b"\xff\xfb")
+
+
+def test_handoff_consumption_is_atomic_across_concurrent_readers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One exact result can win; a simultaneous second reader never sees bytes."""
+
+    entered_probe = threading.Event()
+    allow_probe = threading.Event()
+    arm_handoff_probe = threading.Event()
+
+    def blocking_probe(path: Path, **_kwargs: object) -> MediaProbe:
+        if arm_handoff_probe.is_set():
+            entered_probe.set()
+            assert allow_probe.wait(timeout=5)
+        payload = path.read_bytes()
+        return MediaProbe(
+            duration_ms=45_000,
+            codec="mp3",
+            channels=1,
+            bytes=len(payload),
+            sha256=sha256_bytes(payload),
+        )
+
+    monkeypatch.setattr(audio_module, "probe_mp3", blocking_probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", _canonicalize)
+    root = tmp_path / "private-candidates"
+    outcome = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], []),
+            FakeAdapter("edge_tts", ["ok"], []),
+            FakeAdapter("sapi", ["ok"], []),
+        )
+    ).synthesize(_recap(), _identity(), TrustedCandidateRoot.for_testing(root))
+
+    assert outcome.handoff is not None
+    returned: list[bytes] = []
+    failures: list[Exception] = []
+
+    def consume() -> None:
+        try:
+            returned.append(outcome.handoff.take_verified_bytes(outcome.audio))
+        except Exception as error:  # Thread assertion should retain the real refusal object.
+            failures.append(error)
+
+    arm_handoff_probe.set()
+    first = threading.Thread(target=consume)
+    first.start()
+    assert entered_probe.wait(timeout=5)
+    second = threading.Thread(target=consume)
+    second.start()
+    second.join(timeout=5)
+    allow_probe.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert returned and returned[0].startswith(b"\xff\xfb")
+    assert len(returned) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0], AudioHandoffError)
+    assert failures[0].args == ("audio_handoff_invalid",)
+    assert str(root) not in repr(failures[0])
     assert not list(root.rglob("recap.mp3"))
 
 

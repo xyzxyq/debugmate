@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+import threading
+import weakref
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,9 +31,6 @@ class AudioHandoffError(ValueError):
         super().__init__("audio_handoff_invalid")
 
 
-_AUDIO_HANDOFF_CAPABILITY = object()
-
-
 @dataclass(frozen=True, slots=True)
 class TtsSynthesisOutcome:
     """The public JSON-safe audio record plus one private successful handoff.
@@ -50,6 +49,72 @@ class TtsSynthesisOutcome:
             raise ValueError("tts_outcome_invalid")
 
 
+@dataclass(slots=True)
+class _RegisteredAudioHandoff:
+    """All mutable capability state kept outside the public handoff object."""
+
+    owner_ref: weakref.ReferenceType[AudioHandoff]
+    audio: AudioResult
+    candidate: _MaterializedAudio
+    lease: _CandidateRootLease
+    probe_timeout: float
+    max_bytes: int
+
+
+_AUDIO_HANDOFF_LOCK = threading.RLock()
+_AUDIO_HANDOFFS: dict[object, _RegisteredAudioHandoff] = {}
+
+
+def _release_registered_audio_handoff(state: _RegisteredAudioHandoff) -> None:
+    """Release private resources without surfacing cleanup data or failures."""
+
+    with suppress(Exception):
+        state.candidate.file.close()
+    with suppress(Exception):
+        _safe_unlink(state.candidate.file.path, state.candidate.root)
+    with suppress(Exception):
+        state.lease.close()
+
+
+def _discard_abandoned_audio_handoff(token: object) -> None:
+    """Weakref callback target: remove an unconsumed state before it can leak."""
+
+    try:
+        with _AUDIO_HANDOFF_LOCK:
+            state = _AUDIO_HANDOFFS.pop(token, None)
+    except Exception:  # pragma: no cover - interpreter shutdown hygiene
+        return
+    if state is not None:
+        _release_registered_audio_handoff(state)
+
+
+def _handoff_finalizer(token: object):
+    def finalize(_owner: object) -> None:
+        _discard_abandoned_audio_handoff(token)
+
+    return finalize
+
+
+def _registered_handoff_state(
+    handoff: AudioHandoff, *, audio: AudioResult | None = None, consume: bool
+) -> _RegisteredAudioHandoff | None:
+    """Get the private state only for its original object and exact public result."""
+
+    try:
+        token = object.__getattribute__(handoff, "_token")
+        with _AUDIO_HANDOFF_LOCK:
+            state = _AUDIO_HANDOFFS.get(token)
+            if state is None or state.owner_ref() is not handoff:
+                return None
+            if audio is not None and audio is not state.audio:
+                return None
+            if consume:
+                _AUDIO_HANDOFFS.pop(token, None)
+            return state
+    except (AttributeError, TypeError):
+        return None
+
+
 class AudioHandoff:
     """Opaque, one-shot authority to copy one retained canonical MP3.
 
@@ -59,33 +124,10 @@ class AudioHandoff:
     stay held until this one read is complete.
     """
 
-    __slots__ = (
-        "_audio",
-        "_candidate",
-        "_lease",
-        "_max_bytes",
-        "_probe_timeout",
-        "_released",
-    )
+    __slots__ = ("_token", "__weakref__")
 
-    def __init__(
-        self,
-        *,
-        _capability: object,
-        audio: AudioResult,
-        candidate: _MaterializedAudio,
-        lease: _CandidateRootLease,
-        probe_timeout: float,
-        max_bytes: int,
-    ) -> None:
-        if _capability is not _AUDIO_HANDOFF_CAPABILITY:
-            raise TypeError("AudioHandoff requires an approved factory")
-        self._audio = audio
-        self._candidate = candidate
-        self._lease = lease
-        self._max_bytes = max_bytes
-        self._probe_timeout = probe_timeout
-        self._released = False
+    def __init__(self, *_arguments: object, **_keyword_arguments: object) -> None:
+        raise TypeError("AudioHandoff requires an approved factory")
 
     @classmethod
     def _issue(
@@ -97,17 +139,24 @@ class AudioHandoff:
         probe_timeout: float,
         max_bytes: int,
     ) -> AudioHandoff:
-        return cls(
-            _capability=_AUDIO_HANDOFF_CAPABILITY,
+        handoff = object.__new__(cls)
+        token = object()
+        object.__setattr__(handoff, "_token", token)
+        state = _RegisteredAudioHandoff(
+            owner_ref=weakref.ref(handoff, _handoff_finalizer(token)),
             audio=audio,
             candidate=candidate,
             lease=lease,
             probe_timeout=probe_timeout,
             max_bytes=max_bytes,
         )
+        with _AUDIO_HANDOFF_LOCK:
+            _AUDIO_HANDOFFS[token] = state
+        return handoff
 
     def __repr__(self) -> str:
-        return "<AudioHandoff active>" if not self._released else "<AudioHandoff released>"
+        state = _registered_handoff_state(self, consume=False)
+        return "<AudioHandoff active>" if state is not None else "<AudioHandoff released>"
 
     def __copy__(self) -> AudioHandoff:
         raise TypeError("AudioHandoff is not copyable")
@@ -115,43 +164,45 @@ class AudioHandoff:
     def __deepcopy__(self, _memo: object) -> AudioHandoff:
         raise TypeError("AudioHandoff is not copyable")
 
-    def __del__(self) -> None:  # pragma: no cover - last-resort private-handle hygiene
-        try:
-            self.close()
-        except Exception:
-            # Finalizers must never surface a private cleanup value during
-            # interpreter shutdown; normal callers use the deterministic read.
-            return
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("AudioHandoff is not serialisable")
+
+    def __reduce__(self) -> object:
+        raise TypeError("AudioHandoff is not serialisable")
+
+    def __getstate__(self) -> object:
+        raise TypeError("AudioHandoff is not serialisable")
 
     def take_verified_bytes(self, audio: AudioResult) -> bytes:
         """Return one freshly re-probed/hash-checked copy and release the lease."""
 
-        if self._released or audio is not self._audio:
+        state = _registered_handoff_state(self, audio=audio, consume=True)
+        if state is None:
             raise AudioHandoffError
         payload: bytes | None = None
         try:
-            candidate = self._candidate
+            candidate = state.candidate
             candidate.file.assert_same_path_identity(candidate.root)
             probe = probe_mp3(
                 candidate.file.path,
-                timeout_seconds=self._probe_timeout,
-                max_bytes=self._max_bytes,
+                timeout_seconds=state.probe_timeout,
+                max_bytes=state.max_bytes,
             )
             candidate.file.assert_same_path_identity(candidate.root)
             if (
-                probe.duration_ms != audio.duration_ms
-                or probe.sha256 != audio.sha256
+                probe.duration_ms != state.audio.duration_ms
+                or probe.sha256 != state.audio.sha256
                 or probe.bytes <= 0
             ):
                 raise _TargetInvalid
-            payload = candidate.file.read_all(self._max_bytes)
+            payload = candidate.file.read_all(state.max_bytes)
             candidate.file.assert_same_path_identity(candidate.root)
             if len(payload) != probe.bytes or sha256_bytes(payload) != probe.sha256:
                 raise _TargetInvalid
         except Exception:
             payload = None
         finally:
-            self.close()
+            _release_registered_audio_handoff(state)
         if payload is None:
             raise AudioHandoffError
         return payload
@@ -159,13 +210,9 @@ class AudioHandoff:
     def close(self) -> None:
         """Release every private resource without revealing cleanup values."""
 
-        if getattr(self, "_released", True):
-            return
-        self._released = True
-        candidate = self._candidate
-        candidate.file.close()
-        _safe_unlink(candidate.file.path, candidate.root)
-        self._lease.close()
+        state = _registered_handoff_state(self, consume=True)
+        if state is not None:
+            _release_registered_audio_handoff(state)
 
 
 class TtsFallbackChain:

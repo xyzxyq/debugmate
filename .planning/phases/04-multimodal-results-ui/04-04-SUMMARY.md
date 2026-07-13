@@ -214,3 +214,34 @@ Fresh verification after this repair:
   explicitly open);
 - full offline suite: `630 passed, 27 deselected`;
 - `ruff check src/debugmate/results tests/results`: passed.
+
+## Atomic one-shot handoff follow-up
+
+The final Plan 05 seam review found that the first `AudioHandoff` still kept its
+candidate, leases and identity state in copyable object slots. That made a
+pickle round-trip and an `object.__new__` object with copied slots meaningful
+attack surfaces, and the check-then-release sequence was not atomic across two
+threads.
+
+The replacement makes the public handoff a one-slot opaque token only. The
+candidate file, root/run leases, exact successful `AudioResult` object,
+probe timeout and byte bound live in a module-private registry under an
+`RLock`. A registry entry is bound to a weak reference to the original handoff
+object; copying the token into a forged object never matches that owner. Its
+weak-reference finalizer discards and cleans an abandoned entry, so the private
+file cannot stay live merely because a registry entry exists.
+
+`take_verified_bytes()` now validates the exact original `AudioResult` and
+removes the registry entry while holding the lock, before it begins the
+time-consuming media re-probe/read. Therefore only one concurrent caller can
+obtain bytes; every later caller, forged handoff, copied outcome, stale probe or
+read failure receives the fixed, context-free `audio_handoff_invalid` response.
+The actual candidate is then safely deleted and both leases are released.
+
+New RED/GREEN attack evidence covers pickle refusal, copied-slot
+`object.__new__` plus a forged outcome, and two concurrent readers paused at the
+fresh probe. The predecessor failed both attacks (pickle succeeded and the
+second reader entered the probe); the repaired focused set passes. Fresh local
+verification after the repair: `test_tts_chain.py` has `20 passed`; the real
+TTS gate has `3 passed, 2 explicit external skips` (Dify key absent and edge
+network opt-in absent).
