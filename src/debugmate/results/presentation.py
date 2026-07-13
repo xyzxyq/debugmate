@@ -19,7 +19,9 @@ from debugmate.results.loader import LoadedDiagnosisSource
 
 _PRESENTATION_TOKEN = object()
 _PRESENTATION_REGISTRY_LOCK = threading.RLock()
-_PRESENTATION_REGISTRY: dict[int, weakref.ReferenceType[PresentationModel]] = {}
+_PRESENTATION_REGISTRY: dict[
+    int, tuple[weakref.ReferenceType[PresentationModel], str]
+] = {}
 
 
 def _projection_sha256(payload: dict[str, object]) -> str:
@@ -30,7 +32,8 @@ def _forget_presentation(
     key: int, reference: weakref.ReferenceType[PresentationModel]
 ) -> None:
     with _PRESENTATION_REGISTRY_LOCK:
-        if _PRESENTATION_REGISTRY.get(key) is reference:
+        current = _PRESENTATION_REGISTRY.get(key)
+        if current is not None and current[0] is reference:
             _PRESENTATION_REGISTRY.pop(key, None)
 
 
@@ -40,13 +43,15 @@ def _register_presentation(value: PresentationModel) -> None:
         value, lambda current, identity=key: _forget_presentation(identity, current)
     )
     with _PRESENTATION_REGISTRY_LOCK:
-        _PRESENTATION_REGISTRY[key] = reference
+        _PRESENTATION_REGISTRY[key] = (reference, value.projection_sha256)
 
 
-def _is_registered_presentation(value: PresentationModel) -> bool:
+def _registered_projection_sha256(value: PresentationModel) -> str | None:
     with _PRESENTATION_REGISTRY_LOCK:
-        reference = _PRESENTATION_REGISTRY.get(id(value))
-        return reference is not None and reference() is value
+        entry = _PRESENTATION_REGISTRY.get(id(value))
+        if entry is None or entry[0]() is not value:
+            return None
+        return entry[1]
 
 
 class PresentationBuildError(ValueError):
@@ -174,8 +179,10 @@ def _validated_presentation(value: object) -> PresentationModel:
     if not isinstance(value, PresentationModel):
         raise TypeError("presentation type")
     payload = value.model_dump(mode="json", exclude={"projection_sha256"})
+    registered_sha256 = _registered_projection_sha256(value)
     if (
-        not _is_registered_presentation(value)
+        registered_sha256 is None
+        or registered_sha256 != value.projection_sha256
         or value.projection_sha256 != _projection_sha256(payload)
     ):
         raise ValueError("presentation source authenticity mismatch")
