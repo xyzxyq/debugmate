@@ -24,6 +24,7 @@ from debugmate.results.contracts import (
     SafeFailure,
 )
 from debugmate.results.font import prepare_generation_context
+
 ROOT = Path(__file__).resolve().parents[2]
 CASE_ID = "case_" + "1" * 32
 RUN_ID = "run_" + "2" * 32
@@ -31,14 +32,15 @@ SHA = "3" * 64
 
 
 def _identity(**changes: object) -> ArtifactIdentity:
-    return ArtifactIdentity(
+    payload = dict(
         case_id=CASE_ID,
         source_run_id=RUN_ID,
         diagnosis_sha256=SHA,
         schema_version="1.1.0",
         generation_version="gen_" + "4" * 32,
-        **changes,
     )
+    payload.update(changes)
+    return ArtifactIdentity(**payload)
 
 
 def _artifact(kind: str, path: str) -> ArtifactRecord:
