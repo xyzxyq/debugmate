@@ -18,6 +18,7 @@ from debugmate.results.contracts import (
     ResultStatus,
     ResultViewState,
 )
+from debugmate.ui import serve as serve_module
 from debugmate.ui.app import build_app
 from debugmate.ui.serve import _local_service
 
@@ -95,6 +96,37 @@ def test_local_service_configures_a_real_result_composer_for_replay(tmp_path: Pa
     service = _local_service(runtime_root=tmp_path / "runtime")
 
     assert callable(service._composer)
+
+
+def test_local_composer_uses_the_positional_tts_chain_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class StopAfterTtsCall(RuntimeError):
+        pass
+
+    class CapturingChain:
+        def __init__(self, _adapters) -> None:
+            pass
+
+        def synthesize(self, recap, request, candidate_root):
+            calls.append((recap, request, candidate_root))
+            raise StopAfterTtsCall
+
+    monkeypatch.setattr(serve_module, "TtsFallbackChain", CapturingChain)
+    service = serve_module._local_service(runtime_root=tmp_path / "runtime")
+    row, _outcome, source = service._load_fixture_source("module-not-found")
+
+    with pytest.raises(StopAfterTtsCall):
+        service._composer(
+            source,
+            mode=ResultMode.REPLAY,
+            fixture_id=str(row["fixture_id"]),
+            fixture_name=str(row["display_label"]),
+        )
+
+    assert len(calls) == 1
 
 
 def _free_port() -> int:

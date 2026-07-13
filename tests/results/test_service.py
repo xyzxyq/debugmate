@@ -129,6 +129,24 @@ def test_indexed_replay_imports_complete_outcome_publishes_new_verified_result_a
     assert restored == state
 
 
+def test_replay_composition_failure_retains_verified_fixture_identity_in_safe_state(
+    tmp_path: Path
+) -> None:
+    def broken_composer(*_arguments, **_kwargs):
+        raise TypeError("adapter misuse")
+
+    service = _service(tmp_path, composer=broken_composer)
+
+    state = service.load_replay("module-not-found")
+
+    assert state.status.value == "failed"
+    assert state.mode.value == "replay"
+    assert state.fixture_id == "module-not-found"
+    assert state.fixture_name == "ModuleNotFoundError：缺少虚构依赖包"
+    assert state.failure.code == "result_composition_failed"
+    assert "adapter misuse" not in repr(state)
+
+
 def test_replay_invalid_fixture_and_ui_supplied_outcome_become_safe_failures(
     candidates, completed_source_bundle, tmp_path: Path
 ) -> None:
