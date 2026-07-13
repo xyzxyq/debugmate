@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from PIL import Image, PngImagePlugin
 
 from debugmate.results.card import (
     CANVAS_WIDTH,
+    MAX_PNG_BYTES,
     CardRenderFailure,
     measure_card,
     render_card,
@@ -54,6 +57,9 @@ def test_font_and_layout_are_bound_and_deterministic(
     assert first == second
     assert first.canvas_width == CANVAS_WIDTH == 1600
     assert first.canvas_height > 0
+    assert first.title == "DebugMate 诊断卡"
+    assert presentation.identity.case_id[-8:] in first.identity_bar
+    assert presentation.identity.generation_version in first.identity_bar
     assert [section.section_id for section in first.sections] == [
         "phenomenon",
         "causes",
@@ -66,6 +72,8 @@ def test_font_and_layout_are_bound_and_deterministic(
         assert section.x + section.width <= first.canvas_width
         assert section.y + section.height <= first.canvas_height
         assert all(line.width <= section.content_width for line in section.lines)
+    causes = next(item for item in first.sections if item.section_id == "causes")
+    assert all(evidence_id in "\n".join(line.text for line in causes.lines) for evidence_id in presentation.root_causes[0].evidence_ids)
 
 
 def test_font_change_and_profile_mismatch_fail_closed(
@@ -114,6 +122,71 @@ def test_png_verifier_rejects_real_apng(tmp_path: Path) -> None:
     frames[0].save(bad, save_all=True, append_images=frames[1:], duration=10, loop=0)
     with pytest.raises(CardRenderFailure, match="png_verify_failed"):
         verify_card_png(bad, expected_size=(1600, 10))
+
+
+def _chunks(payload: bytes) -> list[tuple[bytes, bytes]]:
+    offset = 8
+    result = []
+    while offset < len(payload):
+        length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        kind = payload[offset + 4 : offset + 8]
+        data = payload[offset + 8 : offset + 8 + length]
+        result.append((kind, data))
+        offset += 12 + length
+    return result
+
+
+def _png(parts: list[tuple[bytes, bytes]]) -> bytes:
+    output = bytearray(b"\x89PNG\r\n\x1a\n")
+    for kind, data in parts:
+        output.extend(struct.pack(">I", len(data)))
+        output.extend(kind)
+        output.extend(data)
+        output.extend(struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    return bytes(output)
+
+
+def test_png_verifier_rejects_crc_duplicate_split_and_order_attacks(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", (1600, 10), "white").save(source)
+    original = source.read_bytes()
+    parts = _chunks(original)
+    ihdr = next(item for item in parts if item[0] == b"IHDR")
+    idat = next(item for item in parts if item[0] == b"IDAT")
+    iend = next(item for item in parts if item[0] == b"IEND")
+    attacks = [
+        original[:-1] + bytes([original[-1] ^ 1]),
+        _png([ihdr, ihdr, idat, iend]),
+        _png([ihdr, (b"IDAT", idat[1][:1]), (b"IDAT", idat[1][1:]), iend]),
+        _png([ihdr, iend, idat]),
+        _png([ihdr, idat, iend, iend]),
+    ]
+    for index, payload in enumerate(attacks):
+        target = tmp_path / f"attack-{index}.png"
+        target.write_bytes(payload)
+        with pytest.raises(CardRenderFailure, match="png_verify_failed"):
+            verify_card_png(target, expected_size=(1600, 10))
+
+
+def test_png_resource_limits_are_checked_before_decode(tmp_path: Path) -> None:
+    oversized = tmp_path / "oversized.png"
+    with oversized.open("wb") as stream:
+        stream.write(b"\x89PNG\r\n\x1a\n")
+        stream.seek(MAX_PNG_BYTES)
+        stream.write(b"x")
+    with pytest.raises(CardRenderFailure, match="png_verify_failed"):
+        verify_card_png(oversized, expected_size=(1600, 10))
+
+    wrong_width = tmp_path / "wrong-width.png"
+    Image.new("RGB", (1599, 10), "white").save(wrong_width)
+    with pytest.raises(CardRenderFailure, match="png_verify_failed"):
+        verify_card_png(wrong_width, expected_size=(1599, 10))
+
+    huge = tmp_path / "huge-header.png"
+    ihdr = struct.pack(">IIBBBBB", 1600, 20_000, 8, 2, 0, 0, 0)
+    huge.write_bytes(_png([(b"IHDR", ihdr), (b"IDAT", b"x"), (b"IEND", b"")]))
+    with pytest.raises(CardRenderFailure, match="png_verify_failed"):
+        verify_card_png(huge, expected_size=(1600, 20_000))
 
 
 def test_final_disk_verify_failure_removes_success_looking_target(
