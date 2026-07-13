@@ -17,6 +17,7 @@ from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.card import verify_card_png
 from debugmate.results.contracts import ResultManifest, ResultStatus
+from debugmate.results.loader import NodeStateEntry, SourceManifestSummary
 from debugmate.results.media import probe_mp3
 from debugmate.results.publisher import (
     _BUSINESS_SPECS,
@@ -211,6 +212,36 @@ def _validate_business_payloads(root: Path, manifest: ResultManifest) -> dict[st
             or source_payload["schema_version"] != manifest.identity.schema_version
         ):
             raise ValueError("summary identity")
+        source_summary = SourceManifestSummary.model_validate(
+            {
+                "manifest_version": source_payload["source_contract_version"],
+                "case_id": source_payload["case_id"],
+                "run_id": source_payload["source_run_id"],
+                "facts_revision": source_payload["facts_revision"],
+                "facts_sha256": source_payload["facts_sha256"],
+                "routing_rule_version": source_payload["routing_rule_version"],
+                "knowledge_build_id": source_payload["knowledge_build_id"],
+                "schema_version": source_payload["schema_version"],
+                "prompt_version": source_payload["prompt_version"],
+                "workflow_version": source_payload["workflow_version"],
+                # JSON decodes the canonical tuple as a list; construct the
+                # tuple required by the strict source-summary contract before
+                # model validation rather than weakening strict mode.
+                "node_states": tuple(source_payload["node_states"]),
+            },
+            strict=True,
+        )
+        if len({item.stage for item in source_summary.node_states}) != len(
+            source_summary.node_states
+        ):
+            raise ValueError("duplicate node")
+        # Preserve the narrow, concrete entry contract rather than retaining a
+        # generic JSON list that could disguise copied provider bodies.
+        if tuple(
+            NodeStateEntry.model_validate(item, strict=True)
+            for item in source_payload["node_states"]
+        ) != source_summary.node_states:
+            raise ValueError("node state")
         assert_export_safe(source_payload)
     except Exception:
         raise ResultVerificationError("source_summary_invalid") from None
@@ -279,7 +310,10 @@ def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, byte
     member_values = {_BUSINESS_SPECS[kind][0]: payload for kind, payload in values.items()}
     manifest_bytes = (root / RESULT_MANIFEST_NAME).read_bytes()
     member_values[RESULT_MANIFEST_NAME] = manifest_bytes
-    checksums = _parse_checksums((root / CHECKSUMS_NAME).read_bytes())
+    checksums_path = root / CHECKSUMS_NAME
+    if not _safe_file(checksums_path, root):
+        raise ResultVerificationError("checksums_invalid")
+    checksums = _parse_checksums(checksums_path.read_bytes())
     expected_names = sorted((*member_values, CHECKSUMS_NAME))
     if set(checksums) != set(member_values) or any(
         checksums[name] != sha256_bytes(payload) for name, payload in member_values.items()
@@ -316,7 +350,7 @@ def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, byte
                     raise ValueError("size")
                 data = archive.read(info)
                 expected = (
-                    (root / CHECKSUMS_NAME).read_bytes()
+                    checksums_path.read_bytes()
                     if info.filename == CHECKSUMS_NAME
                     else member_values[info.filename]
                 )

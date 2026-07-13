@@ -36,7 +36,7 @@ status: complete
 
 ## Verification
 
-- `python -m pytest -q tests/results` — 175 passed, 5 deselected.
+- `python -m pytest -q tests/results` — 179 passed, 5 deselected.
 - `python -m pytest -q` — 651 passed, 27 deselected (offline defaults).
 - `python -m ruff check src/debugmate/results src/debugmate/cli.py tests/results`
   and `python -m pip check` — passed.
@@ -47,3 +47,7 @@ status: complete
 an explicit audio-only partial result, while retaining `audio` and the exact
 card retry contract.  This aligns the terminal bundle contract with the
 already fail-closed Phase 04 TTS chain.
+
+The verifier also reconstructs the narrow typed source-summary contract before
+serving a bundle; JSON list encoding is converted to the contract's tuple
+shape before strict validation, without accepting extra provider data.
