@@ -238,6 +238,46 @@ def test_replay_correction_requires_confirmation_and_preserves_old_source_and_re
     assert service.restore_result(original.identity.case_id, original.result_id) == original
 
 
+def test_restarted_service_preserves_verified_replay_lineage_for_a_second_correction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.diagnosis.test_workflow_e2e import _rows, _workflow
+
+    from debugmate.results.service import CorrectionDraft
+
+    workflow, *_ = _workflow(_rows()[0], tmp_path)
+    _root, composer = _dynamic_composer(tmp_path, monkeypatch)
+    first_service = _service(tmp_path, composer=composer, workflow=workflow)
+    original = first_service.load_replay("module-not-found")
+    assert original.identity is not None
+    first_correction = first_service.correct_and_compose(
+        original.identity.source_run_id,
+        CorrectionDraft(
+            field_id=FieldId.EXCEPTION_TYPE,
+            replacement="ImportError",
+            reason="已确认第一次修正。",
+        ),
+        True,
+    )
+    assert first_correction.identity is not None
+
+    restarted = _service(tmp_path, composer=composer, workflow=workflow)
+    second_correction = restarted.correct_and_compose(
+        first_correction.identity.source_run_id,
+        CorrectionDraft(
+            field_id=FieldId.PACKAGE,
+            replacement="demo_pkg_v2",
+            reason="已确认第二次修正。",
+        ),
+        True,
+    )
+
+    assert second_correction.status.value == "completed"
+    assert second_correction.mode.value == "replay"
+    assert second_correction.fixture_id == "module-not-found"
+    assert second_correction.fixture_name == "ModuleNotFoundError：缺少虚构依赖包"
+
+
 def test_download_returns_only_one_shot_verified_bytes_not_a_server_path(
     candidates, tmp_path: Path
 ) -> None:
