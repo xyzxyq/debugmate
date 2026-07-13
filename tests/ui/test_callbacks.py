@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
-import gradio as gr
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -18,11 +15,7 @@ from debugmate.results.contracts import (
 from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui.app import (
     UiCallbacks,
-    UiContentUrl,
     _component_updates,
-    _verified_audio,
-    _verified_download_button,
-    _verified_image,
     correction_draft_from_fields,
     mount_content_endpoint,
 )
@@ -159,63 +152,6 @@ def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_
     )
     assert hostile.state.status.value == "failed"
     assert hostile.card_url is None
-
-
-def test_process_api_serializes_verified_urls_without_a_server_path() -> None:
-    """Native components must preserve the capability URL instead of staging a file."""
-
-    card_url = UiContentUrl(
-        url="http://127.0.0.1:7860/debugmate-content/" + "a" * 32,
-        filename="diagnosis-card.png",
-        mime_type="image/png",
-    )
-    audio_url = UiContentUrl(
-        url="http://127.0.0.1:7860/debugmate-content/" + "b" * 32,
-        filename="recap.mp3",
-        mime_type="audio/mpeg",
-    )
-    bundle_url = UiContentUrl(
-        url="http://127.0.0.1:7860/debugmate-content/" + "c" * 32,
-        filename="debugmate-result.zip",
-        mime_type="application/zip",
-    )
-    with gr.Blocks() as app:
-        trigger = gr.Button("deliver")
-        card = _verified_image(type="filepath", sources=None, buttons=[])
-        audio = _verified_audio(type="filepath", sources=None, recording=False, buttons=[])
-        bundle = _verified_download_button(value="download")
-        trigger.click(
-            lambda: (card_url, audio_url, bundle_url),
-            outputs=[card, audio, bundle],
-            api_name=False,
-        )
-
-    response = asyncio.run(app.process_api(block_fn=0, inputs=[], state=None))
-
-    assert [item["url"] for item in response["data"]] == [
-        card_url.url,
-        audio_url.url,
-        bundle_url.url,
-    ]
-    assert [item["path"] for item in response["data"]] == [
-        card_url.url,
-        audio_url.url,
-        bundle_url.url,
-    ]
-    assert [item["orig_name"] for item in response["data"]] == [
-        card_url.filename,
-        audio_url.filename,
-        bundle_url.filename,
-    ]
-    assert [item.get("mime_type") for item in response["data"]] == [
-        card_url.mime_type,
-        audio_url.mime_type,
-        bundle_url.mime_type,
-    ]
-    rendered = repr(response["data"])
-    assert "X:\\" not in rendered
-    assert "phase-1-foundation-platform-gate" not in rendered
-    assert "/gradio_api/file=" not in rendered
 
 
 def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(

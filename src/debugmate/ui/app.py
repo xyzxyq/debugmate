@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 import gradio as gr
 from fastapi import HTTPException
 from fastapi.responses import Response
-from gradio.data_classes import FileData, ImageData
 
 from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.extraction import FieldId
@@ -115,57 +114,6 @@ class UiContentUrl:
     mime_type: str
 
 
-def _verified_image(**kwargs: object) -> gr.Image:
-    """Return a native Image that serializes a checked token URL as FileData."""
-
-    component = gr.Image(**kwargs)
-    original = component.postprocess
-
-    def postprocess(value: object):
-        if isinstance(value, UiContentUrl):
-            return ImageData(
-                path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
-            )
-        return original(value)
-
-    component.postprocess = postprocess
-    return component
-
-
-def _verified_audio(**kwargs: object) -> gr.Audio:
-    """Return a native Audio that serializes a checked token URL as FileData."""
-
-    component = gr.Audio(**kwargs)
-    original = component.postprocess
-
-    def postprocess(value: object):
-        if isinstance(value, UiContentUrl):
-            return FileData(
-                path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
-            )
-        return original(value)
-
-    component.postprocess = postprocess
-    return component
-
-
-def _verified_download_button(**kwargs: object) -> gr.DownloadButton:
-    """Return a native DownloadButton with a capability-only FileData output."""
-
-    component = gr.DownloadButton(**kwargs)
-    original = component.postprocess
-
-    def postprocess(value: object):
-        if isinstance(value, UiContentUrl):
-            return FileData(
-                path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
-            )
-        return original(value)
-
-    component.postprocess = postprocess
-    return component
-
-
 class _UiContentStore:
     """Bounded server-owned content registry with no caller-visible server path."""
 
@@ -250,6 +198,21 @@ class CallbackPayload:
     citation_rows: tuple[tuple[str, str, str, str], ...] = ()
     recap_text: str = ""
     failure_details: tuple[tuple[str, str], ...] = ()
+
+
+def _capability_file_data(value: UiContentUrl | None) -> dict[str, object] | None:
+    """Serialize a verified loopback capability without a filesystem handoff."""
+
+    if value is None:
+        return None
+    return {
+        "path": value.url,
+        "url": value.url,
+        "orig_name": value.filename,
+        "mime_type": value.mime_type,
+        "is_stream": False,
+        "meta": {"_type": "gradio.FileData"},
+    }
 
 
 class UiCallbacks:
@@ -621,10 +584,16 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
         view.result_metadata,
         failure,
         gr.update(value=payload.report_markdown or "尚未生成诊断结果"),
-        gr.update(value=payload.card_url, visible=payload.card_url is not None),
-        gr.update(value=payload.audio_url, visible=payload.audio_url is not None),
         gr.update(
-            value=payload.download_url,
+            value=_capability_file_data(payload.card_url),
+            visible=payload.card_url is not None,
+        ),
+        gr.update(
+            value=_capability_file_data(payload.audio_url),
+            visible=payload.audio_url is not None,
+        ),
+        gr.update(
+            value=_capability_file_data(payload.download_url),
             label=view.download_label or "下载结果包",
             visible=payload.download_url is not None,
             interactive=payload.download_url is not None,
@@ -707,7 +676,7 @@ def build_app(
                     with gr.Tab("文字报告"):
                         report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
                     with gr.Tab("诊断卡"):
-                        card = _verified_image(
+                        card = gr.Image(
                             label="诊断卡",
                             type="filepath",
                             interactive=False,
@@ -715,7 +684,7 @@ def build_app(
                             buttons=[],
                         )
                     with gr.Tab("语音复盘"):
-                        audio = _verified_audio(
+                        audio = gr.Audio(
                             label="语音复盘",
                             type="filepath",
                             interactive=False,
@@ -737,8 +706,8 @@ def build_app(
                             label="引用",
                         )
                         gr.File(label="已验证单个产物", interactive=False, visible=False)
-                        download = _verified_download_button(
-                            value="下载结果包", visible=False, interactive=False
+                        download = gr.DownloadButton(
+                            "下载结果包", visible=False, interactive=False
                         )
         start_button = gr.Button("开始诊断", variant="primary", interactive=False)
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
@@ -869,6 +838,7 @@ def build_app(
             trigger_mode="once",
             concurrency_limit=1,
             concurrency_id="debugmate-case",
+            postprocess=False,
         )
         # The only live boundary is an application-owned approved payload State;
         # no component supplies a DiagnosisRunOutcome, path, command or shell.
@@ -881,6 +851,7 @@ def build_app(
             trigger_mode="once",
             concurrency_limit=1,
             concurrency_id="debugmate-case",
+            postprocess=False,
         )
         for field in fields:
             field.input(
@@ -919,10 +890,15 @@ def build_app(
             trigger_mode="once",
             concurrency_limit=1,
             concurrency_id="debugmate-case",
+            postprocess=False,
         )
     # Gradio 6 moved CSS from the constructor to ``launch``.  Retain it on
     # the app for structural inspection; ``serve`` supplies the same string
     # to launch without adding external assets or JavaScript.
     app.css = WORKBENCH_CSS
-    mount_content_endpoint(app.app, callbacks)
-    return app.queue(default_concurrency_limit=1)
+    # ``Blocks.queue()`` rebuilds ``app.app`` in Gradio 6.  Registering this
+    # route before queueing would silently attach it to the discarded ASGI app
+    # and leave every otherwise-valid capability URL at 404.
+    queued_app = app.queue(default_concurrency_limit=1)
+    mount_content_endpoint(queued_app.app, callbacks)
+    return queued_app

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
+from gradio.state_holder import SessionState
 
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -169,6 +173,62 @@ def test_replay_button_callback_streams_running_states_and_disables_repeat_actio
     assert all(frame[8].mode is ResultMode.REPLAY for frame in frames[:-1])
     assert all(frame[22]["interactive"] is False for frame in frames[:-1])
     assert frames[-1][8].status is ResultStatus.COMPLETED
+
+
+def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls() -> None:
+    """The actual Gradio stream must not rebuild media as a local server path."""
+
+    app = build_app(_Service())
+
+    async def stream_replay() -> list[dict[str, object]]:
+        state = SessionState(app)
+        response = await app.process_api(
+            0,
+            ["module-not-found"],
+            state=state,
+            session_hash="replay-process-api",
+            simple_format=True,
+        )
+        frames = [response]
+        while response["is_generating"]:
+            response = await app.process_api(
+                0,
+                [],
+                state=state,
+                iterator=response["iterator"],
+                session_hash="replay-process-api",
+                simple_format=True,
+            )
+            frames.append(response)
+        return frames
+
+    frames = asyncio.run(stream_replay())
+
+    first = frames[0]
+    assert first["is_generating"] is True
+    for index in (4, 5, 6):
+        assert first["data"][index]["value"] is None
+
+    terminal = frames[-1]
+    assert terminal["is_generating"] is False
+    urls = []
+    for index in (4, 5, 6):
+        value = terminal["data"][index]["value"]
+        assert value["path"] == value["url"]
+        parsed = urlsplit(value["url"])
+        assert (parsed.scheme, parsed.hostname) == ("http", "127.0.0.1")
+        assert parsed.path.startswith("/debugmate-content/")
+        assert "X:\\" not in value["path"]
+        assert "phase-1-foundation-platform-gate" not in value["path"]
+        assert "/gradio_api/file=" not in value["path"]
+        urls.append(value["url"])
+
+    expected = (b"verified-card", b"verified-audio", b"verified-zip")
+    client = TestClient(app.app)
+    for url, payload in zip(urls, expected, strict=True):
+        response = client.get(url)
+        assert response.status_code == 200
+        assert response.content == payload
 
 
 def test_local_service_configures_a_real_result_composer_for_replay(tmp_path: Path) -> None:
