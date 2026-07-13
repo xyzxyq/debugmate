@@ -26,6 +26,9 @@ returns a typed `tts_failed` partial result without a placeholder MP3.
 - `5850dea` RED: real local SAPI media gate.
 - `e67e348` GREEN: adapters, process boundary, fallback and live gates.
 - `115ac24` hardening: cap Dify bytes while streaming, before persistence.
+- `61f205e` RED: reproduce the AST process-audit blind spot with synthetic source.
+- `fb938a9` GREEN: restore independent `os.system` and `subprocess.*` detection while
+  retaining the two exact separately audited media modules.
 
 ## Security and degradation truth
 
@@ -38,6 +41,10 @@ returns a typed `tts_failed` partial result without a placeholder MP3.
 - SAPI receives recap content through a controlled UTF-8 file. PowerShell uses a fixed
   repository-owned `-File` script; FFmpeg uses fixed argv with metadata and ID3/Xing
   suppression. Both subprocesses use `shell=False`.
+- The repository-wide AST safety test still rejects subprocess imports and calls in every
+  other module. A synthetic regression fixture proves `subprocess.run`, `Popen` and
+  `os.system` are independently detected; only `media.py` and `tts/sapi.py` are delegated
+  to their dedicated argv, timeout, cleanup and `shell=False` attack tests.
 - Only an out-of-range duration receives one deterministic current-backend rate retry.
   Transport, content and process failures fall through immediately.
 - Dify response content type and byte size are bounded; edge uses the fixed
