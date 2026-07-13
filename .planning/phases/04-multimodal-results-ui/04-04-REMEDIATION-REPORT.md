@@ -56,3 +56,12 @@ rejection when they are deliberately enabled.
 
 The full offline marker exclusion run is retained as the final Phase 04 execution
 gate and should be read together with the independent verifier's final evidence.
+
+## Final review follow-up
+
+The later independent review identified a separate final set of process-path,
+input-revalidation, reparse-root and AST-shape findings. They are deliberately
+not folded into the historical table above: their complete reproduced-test and
+control mapping is recorded in `04-04-FINAL-REMEDIATION-REPORT.md`, with RED
+commit `178d70e`, GREEN commit `b8b8d38`, fresh local SAPI evidence and the final
+offline regression result.

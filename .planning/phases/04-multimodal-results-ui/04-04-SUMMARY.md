@@ -96,6 +96,29 @@ external skips`. The actual evidence remains `sapi`, `Microsoft Huihui Desktop`,
 
 See `04-04-REMEDIATION-REPORT.md` for the finding-to-test evidence mapping.
 
+## Final independent-review remediation
+
+The final review found four remaining boundary weaknesses. They were reproduced
+first in `178d70e` and closed in `b8b8d38`:
+
+- Production FFmpeg/ffprobe no longer use `PATH`; the resolver accepts only the
+  fixed Windows WinGet 8.1 installation layout after regular-file, no-reparse and
+  exact SHA-256 checks. SAPI now obtains the actual Windows system directory from
+  the Windows API instead of `SYSTEMROOT`.
+- The chain itself reparses the raw `SafeRecapText` and request fields with strict
+  validation before it reads any identity field or invokes an adapter. A forged
+  seven-unit `model_construct` input is rejected with no adapter call.
+- The candidate root is absolute and checked from every existing ancestor before
+  `mkdir`, immediately after `mkdir`, around temporary-directory creation and
+  around final publication. A real nested Windows Junction to an outside directory
+  is rejected before any candidate or outside write.
+- The AST guard now permits exactly one `media._run_bounded_process` `Popen`
+  shape: `command`, `stdin=subprocess.DEVNULL`, named `stdout`/`stderr`, and literal
+  `shell=False`; additional execution options and wrong stream boundaries reject.
+
+See `04-04-FINAL-REMEDIATION-REPORT.md` for the final finding-to-control mapping
+and fresh evidence.
+
 ## Verification
 
 - `tests/results/test_recap.py`: 6 passed.
