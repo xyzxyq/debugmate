@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import pytest
 
 from debugmate.hashing import sha256_bytes
 from debugmate.results import audio as audio_module
-from debugmate.results.audio import TtsFallbackChain
+from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import MediaProbe, MediaProbeError
 from debugmate.results.recap import SafeRecapText
@@ -86,6 +87,78 @@ def _canonicalize(source: Path, target: Path, **_kwargs: object) -> MediaProbe:
     return _probe(target)
 
 
+def _candidate_root(tmp_path: Path) -> TrustedCandidateRoot:
+    """Create an explicit test capability; synthesis never receives a raw Path."""
+
+    return TrustedCandidateRoot.for_testing(tmp_path / "debugmate-private-candidates")
+
+
+def test_chain_requires_a_trusted_candidate_root_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An arbitrary caller directory must not be an output authority."""
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
+    chain = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["ok"], calls),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    )
+
+    with pytest.raises(TypeError):
+        chain.synthesize(_recap(), _identity(), tmp_path / "caller-selected-output")
+
+    result = chain.synthesize(_recap(), _identity(), _candidate_root(tmp_path))
+
+    assert result.available is True
+    assert not (tmp_path / "caller-selected-output" / "recap.mp3").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction replacement attack")
+def test_candidate_capability_blocks_junction_swap_during_canonicalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A swap in the former canonicalization gap must never write outside."""
+
+    root = tmp_path / "debugmate-private-candidates"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    capability = _candidate_root(tmp_path)
+    calls: list[tuple[str, str]] = []
+    outside_was_created = False
+
+    def swap_then_write(source: Path, target: Path, **_kwargs: object) -> MediaProbe:
+        nonlocal outside_was_created
+        payload = source.read_bytes()
+        run = target.parent
+        parked = root / f"{run.name}-parked"
+        run.replace(parked)
+        _make_junction(run, outside)
+        target.write_bytes(payload)
+        outside_was_created = (outside / "recap.mp3").exists()
+        return _probe(target)
+
+    monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", swap_then_write)
+    chain = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["transport"], calls),
+            FakeAdapter("sapi", ["process"], calls),
+        )
+    )
+
+    result = chain.synthesize(_recap(), _identity(), capability)
+
+    assert result.available is False
+    assert outside_was_created is False
+    assert not (outside / "recap.mp3").exists()
+
+
 def test_fallback_order_and_success_short_circuit(tmp_path: Path, monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
@@ -97,7 +170,7 @@ def test_fallback_order_and_success_short_circuit(tmp_path: Path, monkeypatch) -
             FakeAdapter("sapi", ["ok"], calls),
         )
     )
-    result = chain.synthesize(_recap(), _identity(), tmp_path)
+    result = chain.synthesize(_recap(), _identity(), _candidate_root(tmp_path))
     assert calls == [("dify", "normal"), ("edge_tts", "normal")]
     assert result.available is True
     assert result.backend == "edge_tts"
@@ -146,10 +219,10 @@ def test_chain_rejects_external_or_identity_mismatched_candidate(
             FakeAdapter("sapi", ["process"], calls),
         )
     )
-    result = chain.synthesize(_recap(), _identity(), tmp_path / "result")
+    result = chain.synthesize(_recap(), _identity(), _candidate_root(tmp_path))
     assert result.available is False
     assert result.attempts[0].safe_error_code == "tts_candidate_invalid"
-    assert not (tmp_path / "result" / "recap.mp3").exists()
+    assert not list((tmp_path / "debugmate-private-candidates").rglob("recap.mp3"))
 
 
 def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkeypatch) -> None:
@@ -171,7 +244,7 @@ def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkey
             FakeAdapter("edge_tts", ["timeout"], calls),
             FakeAdapter("sapi", ["process"], calls),
         )
-    ).synthesize(_recap(), _identity(), tmp_path)
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
     assert calls == [("dify", "normal"), ("dify", "faster")]
     assert result.available is True
     assert len(result.attempts) == 2
@@ -197,12 +270,13 @@ def test_chain_canonicalizes_a_verified_candidate_before_publication(
             FakeAdapter("edge_tts", ["ok"], adapter_calls),
             FakeAdapter("sapi", ["ok"], adapter_calls),
         )
-    ).synthesize(_recap(), _identity(), tmp_path)
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
     assert result.available is True
     assert len(calls) == 1
     assert calls[0][0].name == "candidate-0-normal.mp3"
-    assert calls[0][1] == tmp_path / "recap.mp3"
+    assert calls[0][1].name == "recap.mp3"
+    assert calls[0][1].parent.parent.name == "debugmate-private-candidates"
 
 
 def test_canonicalization_failure_falls_through_to_the_next_backend(
@@ -227,7 +301,7 @@ def test_canonicalization_failure_falls_through_to_the_next_backend(
             FakeAdapter("edge_tts", ["ok"], calls),
             FakeAdapter("sapi", ["ok"], calls),
         )
-    ).synthesize(_recap(), _identity(), tmp_path)
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
     assert calls == [("dify", "normal"), ("edge_tts", "normal")]
     assert result.available is True
@@ -258,7 +332,7 @@ def test_directory_candidate_is_a_value_free_invalid_attempt(
             FakeAdapter("edge_tts", ["timeout"], calls),
             FakeAdapter("sapi", ["process"], calls),
         )
-    ).synthesize(_recap(), _identity(), tmp_path)
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
     assert result.available is False
     assert result.attempts[0].safe_error_code == "tts_candidate_invalid"
@@ -277,11 +351,11 @@ def test_non_duration_failure_never_retries_and_all_failed_is_partial(
             FakeAdapter("sapi", ["process"], calls),
         )
     )
-    result = chain.synthesize(_recap(), _identity(), tmp_path)
+    result = chain.synthesize(_recap(), _identity(), _candidate_root(tmp_path))
     assert calls == [("dify", "normal"), ("edge_tts", "normal"), ("sapi", "normal")]
     assert result.available is False
     assert result.failure.code == "tts_failed"
-    assert not list(tmp_path.glob("*.mp3"))
+    assert not list((tmp_path / "debugmate-private-candidates").rglob("*.mp3"))
     dumped = result.model_dump_json()
     assert _recap().text not in dumped
     assert str(tmp_path) not in dumped
@@ -478,7 +552,7 @@ def test_chain_rejects_a_constructed_seven_unit_recap_before_any_adapter_call(
     )
 
     with pytest.raises(ValueError, match="^tts_input_invalid$"):
-        chain.synthesize(forged, _identity(), tmp_path / "safe")
+        chain.synthesize(forged, _identity(), _candidate_root(tmp_path))
 
     assert calls == []
 
@@ -517,10 +591,10 @@ def test_chain_rejects_nested_junction_root_before_adapter_or_outside_write(
     )
 
     with pytest.raises(ValueError, match="^tts_target_invalid$"):
-        chain.synthesize(_recap(), _identity(), junction / "result")
+        chain.synthesize(_recap(), _identity(), TrustedCandidateRoot.for_testing(junction))
 
     assert calls == []
-    assert not (outside / "result").exists()
+    assert not list(outside.iterdir())
 
 
 def test_sapi_ignores_a_forged_systemroot_environment(
