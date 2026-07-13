@@ -309,6 +309,8 @@ def _parse_png(
         or not valid_order
         or kinds.count(b"IHDR") != 1
         or kinds.count(b"IEND") != 1
+        or len(chunks[0][1]) != 13
+        or chunks[-1][1] != b""
         or (not allow_split_idat and kinds.count(b"IDAT") != 1)
     ):
         raise CardRenderFailure("png_verify_failed")
