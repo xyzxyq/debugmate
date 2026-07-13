@@ -315,6 +315,40 @@ def test_live_approved_input_runs_phase3_once_then_persists_source_before_result
     assert (tmp_path / "outcomes" / first.identity.source_run_id / "outcome.json").is_file()
 
 
+def test_live_service_events_follow_the_real_seven_stage_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
+
+    workflow, _extraction, _retrieval, _generator = _workflow(_rows()[0], tmp_path)
+    _root, base_composer = _dynamic_composer(tmp_path, monkeypatch)
+
+    def staged_composer(source, *, mode, fixture_id, fixture_name, stage_callback):
+        for stage in ("presentation", "report", "card", "audio", "consistency", "publish"):
+            stage_callback(stage)
+        return base_composer(
+            source, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+        )
+
+    staged_composer.supports_stage_events = True
+    service = _service(tmp_path, composer=staged_composer, workflow=workflow)
+
+    events = list(service.diagnose_and_compose_events(_approved(str(_rows()[0]["case_id"]))))
+
+    running = [event.state for event in events[:-1]]
+    assert [state.current_stage for state in running] == [
+        "source",
+        "presentation",
+        "report",
+        "card",
+        "audio",
+        "consistency",
+        "publish",
+    ]
+    assert [len(state.completed_stages) for state in running] == list(range(7))
+    assert events[-1].state.status.value == "completed"
+
+
 def test_retry_reverifies_a_partial_bundle_then_creates_a_distinct_full_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
