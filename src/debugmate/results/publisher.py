@@ -19,8 +19,8 @@ from debugmate.results.consistency import (
     ResultConsistencyError,
     ValidatedResultCandidates,
     _CandidateSnapshot,
-    _PublisherCandidateLease,
     _issue_publisher_candidate_lease,
+    _PublisherCandidateLease,
     is_issued_result_candidate,
 )
 from debugmate.results.contracts import (
@@ -40,6 +40,9 @@ MANIFEST_VERSION = "1.0.0"
 PUBLICATION_VERSION = "1.0.0"
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
+# The archive contains the same bounded members plus central-directory records.
+# Keep a narrow structural allowance rather than accepting an unbounded wrapper.
+MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + 256 * 1024
 _CASE_ID = re.compile(r"^case_[0-9a-f]{32}$")
 _RESULT_ID = re.compile(r"^result_[0-9a-f]{32}$")
 

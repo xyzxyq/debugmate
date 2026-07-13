@@ -227,7 +227,10 @@ class _PublisherCandidateLease:
     def take_audio_for_publisher(self, snapshot: _CandidateSnapshot) -> bytes | None:
         with _CANDIDATE_LOCK:
             state = self._state()
-            if snapshot.audio != state.snapshot.audio or snapshot.identity != state.snapshot.identity:
+            if (
+                snapshot.audio != state.snapshot.audio
+                or snapshot.identity != state.snapshot.identity
+            ):
                 raise ResultConsistencyError("candidate_invalid")
             if not snapshot.availability.audio:
                 return None
@@ -241,7 +244,11 @@ class _PublisherCandidateLease:
             payload = outcome.handoff.take_verified_bytes(outcome.audio)
         except Exception:
             raise ResultConsistencyError("audio_handoff_invalid") from None
-        if not payload or len(payload) > 8_000_000 or sha256_bytes(payload) != snapshot.audio.sha256:
+        if (
+            not payload
+            or len(payload) > 8_000_000
+            or sha256_bytes(payload) != snapshot.audio.sha256
+        ):
             raise ResultConsistencyError("audio_handoff_invalid")
         return payload
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -18,7 +19,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from debugmate.contracts import DiagnosisRecord
-from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
+from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.card import verify_card_png
 from debugmate.results.contracts import ResultManifest, ResultStatus
@@ -31,6 +32,7 @@ from debugmate.results.publisher import (
     CHECKSUMS_NAME,
     FULL_ARCHIVE_NAME,
     MANIFEST_VERSION,
+    MAX_ARCHIVE_BYTES,
     MAX_MEMBER_BYTES,
     MAX_TOTAL_BYTES,
     PARTIAL_ARCHIVE_NAME,
@@ -476,13 +478,88 @@ def _safe_zip_name(name: str) -> bool:
     )
 
 
-def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, bytes]) -> str:
+def _read_bounded_archive(path: Path, root: Path) -> tuple[bytes, str]:
+    """Freeze one raw archive before hashing or passing it to ``ZipFile``.
+
+    ZIP permits both a self-extracting prefix and a trailing payload.  They are
+    not part of DebugMate's deterministic archive contract, so the verifier
+    reads a single descriptor-backed byte copy first and makes all later ZIP
+    work operate on that copy alone.
+    """
+
+    if not _safe_file(path, root):
+        raise ResultVerificationError("archive_verify_failed")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = -1
+    try:
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size <= 0
+            or before.st_size > MAX_ARCHIVE_BYTES
+        ):
+            raise ValueError("archive shape")
+        chunks: list[bytes] = []
+        total = 0
+        while total < before.st_size:
+            block = os.read(descriptor, min(64 * 1024, before.st_size - total))
+            if not block:
+                break
+            total += len(block)
+            if total > before.st_size:
+                raise ValueError("archive bound")
+            chunks.append(block)
+        after = os.fstat(descriptor)
+        raw = b"".join(chunks)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or len(raw) != before.st_size
+            or raw[:4] != b"PK\x03\x04"
+        ):
+            raise ValueError("archive bytes")
+        return raw, sha256_bytes(raw)
+    except (OSError, ValueError):
+        raise ResultVerificationError("archive_verify_failed") from None
+    finally:
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def _assert_exact_zip_boundary(archive: zipfile.ZipFile, raw: bytes) -> None:
+    """Reject bytes outside the central directory and EOCD of our ZIP format."""
+
+    try:
+        infos = archive.infolist()
+        central_bytes = sum(
+            46
+            + len(info.filename.encode("ascii"))
+            + len(info.extra)
+            + len(info.comment)
+            for info in infos
+        )
+        expected_end = archive.start_dir + central_bytes + 22 + len(archive.comment)
+        if expected_end != len(raw):
+            raise ValueError("archive boundary")
+    except (AttributeError, UnicodeEncodeError, ValueError):
+        raise ResultVerificationError("archive_verify_failed") from None
+
+
+def _verify_archive(
+    root: Path, manifest: ResultManifest, values: dict[str, bytes]
+) -> tuple[str, str]:
     archive_name = (
         FULL_ARCHIVE_NAME if manifest.status is ResultStatus.COMPLETED else PARTIAL_ARCHIVE_NAME
     )
     archive_path = root / archive_name
-    if not _safe_file(archive_path, root):
-        raise ResultVerificationError("archive_verify_failed")
+    archive_bytes, archive_sha256 = _read_bounded_archive(archive_path, root)
     member_values = {_BUSINESS_SPECS[kind][0]: payload for kind, payload in values.items()}
     manifest_bytes = (root / RESULT_MANIFEST_NAME).read_bytes()
     member_values[RESULT_MANIFEST_NAME] = manifest_bytes
@@ -496,7 +573,11 @@ def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, byte
     ):
         raise ResultVerificationError("checksums_invalid")
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            # Keep the path only as harmless diagnostic metadata; test and
+            # instrumentation hooks must not make us reopen a mutable path.
+            archive.filename = str(archive_path)
+            _assert_exact_zip_boundary(archive, archive_bytes)
             infos = archive.infolist()
             names = [info.filename for info in infos]
             if (
@@ -569,11 +650,11 @@ def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, byte
                     raise ValueError("payload")
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError):
         raise ResultVerificationError("archive_verify_failed") from None
-    return archive_name
+    return archive_name, archive_sha256
 
 
 def _verify_publication(
-    root: Path, manifest: ResultManifest, archive_name: str
+    root: Path, manifest: ResultManifest, archive_name: str, archive_sha256: str
 ) -> dict[str, object]:
     path = root / PUBLICATION_NAME
     if not _safe_file(path, root):
@@ -598,7 +679,7 @@ def _verify_publication(
             or payload["identity"] != manifest.identity.model_dump(mode="json")
             or payload["status"] != manifest.status.value
             or payload["archive_name"] != archive_name
-            or payload["archive_sha256"] != sha256_file(root / archive_name)
+            or payload["archive_sha256"] != archive_sha256
         ):
             raise ValueError("publication")
         return payload
@@ -646,9 +727,10 @@ def verify_result_bundle(path: Path, *, allow_temporary: bool = False) -> Verifi
             not _safe_file(root / name, root) for name in expected_files
         ):
             raise ValueError("extra")
-        if _verify_archive(root, manifest, values) != archive_name:
+        verified_archive_name, archive_sha256 = _verify_archive(root, manifest, values)
+        if verified_archive_name != archive_name:
             raise ValueError("archive")
-        publication = _verify_publication(root, manifest, archive_name)
+        publication = _verify_publication(root, manifest, archive_name, archive_sha256)
         return VerifiedResultBundle(path=root, manifest=manifest, publication=publication)
     except ResultVerificationError:
         raise
