@@ -313,10 +313,10 @@ def test_copying_private_authority_and_rewriting_fingerprint_cannot_forge_capabi
     forged = forged.model_copy(
         update={"projection_sha256": sha256_bytes(canonical_json_bytes(payload))}
     )
-    forged.__pydantic_private__["_source_authority"] = presentation.__pydantic_private__[
-        "_source_authority"
-    ]
-    forged.__pydantic_private__["_source_fingerprint"] = forged.projection_sha256
+    copied_private = dict(presentation.__pydantic_private__ or {})
+    copied_private["_source_authority"] = object()
+    copied_private["_source_fingerprint"] = forged.projection_sha256
+    object.__setattr__(forged, "__pydantic_private__", copied_private)
 
     with pytest.raises(ReportRenderError, match="report_render_failed"):
         render_report(forged)

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+import weakref
 from typing import Literal
 
-from pydantic import Field, PrivateAttr, ValidationInfo, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 
 from debugmate.contracts import ClaimKind, CommandPlatform, ErrorCategory, SourceKind
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
@@ -16,10 +18,35 @@ from debugmate.results.contracts import (
 from debugmate.results.loader import LoadedDiagnosisSource
 
 _PRESENTATION_TOKEN = object()
+_PRESENTATION_REGISTRY_LOCK = threading.RLock()
+_PRESENTATION_REGISTRY: dict[int, weakref.ReferenceType[PresentationModel]] = {}
 
 
 def _projection_sha256(payload: dict[str, object]) -> str:
     return sha256_bytes(canonical_json_bytes(payload))
+
+
+def _forget_presentation(
+    key: int, reference: weakref.ReferenceType[PresentationModel]
+) -> None:
+    with _PRESENTATION_REGISTRY_LOCK:
+        if _PRESENTATION_REGISTRY.get(key) is reference:
+            _PRESENTATION_REGISTRY.pop(key, None)
+
+
+def _register_presentation(value: PresentationModel) -> None:
+    key = id(value)
+    reference = weakref.ref(
+        value, lambda current, identity=key: _forget_presentation(identity, current)
+    )
+    with _PRESENTATION_REGISTRY_LOCK:
+        _PRESENTATION_REGISTRY[key] = reference
+
+
+def _is_registered_presentation(value: PresentationModel) -> bool:
+    with _PRESENTATION_REGISTRY_LOCK:
+        reference = _PRESENTATION_REGISTRY.get(id(value))
+        return reference is not None and reference() is value
 
 
 class PresentationBuildError(ValueError):
@@ -100,8 +127,6 @@ class PresentationModel(StrictFrozenModel):
     verification_steps: tuple[PresentationCommand, ...]
     limitations: tuple[str, ...]
     recap_text: str
-    _source_authority: object = PrivateAttr(default=None)
-    _source_fingerprint: str = PrivateAttr(default="")
 
     @model_validator(mode="after")
     def canonical_projection_seal(self, info: ValidationInfo) -> PresentationModel:
@@ -150,8 +175,7 @@ def _validated_presentation(value: object) -> PresentationModel:
         raise TypeError("presentation type")
     payload = value.model_dump(mode="json", exclude={"projection_sha256"})
     if (
-        value._source_authority is not _PRESENTATION_TOKEN
-        or value._source_fingerprint != value.projection_sha256
+        not _is_registered_presentation(value)
         or value.projection_sha256 != _projection_sha256(payload)
     ):
         raise ValueError("presentation source authenticity mismatch")
@@ -261,8 +285,7 @@ def build_presentation(
             strict=True,
             context={"presentation_token": _PRESENTATION_TOKEN},
         )
-        result.__pydantic_private__["_source_authority"] = _PRESENTATION_TOKEN
-        result.__pydantic_private__["_source_fingerprint"] = result.projection_sha256
+        _register_presentation(result)
         return result
     except Exception:
         failure = PresentationBuildError()
