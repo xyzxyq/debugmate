@@ -188,3 +188,46 @@ remaining replay/failure-state truth gaps.
   The exact UI-SPEC messages for `replay_bundle_invalid` and
   `source_bundle_invalid` are now used; no exception body, path or provider
   text is substituted.
+
+## Independent-review hardening addendum III
+
+The next review exercised the actual queued Gradio event endpoint rather than
+only a direct component serialization.  It exposed two framework lifecycle
+details that required a final I2 repair:
+
+- The component-instance serializer in the prior I2 implementation was not
+  retained when `Blocks.process_api` reconstructed native output components
+  for a generator's terminal frame.  An actual replay then raised
+  `ValueError: Cannot process this value as an Image, it is of type
+  UiContentUrl`.  The event handlers now deliberately use
+  `postprocess=False` and emit only ordinary serializable Gradio `FileData`
+  dictionaries made from a verified capability: both `path` and `url` are the
+  same validated loopback HTTP URL, with fixed filename/MIME metadata.  The
+  components are normal native `Image`, `Audio` and `DownloadButton`
+  instances; no custom subclass or instance monkey patch remains.
+- `Blocks.queue()` creates a replacement FastAPI application in Gradio 6.
+  Registering the opaque content route before queueing attached it to the
+  discarded ASGI application, so a correctly serialized URL returned 404.
+  The application now queues first and mounts `/debugmate-content/{token}` on
+  the final ASGI app.  The token endpoint still re-hashes the in-memory bytes
+  on every response and never exposes a workspace, cache or temporary path.
+
+The regression invokes the real replay generator through
+`build_app(...).process_api`: it asserts the first running frame is safe, the
+terminal Image/Audio/DownloadButton values contain only three absolute
+loopback capability URLs (no drive, worktree or `/gradio_api/file=` path), and
+ASGI GETs of those exact URLs return the expected verified PNG/MP3/ZIP bytes.
+It is therefore a full executable boundary test, not a serializer unit test.
+
+Final third-review verification:
+
+- `python -m pytest -q tests/ui/test_app.py -k replay_generator_process_api`
+  — **1 passed**; terminal streaming no longer raises `ValueError` and all
+  three token URLs return verified bytes.
+- `python -m pytest -q tests/ui/test_app.py tests/ui/test_callbacks.py
+  tests/ui/test_view_state.py tests/results/test_service.py` — **38 passed**.
+- `python -m pytest -q -m "not cloud"` — **711 passed, 1 skipped,
+  21 deselected** in 116.32 seconds.  The skipped test is an unapproved
+  external network TTS call; the run retains only the existing Starlette
+  TestClient/httpx deprecation warning.
+- `python -m ruff check .` and `git diff --check` — passed.
