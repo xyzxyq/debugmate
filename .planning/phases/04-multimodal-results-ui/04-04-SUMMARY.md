@@ -76,6 +76,26 @@ encoder build changes; acceptance is always based on the public media probe.
 Neither external skip is represented as a pass. The offline and guaranteed local SAPI
 paths remain independent from network availability.
 
+## Post-review remediation
+
+After the independent review, the first implementation was re-audited and two
+test-first remediation commits were applied:
+
+- `de33ca0` narrows the repository AST process boundary to the single audited
+  `media.py` `subprocess.Popen` shape, removes unbounded SAPI `capture_output`,
+  canonicalizes every accepted candidate before publication, and fixes the real
+  adapter gate fixtures to construct a valid `SafeRecapText`.
+- `a588510` keeps canonicalization/final-probe failures inside the ordered fallback,
+  makes failed candidate and target cleanup value-free, and rejects untrusted SAPI
+  roots, executable overrides and non-regular resolved FFmpeg binaries.
+
+The local SAPI marker was re-run after the remediation: `1 passed, 2 explicit
+external skips`. The actual evidence remains `sapi`, `Microsoft Huihui Desktop`,
+`normal`/SAPI rate `2`, `45,035 ms`, mono MP3, `180,140` bytes and SHA-256
+`9caf9f15cd359cc9fdbb8635a935df84777b875cc567bcbd146a5d8710c0824c`.
+
+See `04-04-REMEDIATION-REPORT.md` for the finding-to-test evidence mapping.
+
 ## Verification
 
 - `tests/results/test_recap.py`: 6 passed.
