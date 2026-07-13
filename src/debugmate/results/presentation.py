@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, ValidationInfo, model_validator
+from pydantic import Field, PrivateAttr, ValidationInfo, model_validator
 
 from debugmate.contracts import ClaimKind, CommandPlatform, ErrorCategory, SourceKind
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
@@ -16,6 +16,10 @@ from debugmate.results.contracts import (
 from debugmate.results.loader import LoadedDiagnosisSource
 
 _PRESENTATION_TOKEN = object()
+
+
+def _projection_sha256(payload: dict[str, object]) -> str:
+    return sha256_bytes(canonical_json_bytes(payload))
 
 
 class PresentationBuildError(ValueError):
@@ -96,10 +100,8 @@ class PresentationModel(StrictFrozenModel):
     verification_steps: tuple[PresentationCommand, ...]
     limitations: tuple[str, ...]
     recap_text: str
-
-    @staticmethod
-    def seal_for(payload: dict[str, object]) -> str:
-        return sha256_bytes(canonical_json_bytes(payload))
+    _source_authority: object = PrivateAttr(default=None)
+    _source_fingerprint: str = PrivateAttr(default="")
 
     @model_validator(mode="after")
     def canonical_projection_seal(self, info: ValidationInfo) -> PresentationModel:
@@ -107,7 +109,7 @@ class PresentationModel(StrictFrozenModel):
         if context.get("presentation_token") is not _PRESENTATION_TOKEN:
             raise ValueError("presentation must be built by build_presentation")
         payload = self.model_dump(mode="json", exclude={"projection_sha256"})
-        if self.projection_sha256 != self.seal_for(payload):
+        if self.projection_sha256 != _projection_sha256(payload):
             raise ValueError("presentation projection seal mismatch")
         return self
 
@@ -141,16 +143,19 @@ def _strict_context(value: object) -> PreparedGenerationContext:
     )
 
 
-def revalidate_presentation(value: object) -> PresentationModel:
-    """Revalidate one existing projection with the module-private build authority."""
+def _validated_presentation(value: object) -> PresentationModel:
+    """Validate existing build provenance without issuing new authority."""
 
     if not isinstance(value, PresentationModel):
         raise TypeError("presentation type")
-    return PresentationModel.model_validate_json(
-        canonical_json_bytes(value.model_dump(mode="json")),
-        strict=True,
-        context={"presentation_token": _PRESENTATION_TOKEN},
-    )
+    payload = value.model_dump(mode="json", exclude={"projection_sha256"})
+    if (
+        value._source_authority is not _PRESENTATION_TOKEN
+        or value._source_fingerprint != value.projection_sha256
+        or value.projection_sha256 != _projection_sha256(payload)
+    ):
+        raise ValueError("presentation source authenticity mismatch")
+    return value
 
 
 def _command(value: object) -> PresentationCommand:
@@ -246,16 +251,19 @@ def build_presentation(
         normalized = PresentationModel.model_construct(
             **payload, projection_sha256="0" * 64
         ).model_dump(mode="json", exclude={"projection_sha256"})
-        return PresentationModel.model_validate_json(
+        result = PresentationModel.model_validate_json(
             canonical_json_bytes(
                 {
                     **normalized,
-                    "projection_sha256": PresentationModel.seal_for(normalized),
+                    "projection_sha256": _projection_sha256(normalized),
                 }
             ),
             strict=True,
             context={"presentation_token": _PRESENTATION_TOKEN},
         )
+        result.__pydantic_private__["_source_authority"] = _PRESENTATION_TOKEN
+        result.__pydantic_private__["_source_fingerprint"] = result.projection_sha256
+        return result
     except Exception:
         failure = PresentationBuildError()
     raise failure from None

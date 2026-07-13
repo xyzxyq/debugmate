@@ -40,9 +40,11 @@ def _reseal_for_adversarial_renderer_test(presentation, **changes):
 
     changed = presentation.model_copy(update=changes)
     payload = changed.model_dump(mode="json", exclude={"projection_sha256"})
-    return changed.model_copy(
+    resealed = changed.model_copy(
         update={"projection_sha256": sha256_bytes(canonical_json_bytes(payload))}
     )
+    resealed.__pydantic_private__["_source_fingerprint"] = resealed.projection_sha256
+    return resealed
 
 
 def test_report_matches_reviewed_golden_and_fixed_nine_sections(
