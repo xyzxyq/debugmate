@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import re
 import shutil
+from contextlib import suppress
 from pathlib import Path
 
 from debugmate.diagnosis.workflow import DiagnosisRunOutcome
@@ -38,6 +39,7 @@ class DiagnosisOutcomeStore:
         self._root.mkdir(exist_ok=True)
 
     def write(self, outcome: DiagnosisRunOutcome) -> Path:
+        temporary: Path | None = None
         try:
             strict = _strict_outcome(outcome)
             payload = strict.model_dump(mode="json")
@@ -61,12 +63,12 @@ class DiagnosisOutcomeStore:
             (temporary / "outcome.sha256").write_text(sha256_bytes(raw), encoding="ascii")
             atomic_replace_directory(temporary, target)
             return target
-        except ResultLoadError:
-            raise
-        except Exception as exc:
-            if "temporary" in locals() and temporary.exists() and not temporary.is_symlink():
+        except Exception:
+            error = ResultLoadError("outcome_store_invalid", "store")
+        if temporary is not None and temporary.exists() and not temporary.is_symlink():
+            with suppress(OSError):
                 shutil.rmtree(temporary)
-            raise ResultLoadError("outcome_store_invalid", "store") from exc
+        raise error from None
 
     def read(self, run_id: str) -> DiagnosisRunOutcome:
         try:
@@ -95,7 +97,6 @@ class DiagnosisOutcomeStore:
             if outcome.run_id != run_id or raw != canonical:
                 raise ValueError("outcome record is not canonical or directory-bound")
             return outcome
-        except ResultLoadError:
-            raise
-        except Exception as exc:
-            raise ResultLoadError("outcome_store_invalid", "store") from exc
+        except Exception:
+            error = ResultLoadError("outcome_store_invalid", "store")
+        raise error from None

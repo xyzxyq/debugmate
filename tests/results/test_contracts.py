@@ -16,7 +16,9 @@ from debugmate.results.contracts import (
     ArtifactRecord,
     AudioAttempt,
     AudioResult,
+    GenerationProfile,
     PreparedGenerationContext,
+    ResolvedFont,
     ResultManifest,
     ResultMode,
     ResultStatus,
@@ -43,13 +45,13 @@ def _identity(**changes: object) -> ArtifactIdentity:
     return ArtifactIdentity(**payload)
 
 
-def _artifact(kind: str, path: str) -> ArtifactRecord:
+def _artifact(kind: str, path: str, *, sha256: str = "5" * 64) -> ArtifactRecord:
     return ArtifactRecord(
         kind=kind,
         path=path,
         mime_type="application/octet-stream",
         bytes=1,
-        sha256="5" * 64,
+        sha256=sha256,
         identity=_identity(),
     )
 
@@ -152,6 +154,41 @@ def test_prepared_generation_context_binds_exact_font_and_profile(tmp_path: Path
         )
 
 
+def test_prepared_context_recomputes_font_hash_and_rejects_missing_or_directory(
+    tmp_path: Path,
+) -> None:
+    font = tmp_path / "font.ttf"
+    font.write_bytes(b"trusted-font")
+    forged_hash = "f" * 64
+    forged_profile = GenerationProfile.create(
+        report_contract_version="report-v1",
+        card_contract_version="card-v1",
+        recap_contract_version="recap-v1",
+        font_name=font.name,
+        font_sha256=forged_hash,
+    )
+    with pytest.raises(ValidationError, match="font"):
+        PreparedGenerationContext(
+            generation_profile=forged_profile,
+            resolved_font=ResolvedFont(
+                name=font.name,
+                path=font,
+                confinement_root=tmp_path,
+                sha256=forged_hash,
+                source="project",
+            ),
+        )
+    for unsafe in (tmp_path / "missing.ttf", tmp_path):
+        with pytest.raises(ValidationError, match="font"):
+            ResolvedFont(
+                name="font.ttf",
+                path=unsafe,
+                confinement_root=tmp_path,
+                sha256=forged_hash,
+                source="project",
+            )
+
+
 def test_font_preparation_prefers_project_and_rejects_links(tmp_path: Path) -> None:
     project_font = tmp_path / "fonts/project.ttf"
     project_font.parent.mkdir()
@@ -177,6 +214,26 @@ def test_font_preparation_prefers_project_and_rejects_links(tmp_path: Path) -> N
         )
 
 
+def test_font_preparation_rejects_linked_root_and_linked_ancestor(tmp_path: Path) -> None:
+    actual = tmp_path / "actual"
+    (actual / "child").mkdir(parents=True)
+    (actual / "child/font.ttf").write_bytes(b"font")
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(actual, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    for root in (linked, linked / "child"):
+        with pytest.raises(ValueError, match="font|root|link|reparse"):
+            prepare_generation_context(
+                project_root=root,
+                project_font_candidates=(
+                    "child/font.ttf" if root == linked else "font.ttf",
+                ),
+                windows_font_candidates=(),
+            )
+
+
 @pytest.mark.parametrize(
     "status,availability,failure",
     [
@@ -198,7 +255,7 @@ def test_manifest_rejects_illegal_terminal_availability(status, availability, fa
             mode=ResultMode.LIVE,
             status=status,
             availability=availability,
-            artifacts=[],
+            artifacts=(),
             failure=failure,
         )
 
@@ -219,7 +276,7 @@ def test_fallback_audio_requires_attempt_history() -> None:
             available=True,
             backend="edge_tts",
             fallback_used=True,
-            attempts=[],
+            attempts=(),
             duration_ms=40_000,
             sha256="7" * 64,
         )
@@ -243,7 +300,7 @@ def test_manifest_rejects_duplicate_or_hash_cycle_members() -> None:
             mode=ResultMode.LIVE,
             status=ResultStatus.PARTIAL,
             availability=ArtifactAvailability(report=True),
-            artifacts=[duplicate, duplicate],
+            artifacts=(duplicate, duplicate),
             failure=SafeFailure(
                 code="png_layout_failed", failed_stage="card", retry_scope="card"
             ),
@@ -261,3 +318,125 @@ def test_public_failures_have_no_raw_error_or_path_fields() -> None:
             {**failure.model_dump(), "raw_exception": "secret", "path": "C:/Users/private"},
             strict=True,
         )
+
+
+def _successful_audio(identity: ArtifactIdentity | None = None, *, sha256: str = "7" * 64):
+    bound = identity or _identity()
+    attempt = AudioAttempt(
+        backend="edge_tts",
+        rate_profile="default",
+        succeeded=True,
+        duration_ms=40_000,
+        sha256=sha256,
+    )
+    return AudioResult(
+        identity=bound,
+        available=True,
+        backend="edge_tts",
+        attempts=(attempt,),
+        duration_ms=40_000,
+        sha256=sha256,
+    )
+
+
+def _completed_manifest(**changes: object) -> ResultManifest:
+    identity = _identity()
+    payload = {
+        "manifest_version": "1.0.0",
+        "result_id": "result_" + "6" * 32,
+        "identity": identity,
+        "mode": ResultMode.LIVE,
+        "status": ResultStatus.COMPLETED,
+        "availability": ArtifactAvailability(
+            report=True, card=True, recap_text=True, audio=True
+        ),
+        "artifacts": (
+            _artifact("report", "report.md"),
+            _artifact("card", "card.png"),
+            _artifact("recap_text", "recap.txt"),
+            _artifact("audio", "recap.mp3", sha256="7" * 64),
+        ),
+        "audio": _successful_audio(identity),
+        "completed_stages": ("source", "report", "card", "audio"),
+    }
+    payload.update(changes)
+    return ResultManifest(**payload)
+
+
+def test_manifest_binds_availability_to_exact_artifact_kinds_and_audio() -> None:
+    assert _completed_manifest().status is ResultStatus.COMPLETED
+    valid = _completed_manifest()
+    for changes in (
+        {"artifacts": valid.artifacts[:-1]},
+        {"audio": None},
+        {"audio": _successful_audio(sha256="8" * 64)},
+        {"artifacts": (*valid.artifacts, _artifact("audio", "other.mp3", sha256="7" * 64))},
+    ):
+        with pytest.raises(ValidationError):
+            _completed_manifest(**changes)
+
+
+def test_partial_manifest_allows_only_explicit_card_or_audio_failure_subset() -> None:
+    identity = _identity()
+    audio_failure = SafeFailure(
+        code="tts_failed", failed_stage="audio", retry_scope="audio"
+    )
+    failed_attempt = AudioAttempt(
+        backend="edge_tts",
+        rate_profile="default",
+        succeeded=False,
+        safe_error_code="tts_backend_failed",
+    )
+    partial = ResultManifest(
+        manifest_version="1.0.0",
+        result_id="result_" + "6" * 32,
+        identity=identity,
+        mode=ResultMode.LIVE,
+        status=ResultStatus.PARTIAL,
+        availability=ArtifactAvailability(report=True, card=True, recap_text=True),
+        artifacts=(
+            _artifact("report", "report.md"),
+            _artifact("card", "card.png"),
+            _artifact("recap_text", "recap.txt"),
+        ),
+        failure=audio_failure,
+        audio=AudioResult(
+            identity=identity,
+            available=False,
+            attempts=(failed_attempt,),
+            failure=audio_failure,
+        ),
+    )
+    assert partial.status is ResultStatus.PARTIAL
+    with pytest.raises(ValidationError):
+        ResultManifest.model_validate(
+            {
+                **partial.model_dump(),
+                "availability": ArtifactAvailability(report=True).model_dump(),
+                "artifacts": (_artifact("report", "report.md").model_dump(),),
+            },
+            strict=True,
+        )
+
+
+def test_result_contract_collections_are_deeply_immutable_and_roundtrip_stably() -> None:
+    manifest = _completed_manifest()
+    with pytest.raises(AttributeError):
+        manifest.artifacts.append(_artifact("citations", "citations.json"))
+    with pytest.raises(AttributeError):
+        manifest.completed_stages.append("publish")
+    assert manifest.audio is not None
+    with pytest.raises(AttributeError):
+        manifest.audio.attempts.append(
+            AudioAttempt(
+                backend="edge_tts",
+                rate_profile="default",
+                succeeded=False,
+                safe_error_code="late_mutation",
+            )
+        )
+    from debugmate.hashing import canonical_json_bytes
+
+    first = canonical_json_bytes(manifest.model_dump(mode="json"))
+    restored = ResultManifest.model_validate_json(first, strict=True)
+    assert canonical_json_bytes(restored.model_dump(mode="json")) == first

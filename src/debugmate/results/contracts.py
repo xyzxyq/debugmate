@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import stat
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -15,7 +16,27 @@ Sha256 = str
 
 
 class StrictFrozenModel(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        strict=True, extra="forbid", frozen=True, revalidate_instances="always"
+    )
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        return bool(path.stat(follow_symlinks=False).st_file_attributes & 0x400)
+    except (AttributeError, FileNotFoundError, OSError):
+        return False
+
+
+def _has_unsafe_ancestor(path: Path) -> bool:
+    current = path
+    while current != current.parent:
+        if _is_link_or_reparse(current):
+            return True
+        current = current.parent
+    return _is_link_or_reparse(current)
 
 
 class ResultStatus(StrEnum):
@@ -75,13 +96,30 @@ class GenerationProfile(StrictFrozenModel):
 class ResolvedFont(StrictFrozenModel):
     name: str = Field(pattern=r"^[^/\\\x00]{1,128}$")
     path: Path
+    confinement_root: Path
     sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
     source: Literal["project", "windows"]
 
     @model_validator(mode="after")
-    def absolute_non_link_path(self) -> ResolvedFont:
-        if not self.path.is_absolute() or self.path.is_symlink():
-            raise ValueError("resolved font path must be an absolute non-link path")
+    def verified_confined_regular_file(self) -> ResolvedFont:
+        if not self.path.is_absolute() or not self.confinement_root.is_absolute():
+            raise ValueError("resolved font path and root must be absolute")
+        if _has_unsafe_ancestor(self.confinement_root) or _has_unsafe_ancestor(self.path):
+            raise ValueError("resolved font path contains a link or reparse point")
+        if not self.confinement_root.is_dir() or not self.path.is_file():
+            raise ValueError("resolved font must be a regular file under an existing root")
+        try:
+            if not stat.S_ISREG(self.path.stat().st_mode):
+                raise ValueError("resolved font must be a regular file")
+            self.path.resolve().relative_to(self.confinement_root.resolve())
+        except (OSError, ValueError) as exc:
+            raise ValueError("resolved font is outside its confinement root") from exc
+        if self.name != self.path.name:
+            raise ValueError("resolved font name does not match its file")
+        from debugmate.hashing import sha256_file
+
+        if sha256_file(self.path) != self.sha256:
+            raise ValueError("resolved font hash does not match current bytes")
         return self
 
 
@@ -181,7 +219,7 @@ class AudioResult(StrictFrozenModel):
     available: bool
     backend: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{1,31}$")
     fallback_used: bool = False
-    attempts: list[AudioAttempt]
+    attempts: tuple[AudioAttempt, ...]
     duration_ms: int | None = Field(default=None, strict=True, ge=0)
     sha256: Sha256 | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     failure: SafeFailure | None = None
@@ -193,12 +231,29 @@ class AudioResult(StrictFrozenModel):
                 raise ValueError("available audio requires backend, duration and hash")
             if not self.attempts or not self.attempts[-1].succeeded:
                 raise ValueError("available audio requires a successful final attempt")
+            if any(item.succeeded for item in self.attempts[:-1]):
+                raise ValueError("only the final audio attempt may succeed")
+            final = self.attempts[-1]
+            if (
+                final.backend != self.backend
+                or final.duration_ms != self.duration_ms
+                or final.sha256 != self.sha256
+            ):
+                raise ValueError("audio result must match its successful final attempt")
             if self.failure is not None:
                 raise ValueError("available audio cannot carry a terminal failure")
-        elif self.failure is None:
-            raise ValueError("unavailable audio requires a safe failure")
-        if self.fallback_used and len(self.attempts) < 2:
-            raise ValueError("fallback audio requires complete attempt history")
+        elif (
+            self.failure is None
+            or not self.attempts
+            or any(item.succeeded for item in self.attempts)
+            or any(
+                value is not None for value in (self.backend, self.duration_ms, self.sha256)
+            )
+        ):
+            raise ValueError("unavailable audio requires only failed attempts and safe failure")
+        used_multiple_backends = len({item.backend for item in self.attempts}) > 1
+        if self.fallback_used != used_multiple_backends:
+            raise ValueError("fallback flag must reflect the backend attempt history")
         return self
 
 
@@ -211,10 +266,10 @@ class ResultManifest(StrictFrozenModel):
     fixture_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
     fixture_name: str | None = Field(default=None, min_length=1, max_length=128)
     availability: ArtifactAvailability
-    artifacts: list[ArtifactRecord]
+    artifacts: tuple[ArtifactRecord, ...]
     failure: SafeFailure | None = None
-    completed_stages: list[str] = Field(default_factory=list)
-    inherited_stages: list[str] = Field(default_factory=list)
+    completed_stages: tuple[str, ...] = ()
+    inherited_stages: tuple[str, ...] = ()
     audio: AudioResult | None = None
 
     @model_validator(mode="after")
@@ -226,10 +281,21 @@ class ResultManifest(StrictFrozenModel):
             not self.availability.all() or self.failure is not None
         ):
             raise ValueError("completed result requires every artifact and no failure")
-        if self.status is ResultStatus.PARTIAL and (
-            not self.availability.any() or self.availability.all() or self.failure is None
-        ):
-            raise ValueError("partial result requires some artifacts and a safe failure")
+        if self.status is ResultStatus.PARTIAL:
+            expected_partial = {
+                "card": ArtifactAvailability(
+                    report=True, card=False, recap_text=True, audio=True
+                ),
+                "audio": ArtifactAvailability(
+                    report=True, card=True, recap_text=True, audio=False
+                ),
+            }
+            if (
+                self.failure is None
+                or expected_partial.get(self.failure.failed_stage) != self.availability
+                or self.failure.retry_scope != self.failure.failed_stage
+            ):
+                raise ValueError("partial result must identify exactly one card or audio failure")
         if self.status is ResultStatus.FAILED and (
             self.availability.any() or self.failure is None or self.artifacts
         ):
@@ -240,6 +306,38 @@ class ResultManifest(StrictFrozenModel):
             raise ValueError("artifact members must be unique")
         if any(item.identity != self.identity for item in self.artifacts):
             raise ValueError("artifact identity does not match result identity")
+        available_kinds = {
+            kind
+            for kind in ("report", "card", "recap_text", "audio")
+            if getattr(self.availability, kind)
+        }
+        actual_kinds = {item.kind for item in self.artifacts} & {
+            "report",
+            "card",
+            "recap_text",
+            "audio",
+        }
+        if actual_kinds != available_kinds:
+            raise ValueError("artifact kinds must exactly match declared availability")
+        audio_record = next((item for item in self.artifacts if item.kind == "audio"), None)
+        if self.status is ResultStatus.FAILED:
+            if self.audio is not None:
+                raise ValueError("failed result cannot expose audio state")
+        elif self.audio is None or self.audio.identity != self.identity:
+            raise ValueError("terminal result requires identity-bound audio state")
+        elif self.availability.audio:
+            if (
+                not self.audio.available
+                or audio_record is None
+                or self.audio.sha256 != audio_record.sha256
+            ):
+                raise ValueError("available audio record and AudioResult must match")
+        elif (
+            self.audio.available
+            or self.audio.failure != self.failure
+            or audio_record is not None
+        ):
+            raise ValueError("unavailable audio must match the manifest failure")
         return self
 
 
@@ -252,8 +350,8 @@ class ResultViewState(StrictFrozenModel):
     availability: ArtifactAvailability
     failure: SafeFailure | None = None
     current_stage: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{1,31}$")
-    completed_stages: list[str] = Field(default_factory=list)
-    inherited_stages: list[str] = Field(default_factory=list)
+    completed_stages: tuple[str, ...] = ()
+    inherited_stages: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def honest_view_state(self) -> ResultViewState:

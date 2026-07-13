@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import traceback
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,99 @@ def test_outcome_store_rejects_a_reparse_ancestor(
     with pytest.raises(ResultLoadError) as caught:
         store.write(outcome)
     assert caught.value.code == "outcome_store_invalid"
+
+
+def _assert_public_error_is_value_free(error: ResultLoadError, forbidden: tuple[str, ...]) -> None:
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    rendered = "".join(traceback.format_exception(error))
+    for value in forbidden:
+        assert value not in rendered
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected_code"),
+    [
+        ("outcome", "source_outcome_invalid"),
+        ("bundle", "source_bundle_invalid"),
+        ("identity", "diagnosis_identity_mismatch"),
+    ],
+)
+def test_loader_suppresses_raw_exception_chain_at_every_public_boundary(
+    completed_source_bundle,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    expected_code: str,
+) -> None:
+    import debugmate.results.loader as loader_module
+
+    outcome, source = completed_source_bundle
+    forbidden = ("Bearer SECRET_LEAK", "C:\\Users\\private", "provider response body")
+
+    def explode(_outcome):
+        raise RuntimeError(" | ".join(forbidden))
+
+    if boundary == "outcome":
+        monkeypatch.setattr(loader_module, "validate_diagnosis_outcome", explode)
+    elif boundary == "bundle":
+        monkeypatch.setattr(loader_module, "verify_bundle", explode)
+    else:
+        class ExplodingDiagnosisRecord:
+            model_validate_json = staticmethod(explode)
+
+        monkeypatch.setattr(loader_module, "DiagnosisRecord", ExplodingDiagnosisRecord)
+    with pytest.raises(ResultLoadError) as caught:
+        load_verified_outcome(outcome, evidence_root=source.parents[1])
+    assert caught.value.code == expected_code
+    _assert_public_error_is_value_free(caught.value, forbidden)
+
+
+def test_store_suppresses_raw_exception_chain_at_public_boundary(
+    completed_source_bundle, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import debugmate.results.outcome_store as store_module
+
+    outcome, _ = completed_source_bundle
+    forbidden = ("Bearer SECRET_LEAK", str(tmp_path), "provider response body")
+
+    def explode(_outcome):
+        raise RuntimeError(" | ".join(forbidden))
+
+    monkeypatch.setattr(store_module, "_strict_outcome", explode)
+    with pytest.raises(ResultLoadError) as caught:
+        DiagnosisOutcomeStore(tmp_path / "outcomes").write(outcome)
+    _assert_public_error_is_value_free(caught.value, forbidden)
+
+
+def test_store_read_suppresses_raw_exception_chain_at_public_boundary(
+    completed_source_bundle, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import debugmate.results.outcome_store as store_module
+
+    outcome, _ = completed_source_bundle
+    store = DiagnosisOutcomeStore(tmp_path / "outcomes")
+    store.write(outcome)
+    forbidden = ("Bearer SECRET_LEAK", str(tmp_path), "provider response body")
+
+    def explode(_outcome):
+        raise RuntimeError(" | ".join(forbidden))
+
+    monkeypatch.setattr(store_module, "_strict_outcome", explode)
+    with pytest.raises(ResultLoadError) as caught:
+        store.read(outcome.run_id)
+    _assert_public_error_is_value_free(caught.value, forbidden)
+
+
+def test_loaded_source_node_states_are_immutable_and_byte_stable(
+    completed_source_bundle,
+) -> None:
+    from debugmate.hashing import canonical_json_bytes
+    from debugmate.results.loader import LoadedDiagnosisSource
+
+    outcome, source = completed_source_bundle
+    loaded = load_verified_outcome(outcome, evidence_root=source.parents[1])
+    with pytest.raises(AttributeError):
+        loaded.source_manifest.node_states.append(("forged", "completed"))
+    raw = canonical_json_bytes(loaded.model_dump(mode="json"))
+    restored = LoadedDiagnosisSource.model_validate_json(raw, strict=True)
+    assert canonical_json_bytes(restored.model_dump(mode="json")) == raw

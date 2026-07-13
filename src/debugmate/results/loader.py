@@ -47,7 +47,12 @@ class SourceManifestSummary(StrictFrozenModel):
     schema_version: Literal["1.1.0"]
     prompt_version: str = Field(min_length=1)
     workflow_version: str = Field(min_length=1)
-    node_states: dict[str, str]
+    node_states: tuple[NodeStateEntry, ...]
+
+
+class NodeStateEntry(StrictFrozenModel):
+    stage: str = Field(pattern=r"^[a-z][a-z0-9_]{1,31}$")
+    state: Literal["completed", "inherited"]
 
 
 class LoadedDiagnosisSource(StrictFrozenModel):
@@ -132,8 +137,12 @@ def load_verified_outcome(
         strict = _strict_outcome(outcome)
         if strict.status is not WorkflowStatus.COMPLETED or strict.diagnosis is None:
             raise ValueError("outcome is not completed")
-    except Exception as exc:
-        raise ResultLoadError("source_outcome_invalid", "source") from exc
+    except Exception:
+        outcome_error = ResultLoadError("source_outcome_invalid", "source")
+    else:
+        outcome_error = None
+    if outcome_error is not None:
+        raise outcome_error from None
 
     root = Path(evidence_root)
     bundle = root / strict.case_id / strict.run_id
@@ -148,10 +157,12 @@ def load_verified_outcome(
         manifest = verification.manifest
         if not _manifest_matches(strict, manifest):
             raise ValueError("source manifest identity mismatch")
-    except ResultLoadError:
-        raise
-    except Exception as exc:
-        raise ResultLoadError("source_bundle_invalid", "source") from exc
+    except Exception:
+        bundle_error = ResultLoadError("source_bundle_invalid", "source")
+    else:
+        bundle_error = None
+    if bundle_error is not None:
+        raise bundle_error from None
 
     try:
         diagnosis = DiagnosisRecord.model_validate_json(
@@ -162,8 +173,12 @@ def load_verified_outcome(
         diagnosis_sha256 = sha256_bytes(
             canonical_json_bytes(diagnosis.model_dump(mode="json"))
         )
-    except Exception as exc:
-        raise ResultLoadError("diagnosis_identity_mismatch", "identity") from exc
+    except Exception:
+        identity_error = ResultLoadError("diagnosis_identity_mismatch", "identity")
+    else:
+        identity_error = None
+    if identity_error is not None:
+        raise identity_error from None
 
     summary = SourceManifestSummary(
         manifest_version=manifest.manifest_version,
@@ -176,7 +191,10 @@ def load_verified_outcome(
         schema_version=manifest.schema_version,
         prompt_version=manifest.prompt_version,
         workflow_version=manifest.workflow_version,
-        node_states=manifest.node_states,
+        node_states=tuple(
+            NodeStateEntry(stage=stage, state=state)
+            for stage, state in sorted(manifest.node_states.items())
+        ),
     )
     return LoadedDiagnosisSource(
         case_id=strict.case_id,

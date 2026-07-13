@@ -9,6 +9,7 @@ from debugmate.results.contracts import (
     GenerationProfile,
     PreparedGenerationContext,
     ResolvedFont,
+    _has_unsafe_ancestor,
 )
 
 
@@ -50,9 +51,10 @@ def prepare_generation_context(
 ) -> PreparedGenerationContext:
     """Resolve exactly once, project-first, and return an indivisible frozen context."""
 
-    root = Path(project_root).resolve()
-    if not root.is_dir() or root.is_symlink():
+    unresolved_root = Path(project_root).absolute()
+    if not unresolved_root.is_dir() or _has_unsafe_ancestor(unresolved_root):
         raise ValueError("project font root is unavailable or unsafe")
+    root = unresolved_root.resolve()
     chosen: tuple[Path, str] | None = None
     for value in project_font_candidates:
         candidate = _project_candidate(root, value)
@@ -65,7 +67,7 @@ def prepare_generation_context(
             if not candidate.is_absolute():
                 raise ValueError("Windows font allowlist entries must be absolute")
             resolved = candidate.resolve()
-            if candidate.is_symlink() or resolved != candidate.absolute():
+            if _has_unsafe_ancestor(candidate.absolute()) or resolved != candidate.absolute():
                 raise ValueError("Windows font allowlist entry is a link")
             if resolved.is_file():
                 chosen = (resolved, "windows")
@@ -74,9 +76,11 @@ def prepare_generation_context(
         raise ValueError("no approved font is available")
 
     path, source = chosen
+    confinement_root = root if source == "project" else path.parent
     resolved = ResolvedFont(
         name=path.name,
         path=path,
+        confinement_root=confinement_root,
         sha256=sha256_file(path),
         source=source,
     )
