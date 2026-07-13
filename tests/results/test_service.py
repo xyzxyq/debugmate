@@ -6,20 +6,92 @@ from pathlib import Path
 
 import pytest
 
+from debugmate.diagnosis.extraction import FieldId
 from debugmate.diagnosis.workflow import DiagnosisRunOutcome
 from debugmate.results.consistency import validate_result_candidates
 from debugmate.results.outcome_store import DiagnosisOutcomeStore
 from debugmate.results.publisher import TrustedResultRoot, publish_result_bundle
+from debugmate.results.verifier import ResultVerificationError
 
 
-def _service(tmp_path: Path, candidates):
+def _service(tmp_path: Path, candidates=None, *, composer=None, workflow=None):
     from debugmate.results.service import ResultApplicationService
 
-    candidate = validate_result_candidates(*candidates)
     root = TrustedResultRoot.for_testing(tmp_path / "results")
+    if composer is None:
+        assert candidates is not None
+        candidate = validate_result_candidates(*candidates)
+
+        def compose(source, *, mode, fixture_id, fixture_name):
+            assert source.case_id == candidate.identity.case_id
+            return publish_result_bundle(
+                root,
+                candidate,
+                mode=mode,
+                fixture_id=fixture_id,
+                fixture_name=fixture_name,
+            )
+
+    return ResultApplicationService(
+        workflow=workflow,
+        evidence_root=tmp_path / "evidence",
+        outcome_store=DiagnosisOutcomeStore(tmp_path / "outcomes"),
+        results_root=root,
+        replay_root=Path(__file__).resolve().parents[2] / "fixtures" / "replay",
+        composer=compose if composer is None else composer,
+    )
+
+
+def _dynamic_composer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tests.results.conftest import _AudioAdapter, _FailAdapter, _font_copy, _probe
+
+    from debugmate.results import audio as audio_module
+    from debugmate.results import verifier as verifier_module
+    from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
+    from debugmate.results.card import render_card
+    from debugmate.results.font import prepare_generation_context
+    from debugmate.results.presentation import build_presentation
+    from debugmate.results.recap import compose_recap
+    from debugmate.results.report import render_citations, render_report
+    from debugmate.results.tts.base import TtsRequestIdentity
+
+    root = TrustedResultRoot.for_testing(tmp_path / "results")
+    font = _font_copy(tmp_path)
+    context = prepare_generation_context(
+        project_root=tmp_path,
+        project_font_candidates=(f"fonts/{font.name}",),
+        windows_font_candidates=(),
+    )
+    monkeypatch.setattr(audio_module, "probe_mp3", _probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", lambda value, **_kwargs: value)
+    monkeypatch.setattr(verifier_module, "probe_mp3", _probe)
 
     def compose(source, *, mode, fixture_id, fixture_name):
-        assert source.case_id == candidate.identity.case_id
+        presentation = build_presentation(source, context)
+        report = render_report(presentation)
+        citations = render_citations(presentation)
+        recap = compose_recap(presentation)
+        card = render_card(
+            presentation,
+            context,
+            target=tmp_path / "cards" / f"{source.source_run_id}.png",
+        )
+        audio = TtsFallbackChain(
+            (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
+        ).synthesize(
+            recap,
+            TtsRequestIdentity(
+                case_id=recap.identity.case_id,
+                source_run_id=recap.identity.source_run_id,
+                diagnosis_sha256=recap.identity.diagnosis_sha256,
+                generation_version=recap.identity.generation_version,
+                recap_sha256=recap.sha256,
+            ),
+            TrustedCandidateRoot.for_testing(tmp_path / "private"),
+        )
+        candidate = validate_result_candidates(
+            source, presentation, report, citations, card, recap, audio
+        )
         return publish_result_bundle(
             root,
             candidate,
@@ -28,14 +100,7 @@ def _service(tmp_path: Path, candidates):
             fixture_name=fixture_name,
         )
 
-    return ResultApplicationService(
-        workflow=None,
-        evidence_root=tmp_path / "evidence",
-        outcome_store=DiagnosisOutcomeStore(tmp_path / "outcomes"),
-        results_root=root,
-        replay_root=Path(__file__).resolve().parents[2] / "fixtures" / "replay",
-        composer=compose,
-    )
+    return root, compose
 
 
 def test_indexed_replay_imports_complete_outcome_publishes_new_verified_result_and_restores(
@@ -82,3 +147,83 @@ def test_restore_rereads_full_outcome_store_and_refuses_a_tampered_record(
     assert restored.status.value == "failed"
     assert restored.failure.code == "outcome_store_invalid"
     assert not hasattr(restored, "path")
+
+
+def test_replay_correction_requires_confirmation_and_preserves_old_source_and_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A correction derived from a replay remains honestly replay-labelled."""
+
+    from tests.diagnosis.test_workflow_e2e import _rows, _workflow
+
+    from debugmate.results.service import CorrectionDraft
+
+    workflow, *_ = _workflow(_rows()[0], tmp_path)
+    _root, composer = _dynamic_composer(tmp_path, monkeypatch)
+    service = _service(tmp_path, composer=composer, workflow=workflow)
+    original = service.load_replay("module-not-found")
+    assert original.identity is not None and original.result_id is not None
+
+    draft = CorrectionDraft(
+        field_id=FieldId.EXCEPTION_TYPE,
+        replacement="ImportError",
+        reason="已根据脱敏回溯确认。",
+    )
+    unconfirmed = service.correct_and_compose(original.identity.source_run_id, draft, False)
+    assert unconfirmed == original
+
+    no_op = service.correct_and_compose(
+        original.identity.source_run_id,
+        CorrectionDraft(
+            field_id=FieldId.EXCEPTION_TYPE,
+            replacement="ModuleNotFoundError",
+            reason="无需修改。",
+        ),
+        True,
+    )
+    assert no_op == original
+
+    corrected = service.correct_and_compose(original.identity.source_run_id, draft, True)
+    assert corrected.status.value == "completed"
+    assert corrected.mode.value == "replay"
+    assert corrected.identity is not None
+    assert corrected.identity.source_run_id != original.identity.source_run_id
+    assert corrected.result_id != original.result_id
+    assert service.restore_result(original.identity.case_id, original.result_id) == original
+
+
+def test_download_returns_only_one_shot_verified_bytes_not_a_server_path(
+    candidates, tmp_path: Path
+) -> None:
+    service = _service(tmp_path, candidates)
+    state = service.load_replay("module-not-found")
+    assert state.identity is not None and state.result_id is not None
+
+    download = service.resolve_download(state.identity.case_id, state.result_id, "report")
+    assert download.member_id == "report"
+    assert not hasattr(download, "path")
+    assert download.read_bytes().startswith(b"# DebugMate")
+    with pytest.raises(ResultVerificationError):
+        download.read_bytes()
+
+
+def test_live_approved_input_runs_phase3_once_then_persists_source_before_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
+
+    row = _rows()[0]
+    workflow, _extraction, _retrieval, generator = _workflow(row, tmp_path)
+    _root, composer = _dynamic_composer(tmp_path, monkeypatch)
+    service = _service(tmp_path, composer=composer, workflow=workflow)
+    approved = _approved(str(row["case_id"]))
+
+    first = service.diagnose_and_compose(approved)
+    second = service.diagnose_and_compose(approved.model_dump_json())
+
+    assert first.status.value == "completed"
+    assert second == first
+    assert first.identity is not None
+    assert len(generator.calls) == 1
+    assert (tmp_path / "evidence" / first.identity.case_id / first.identity.source_run_id).is_dir()
+    assert (tmp_path / "outcomes" / first.identity.source_run_id / "outcome.json").is_file()
