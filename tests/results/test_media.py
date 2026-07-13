@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from debugmate.results.media import MediaProbeError, probe_mp3
+from debugmate.results.media import MediaProbeError, canonicalize_mp3, probe_mp3
 
 FFMPEG = "ffmpeg"
 
@@ -274,3 +274,79 @@ def test_rejects_untrusted_ffprobe_shapes_with_fixed_codes(
 
     _assert_code(error, code)
     assert "SECRET" not in repr(error.value)
+
+
+def test_ffprobe_output_is_file_bounded_before_python_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media = tmp_path / "candidate.mp3"
+    media.write_bytes(b"\xff\xfb" + b"x" * 100)
+
+    class Process:
+        returncode = 0
+
+        def communicate(self, *, timeout: float) -> tuple[None, None]:
+            assert timeout == 5.0
+            return None, None
+
+    def popen(command: list[str], **kwargs: object) -> Process:
+        assert kwargs["shell"] is False
+        assert kwargs["stdout"] is not subprocess.PIPE
+        assert kwargs["stderr"] is not subprocess.PIPE
+        stdout = kwargs["stdout"]
+        assert hasattr(stdout, "write")
+        stdout.write(b"x" * (1024 * 1024 + 1))  # type: ignore[union-attr]
+        return Process()
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+    with pytest.raises(MediaProbeError) as error:
+        probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000)
+
+    _assert_code(error, "probe_invalid")
+
+
+def test_canonicalize_reencodes_tagged_mp3_and_drops_trailing_secret(tmp_path: Path) -> None:
+    source = _ffmpeg(
+        tmp_path / "tagged-source.mp3",
+        "-metadata",
+        "title=forbidden",
+        "-ac",
+        "1",
+        "-codec:a",
+        "libmp3lame",
+        duration=45.0,
+    )
+    with source.open("ab") as handle:
+        handle.write(b"HIDDEN_TRAILING_SECRET")
+    target = tmp_path / "canonical.mp3"
+
+    probe = canonicalize_mp3(
+        source,
+        target,
+        timeout_seconds=20.0,
+        max_bytes=1_000_000,
+    )
+
+    assert probe == probe_mp3(target, timeout_seconds=5.0, max_bytes=1_000_000)
+    assert b"HIDDEN_TRAILING_SECRET" not in target.read_bytes()
+    assert target != source
+
+
+def test_canonicalize_failure_does_not_publish_partial_target(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "invalid.mp3"
+    source.write_bytes(b"not audio HIDDEN_SECRET")
+    target = tmp_path / "canonical.mp3"
+
+    with pytest.raises(MediaProbeError) as error:
+        canonicalize_mp3(
+            source,
+            target,
+            timeout_seconds=5.0,
+            max_bytes=1_000_000,
+        )
+
+    _assert_code(error, "canonicalize_failed")
+    assert not target.exists()
