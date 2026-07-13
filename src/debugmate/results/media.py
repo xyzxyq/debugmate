@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import math
 import os
-import shutil
+import stat
 import subprocess
 import tempfile
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +18,23 @@ from pydantic import Field
 from debugmate.hashing import sha256_file
 from debugmate.results.contracts import StrictFrozenModel
 
-FFPROBE_EXECUTABLE = shutil.which("ffprobe") or "ffprobe"
-FFMPEG_EXECUTABLE = shutil.which("ffmpeg") or "ffmpeg"
 _MAX_PROBE_OUTPUT_BYTES = 1024 * 1024
 _MAX_TRANSCODE_OUTPUT_BYTES = 64 * 1024
 _MIN_DURATION_SECONDS = 30.0
 _MAX_DURATION_SECONDS = 60.0
 _MP3_FRAME_TOLERANCE_SECONDS = 0.02
+_WINGET_FFMPEG_BIN = (
+    Path("Microsoft")
+    / "WinGet"
+    / "Packages"
+    / "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    / "ffmpeg-8.1-full_build"
+    / "bin"
+)
+_EXPECTED_MEDIA_HASHES = {
+    "ffmpeg.exe": "d1e2a156261ecc675081943197a85f08f2868784a0af499171ede89353edad31",
+    "ffprobe.exe": "70872c3ffbc43d0b2c570f9837f54d6e9a832f4ca25463e9735b6a3ec0621478",
+}
 
 
 class MediaProbeError(ValueError):
@@ -32,6 +43,122 @@ class MediaProbeError(ValueError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class TrustedMediaTools:
+    """Verified absolute media executables; never a PATH-derived command."""
+
+    ffmpeg: Path
+    ffprobe: Path
+
+
+@dataclass(frozen=True)
+class _VerifiedExecutable:
+    path: Path
+    size: int
+    mtime_ns: int
+
+
+_VERIFIED_EXECUTABLES: dict[str, _VerifiedExecutable] = {}
+
+
+def _windows_local_app_data() -> Path:
+    """Read the Windows known folder directly, not an environment variable."""
+
+    if os.name != "nt":
+        raise MediaProbeError("media_tool_unavailable") from None
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32_768)
+        # CSIDL_LOCAL_APPDATA. This API returns the real Windows known folder and
+        # does not honor a caller-controlled PATH/LOCALAPPDATA override.
+        result = ctypes.windll.shell32.SHGetFolderPathW(None, 0x001C, None, 0, buffer)
+        if result != 0 or not buffer.value:
+            raise OSError
+        return Path(buffer.value)
+    except (AttributeError, OSError):
+        raise MediaProbeError("media_tool_unavailable") from None
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        info = path.stat(follow_symlinks=False)
+    except OSError:
+        return True
+    return path.is_symlink() or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
+def _is_regular_nonreparse(path: Path) -> bool:
+    try:
+        info = path.stat(follow_symlinks=False)
+        return not _is_link_or_reparse(path) and stat.S_ISREG(info.st_mode)
+    except OSError:
+        return False
+
+
+def _has_safe_ancestors(path: Path) -> bool:
+    """Reject every symlink/reparse ancestor before executing a trusted tool."""
+
+    current = path
+    try:
+        while True:
+            info = current.stat(follow_symlinks=False)
+            if current != path and not stat.S_ISDIR(info.st_mode):
+                return False
+            if _is_link_or_reparse(current):
+                return False
+            parent = current.parent
+            if parent == current:
+                return True
+            current = parent
+    except OSError:
+        return False
+
+
+def _verified_media_executable(name: str) -> Path:
+    """Resolve only the pinned WinGet 8.1 binary and recheck replacements."""
+
+    expected = _EXPECTED_MEDIA_HASHES[name]
+    candidate = _windows_local_app_data() / _WINGET_FFMPEG_BIN / name
+    if (
+        not candidate.is_absolute()
+        or not _is_regular_nonreparse(candidate)
+        or not _has_safe_ancestors(candidate)
+    ):
+        raise MediaProbeError("media_tool_unavailable") from None
+    try:
+        info = candidate.stat(follow_symlinks=False)
+    except OSError:
+        raise MediaProbeError("media_tool_unavailable") from None
+    cached = _VERIFIED_EXECUTABLES.get(name)
+    if cached is None or (cached.path, cached.size, cached.mtime_ns) != (
+        candidate,
+        info.st_size,
+        info.st_mtime_ns,
+    ):
+        try:
+            if sha256_file(candidate) != expected:
+                raise MediaProbeError("media_tool_unavailable") from None
+        except OSError:
+            raise MediaProbeError("media_tool_unavailable") from None
+        # Close the common replacement race before the process command is built.
+        if not _is_regular_nonreparse(candidate) or not _has_safe_ancestors(candidate):
+            raise MediaProbeError("media_tool_unavailable") from None
+        _VERIFIED_EXECUTABLES[name] = _VerifiedExecutable(
+            path=candidate, size=info.st_size, mtime_ns=info.st_mtime_ns
+        )
+    return candidate
+
+
+def trusted_media_tools() -> TrustedMediaTools:
+    """Return the exact verified binaries approved for the Windows course host."""
+
+    return TrustedMediaTools(
+        ffmpeg=_verified_media_executable("ffmpeg.exe"),
+        ffprobe=_verified_media_executable("ffprobe.exe"),
+    )
 
 
 class MediaProbe(StrictFrozenModel):
@@ -113,8 +240,12 @@ def probe_mp3(
     if len(signature) < 2 or signature[0] != 0xFF or signature[1] & 0xE0 != 0xE0:
         _fail("not_mpeg")
 
+    try:
+        ffprobe = trusted_media_tools().ffprobe
+    except MediaProbeError:
+        raise
     command = [
-        FFPROBE_EXECUTABLE,
+        str(ffprobe),
         "-v",
         "error",
         "-show_entries",
@@ -218,8 +349,9 @@ def canonicalize_mp3(
             delete=False,
         ) as handle:
             temporary_path = Path(handle.name)
+        ffmpeg = trusted_media_tools().ffmpeg
         command = [
-            FFMPEG_EXECUTABLE,
+            str(ffmpeg),
             "-v",
             "error",
             "-nostdin",

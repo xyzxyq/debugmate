@@ -417,7 +417,12 @@ def test_sapi_rejects_untrusted_executable_or_script_roots_without_echoing_value
 def test_sapi_rejects_a_non_regular_resolved_ffmpeg_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("debugmate.results.tts.sapi.FFMPEG_EXECUTABLE", "cmd.exe")
+    class ForgedTools:
+        ffmpeg = Path(r"C:\Windows\System32\cmd.exe")
+
+    monkeypatch.setattr(
+        "debugmate.results.tts.sapi.trusted_media_tools", lambda: ForgedTools()
+    )
 
     with pytest.raises(ValueError, match="^tts_sapi_config_invalid$"):
         SapiTtsAdapter(project_root=Path.cwd())

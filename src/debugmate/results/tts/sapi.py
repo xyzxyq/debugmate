@@ -8,7 +8,7 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-from debugmate.results.media import FFMPEG_EXECUTABLE, _run_bounded_process
+from debugmate.results.media import _run_bounded_process, trusted_media_tools
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import (
     AudioCandidate,
@@ -44,14 +44,11 @@ class SapiTtsAdapter:
             script = trusted_root / "scripts" / "sapi-synthesize.ps1"
             if not _is_trusted_repository_file(script, trusted_root):
                 raise ValueError
-            system_directory = Path(os.environ["SYSTEMROOT"]) / "System32"
+            system_directory = _windows_system_directory()
             powershell_path = system_directory / "WindowsPowerShell" / "v1.0" / "powershell.exe"
             if not _is_regular_file(powershell_path):
                 raise ValueError
-            ffmpeg_path = Path(FFMPEG_EXECUTABLE)
-            if not ffmpeg_path.is_absolute():
-                raise ValueError
-            ffmpeg_path = ffmpeg_path.resolve(strict=True)
+            ffmpeg_path = trusted_media_tools().ffmpeg
             if not _is_regular_file(ffmpeg_path) or ffmpeg_path.name.casefold() != "ffmpeg.exe":
                 raise ValueError
         except (AttributeError, KeyError, OSError, ValueError):
@@ -150,6 +147,23 @@ def _is_regular_file(path: Path) -> bool:
         return path.is_file() and not path.is_symlink() and stat.S_ISREG(path.stat().st_mode)
     except OSError:
         return False
+
+
+def _windows_system_directory() -> Path:
+    """Use the Windows API rather than a caller-controlled SYSTEMROOT value."""
+
+    if os.name != "nt":
+        raise OSError("not windows")
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32_768)
+        length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+        if length == 0 or length >= len(buffer):
+            raise OSError
+        return Path(buffer.value)
+    except (AttributeError, OSError):
+        raise OSError("system directory unavailable") from None
 
 
 def _is_link_or_reparse(path: Path) -> bool:

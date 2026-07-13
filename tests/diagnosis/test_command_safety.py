@@ -45,12 +45,29 @@ def _scan_process_capabilities(
             return False
         if name != "Popen":
             return False
-        keyword_names = {keyword.arg for keyword in call.keywords}
+        keyword_values = {keyword.arg: keyword.value for keyword in call.keywords}
+        expected_keywords = {"stdin", "stdout", "stderr", "shell"}
+
+        def _is_subprocess_attribute(value: ast.expr, name: str) -> bool:
+            return (
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id == "subprocess"
+                and value.attr == name
+            )
+
         return (
-            bool(call.args)
+            len(call.args) == 1
             and isinstance(call.args[0], ast.Name)
             and call.args[0].id == "command"
-            and {"stdin", "stdout", "stderr"} <= keyword_names
+            and set(keyword_values) == expected_keywords
+            and _is_subprocess_attribute(keyword_values["stdin"], "DEVNULL")
+            and isinstance(keyword_values["stdout"], ast.Name)
+            and keyword_values["stdout"].id == "stdout"
+            and isinstance(keyword_values["stderr"], ast.Name)
+            and keyword_values["stderr"].id == "stderr"
+            and isinstance(keyword_values["shell"], ast.Constant)
+            and keyword_values["shell"].value is False
         )
 
     def _is_os_process_name(name: str) -> bool:
@@ -243,8 +260,8 @@ def test_process_allowlist_is_call_precise_and_requires_literal_shell_false(
             boundary: (
                 "import subprocess\n"
                 "command = ['fixed']\n"
-                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, "
-                "stderr=err, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
+                "stderr=stderr, shell=False)\n"
                 "subprocess.Popen(['missing-shell'])\n"
                 "subprocess.Popen(['unsafe'], shell=True)\n"
                 "subprocess.run(['not-the-audited-call'], shell=False)\n"
