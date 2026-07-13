@@ -19,9 +19,9 @@ from debugmate.results.consistency import (
     ResultConsistencyError,
     ValidatedResultCandidates,
     _CandidateSnapshot,
-    checkout_verified_candidate_for_publication,
+    _PublisherCandidateLease,
+    _issue_publisher_candidate_lease,
     is_issued_result_candidate,
-    release_verified_candidate_checkout,
 )
 from debugmate.results.contracts import (
     ArtifactIdentity,
@@ -560,9 +560,32 @@ class ResultBundlePublisher:
         if not is_issued_result_candidate(candidate):
             raise ResultPublishError("candidate_invalid")
         try:
-            snapshot = checkout_verified_candidate_for_publication(candidate)
+            lease = _issue_publisher_candidate_lease(candidate)
         except ResultConsistencyError as error:
             raise ResultPublishError(error.code) from None
+        try:
+            snapshot = lease.snapshot_for_publisher()
+            return self._publish_snapshot(
+                snapshot,
+                lease,
+                mode=mode,
+                fixture_id=fixture_id,
+                fixture_name=fixture_name,
+            )
+        finally:
+            lease.close()
+
+    def _publish_snapshot(
+        self,
+        snapshot: _CandidateSnapshot,
+        lease: _PublisherCandidateLease,
+        *,
+        mode: ResultMode,
+        fixture_id: str | None,
+        fixture_name: str | None,
+    ) -> PublishedResultBundle:
+        """Publish one internal snapshot while its private lease is active."""
+
         transaction: _ResultTransaction | None = None
         try:
             if snapshot.identity != self.result_identity:
@@ -576,7 +599,9 @@ class ResultBundlePublisher:
                     transaction.final, snapshot, result_id, mode, fixture_id, fixture_name
                 )
             temporary = transaction.temporary
-            audio = snapshot.audio_bytes
+            # The transaction has obtained exclusive directory leases.  Only
+            # now may the one-shot TTS handoff consume its private MP3.
+            audio = lease.take_audio_for_publisher(snapshot)
             payloads = _candidate_payloads(snapshot, audio)
             manifest = _manifest(
                 snapshot,
@@ -626,7 +651,6 @@ class ResultBundlePublisher:
                 transaction.close()
                 if temporary is not None:
                     _remove_temporary_tree(temporary)
-            release_verified_candidate_checkout(candidate)
 
 
 def _reuse_existing(
@@ -689,7 +713,23 @@ def publish_result_bundle(
 
     if not isinstance(results_root, TrustedResultRoot) or not is_issued_result_candidate(candidate):
         raise ResultPublishError("candidate_invalid")
-    publisher = ResultBundlePublisher.begin(
-        results_root, candidate.identity.case_id, candidate.identity
-    )
-    return publisher.publish(candidate, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name)
+    try:
+        lease = _issue_publisher_candidate_lease(candidate)
+    except ResultConsistencyError as error:
+        raise ResultPublishError(error.code) from None
+    try:
+        # Never read identity or business fields from the public dataclass:
+        # observers can mutate a frozen object with object.__setattr__.
+        snapshot = lease.snapshot_for_publisher()
+        publisher = ResultBundlePublisher.begin(
+            results_root, snapshot.identity.case_id, snapshot.identity
+        )
+        return publisher._publish_snapshot(
+            snapshot,
+            lease,
+            mode=mode,
+            fixture_id=fixture_id,
+            fixture_name=fixture_name,
+        )
+    finally:
+        lease.close()

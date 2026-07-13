@@ -11,6 +11,7 @@ from __future__ import annotations
 import stat
 import threading
 import weakref
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,7 +57,7 @@ class ValidatedResultCandidates:
     The dataclass intentionally has no source/card/audio filesystem path.  A
     successful MP3 is represented by the corresponding public ``AudioResult``
     only; the private handoff is held in the module registry and can be used
-    exactly once by :func:`take_verified_audio_for_publication`.
+    exactly once through a publisher-private lease.
     """
 
     identity: ArtifactIdentity
@@ -88,7 +89,6 @@ class _CandidateSnapshot:
     recap_bytes: bytes
     card_bytes: bytes | None
     audio: AudioResult
-    audio_bytes: bytes | None
     source_proof_sha256: str
     presentation_projection_sha256: str
     citation_graph_sha256: str
@@ -98,21 +98,175 @@ class _CandidateSnapshot:
 class _CandidateState:
     owner: weakref.ReferenceType[ValidatedResultCandidates]
     snapshot: _CandidateSnapshot
+    audio_outcome: TtsSynthesisOutcome | None
     checked_out: bool = False
+    public_checkout: bool = False
+    publisher_lease_token: object | None = None
+    audio_taken: bool = False
+
+
+@dataclass(slots=True)
+class _PublisherLeaseState:
+    owner: weakref.ReferenceType[_PublisherCandidateLease]
+    candidate_key: int
 
 
 _CANDIDATE_LOCK = threading.RLock()
 _CANDIDATE_STATES: dict[int, _CandidateState] = {}
+_PUBLISHER_LEASES: dict[object, _PublisherLeaseState] = {}
 
 
 def _forget_candidate(key: int):
     def finalize(_owner: object) -> None:
+        outcome: TtsSynthesisOutcome | None = None
         with _CANDIDATE_LOCK:
-            state = _CANDIDATE_STATES.get(key)
+            state = _CANDIDATE_STATES.pop(key, None)
             if state is not None and state.owner() is None:
-                _CANDIDATE_STATES.pop(key, None)
+                outcome = state.audio_outcome
+                if state.publisher_lease_token is not None:
+                    _PUBLISHER_LEASES.pop(state.publisher_lease_token, None)
+        _close_unconsumed_handoff(outcome)
 
     return finalize
+
+
+def _close_unconsumed_handoff(outcome: TtsSynthesisOutcome | None) -> None:
+    if outcome is not None and outcome.handoff is not None:
+        with suppress(Exception):
+            outcome.handoff.close()
+
+
+def _clone_model(value, model_type):
+    return model_type.model_validate_json(
+        canonical_json_bytes(value.model_dump(mode="json")), strict=True
+    )
+
+
+def _clone_snapshot(value: _CandidateSnapshot) -> _CandidateSnapshot:
+    """Copy every mutable model boundary before an observer can see it."""
+
+    try:
+        return _CandidateSnapshot(
+            identity=_clone_model(value.identity, ArtifactIdentity),
+            status=value.status,
+            availability=_clone_model(value.availability, ArtifactAvailability),
+            failure=(
+                _clone_model(value.failure, SafeFailure) if value.failure is not None else None
+            ),
+            diagnosis_bytes=value.diagnosis_bytes,
+            report_bytes=value.report_bytes,
+            citations_bytes=value.citations_bytes,
+            source_manifest_bytes=value.source_manifest_bytes,
+            recap_bytes=value.recap_bytes,
+            card_bytes=value.card_bytes,
+            audio=_clone_model(value.audio, AudioResult),
+            source_proof_sha256=value.source_proof_sha256,
+            presentation_projection_sha256=value.presentation_projection_sha256,
+            citation_graph_sha256=value.citation_graph_sha256,
+        )
+    except Exception:
+        raise ResultConsistencyError("candidate_invalid") from None
+
+
+class _PublisherCandidateLease:
+    """Private, one-shot bridge from a gate state into one publisher call."""
+
+    __slots__ = ("_token", "__weakref__")
+
+    def __init__(self, *_arguments: object, **_kwargs: object) -> None:
+        raise TypeError("publisher lease requires the consistency gate")
+
+    @classmethod
+    def _issue(cls, candidate_key: int) -> _PublisherCandidateLease:
+        value = object.__new__(cls)
+        token = object()
+        object.__setattr__(value, "_token", token)
+
+        def forget(reference: weakref.ReferenceType[_PublisherCandidateLease]) -> None:
+            _release_publisher_lease(token, reference)
+
+        reference = weakref.ref(value, forget)
+        _PUBLISHER_LEASES[token] = _PublisherLeaseState(
+            owner=reference, candidate_key=candidate_key
+        )
+        return value
+
+    def __copy__(self) -> _PublisherCandidateLease:
+        raise TypeError("publisher lease is not copyable")
+
+    def __deepcopy__(self, _memo: object) -> _PublisherCandidateLease:
+        raise TypeError("publisher lease is not copyable")
+
+    def __reduce__(self) -> object:
+        raise TypeError("publisher lease is not serialisable")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("publisher lease is not serialisable")
+
+    def _state(self) -> _CandidateState:
+        try:
+            token = object.__getattribute__(self, "_token")
+            lease = _PUBLISHER_LEASES.get(token)
+            if lease is None or lease.owner() is not self:
+                raise ValueError("lease")
+            state = _CANDIDATE_STATES.get(lease.candidate_key)
+            if (
+                state is None
+                or state.publisher_lease_token is not token
+                or state.owner() is None
+            ):
+                raise ValueError("state")
+            return state
+        except Exception:
+            raise ResultConsistencyError("candidate_invalid") from None
+
+    def snapshot_for_publisher(self) -> _CandidateSnapshot:
+        with _CANDIDATE_LOCK:
+            return _clone_snapshot(self._state().snapshot)
+
+    def take_audio_for_publisher(self, snapshot: _CandidateSnapshot) -> bytes | None:
+        with _CANDIDATE_LOCK:
+            state = self._state()
+            if snapshot.audio != state.snapshot.audio or snapshot.identity != state.snapshot.identity:
+                raise ResultConsistencyError("candidate_invalid")
+            if not snapshot.availability.audio:
+                return None
+            if state.audio_taken or state.audio_outcome is None:
+                raise ResultConsistencyError("audio_handoff_invalid")
+            outcome = state.audio_outcome
+            state.audio_taken = True
+        if outcome.handoff is None:
+            raise ResultConsistencyError("audio_handoff_invalid")
+        try:
+            payload = outcome.handoff.take_verified_bytes(outcome.audio)
+        except Exception:
+            raise ResultConsistencyError("audio_handoff_invalid") from None
+        if not payload or len(payload) > 8_000_000 or sha256_bytes(payload) != snapshot.audio.sha256:
+            raise ResultConsistencyError("audio_handoff_invalid")
+        return payload
+
+    def close(self) -> None:
+        token = object.__getattribute__(self, "_token")
+        _release_publisher_lease(token, None)
+
+
+def _release_publisher_lease(
+    token: object, reference: weakref.ReferenceType[_PublisherCandidateLease] | None
+) -> None:
+    outcome: TtsSynthesisOutcome | None = None
+    with _CANDIDATE_LOCK:
+        lease = _PUBLISHER_LEASES.get(token)
+        if lease is None or (reference is not None and lease.owner is not reference):
+            return
+        _PUBLISHER_LEASES.pop(token, None)
+        state = _CANDIDATE_STATES.get(lease.candidate_key)
+        if state is not None and state.publisher_lease_token is token:
+            state.publisher_lease_token = None
+            state.checked_out = False
+            state.public_checkout = False
+            outcome = state.audio_outcome
+            state.audio_outcome = None
+    _close_unconsumed_handoff(outcome)
 
 
 def is_issued_result_candidate(candidate: object) -> bool:
@@ -152,7 +306,8 @@ def checkout_verified_candidate_for_publication(
         if state.checked_out:
             raise ResultConsistencyError("candidate_busy")
         state.checked_out = True
-        return state.snapshot
+        state.public_checkout = True
+        return _clone_snapshot(state.snapshot)
 
 
 def release_verified_candidate_checkout(candidate: object) -> None:
@@ -162,22 +317,57 @@ def release_verified_candidate_checkout(candidate: object) -> None:
         return
     with _CANDIDATE_LOCK:
         state = _CANDIDATE_STATES.get(id(candidate))
-        if state is not None and state.owner() is candidate:
+        if (
+            state is not None
+            and state.owner() is candidate
+            and state.public_checkout
+            and state.publisher_lease_token is None
+        ):
             state.checked_out = False
+            state.public_checkout = False
+
+
+def _issue_publisher_candidate_lease(candidate: object) -> _PublisherCandidateLease:
+    """Claim private gate state for a publisher; never return it publicly."""
+
+    if not isinstance(candidate, ValidatedResultCandidates):
+        raise ResultConsistencyError("candidate_invalid")
+    with _CANDIDATE_LOCK:
+        state = _CANDIDATE_STATES.get(id(candidate))
+        if state is None or state.owner() is not candidate:
+            raise ResultConsistencyError("candidate_invalid")
+        if state.checked_out:
+            raise ResultConsistencyError("candidate_busy")
+        state.checked_out = True
+        state.public_checkout = False
+        lease = _PublisherCandidateLease._issue(id(candidate))
+        state.publisher_lease_token = object.__getattribute__(lease, "_token")
+        return lease
 
 
 def take_verified_audio_for_publication(candidate: ValidatedResultCandidates) -> bytes | None:
-    """Compatibility accessor for a claimed private snapshot only."""
+    """Retired public path: audio is only consumable by a publisher lease."""
 
-    snapshot = checkout_verified_candidate_for_publication(candidate)
-    try:
-        return snapshot.audio_bytes
-    finally:
-        release_verified_candidate_checkout(candidate)
+    raise ResultConsistencyError("audio_handoff_invalid")
 
 
 def discard_audio_handoff(candidate: ValidatedResultCandidates) -> None:
-    """Compatibility no-op: the gate consumes/rechecks audio before issuance."""
+    """Explicitly abandon an unclaimed successful handoff without exposing it."""
+
+    outcome: TtsSynthesisOutcome | None = None
+    if not isinstance(candidate, ValidatedResultCandidates):
+        return
+    with _CANDIDATE_LOCK:
+        state = _CANDIDATE_STATES.get(id(candidate))
+        if (
+            state is not None
+            and state.owner() is candidate
+            and not state.checked_out
+            and state.audio_outcome is not None
+        ):
+            outcome = state.audio_outcome
+            state.audio_outcome = None
+    _close_unconsumed_handoff(outcome)
 
 
 def _safe_regular_file(path: Path) -> bool:
@@ -252,7 +442,7 @@ def _strict_identity(*values: ArtifactIdentity) -> ArtifactIdentity:
 
 def _validated_audio(
     value: object, identity: ArtifactIdentity
-) -> tuple[AudioResult, bytes | None]:
+) -> tuple[AudioResult, TtsSynthesisOutcome | None]:
     if not isinstance(value, TtsSynthesisOutcome):
         raise ResultConsistencyError("audio_handoff_invalid")
     audio = value.audio
@@ -261,13 +451,10 @@ def _validated_audio(
     if audio.available:
         if value.handoff is None:
             raise ResultConsistencyError("audio_handoff_invalid")
-        try:
-            payload = value.handoff.take_verified_bytes(audio)
-        except Exception:
-            raise ResultConsistencyError("audio_handoff_invalid") from None
-        if not payload or len(payload) > 8_000_000 or sha256_bytes(payload) != audio.sha256:
-            raise ResultConsistencyError("audio_handoff_invalid")
-        return audio, payload
+        # The handoff owns an exclusive temporary MP3.  Do not consume it at
+        # the gate: publication may still fail before it obtains an exclusive
+        # result transaction.  The publisher-private lease reads it later.
+        return audio, value
     if value.handoff is not None or audio.failure is None:
         raise ResultConsistencyError("audio_handoff_invalid")
     if audio.failure.failed_stage != "audio":
@@ -318,7 +505,7 @@ def validate_result_candidates(
         assert_export_safe(diagnosis_payload)
         diagnosis_bytes = canonical_json_bytes(diagnosis_payload)
         source_bytes = _source_manifest_bytes(verified_source)
-        audio, audio_bytes = _validated_audio(audio_result, identity)
+        audio, audio_outcome = _validated_audio(audio_result, identity)
 
         card_bytes: bytes | None
         failure: SafeFailure | None
@@ -381,13 +568,14 @@ def validate_result_candidates(
             recap_bytes=recap.text.encode("utf-8"),
             card_bytes=card_bytes,
             audio=audio,
-            audio_bytes=audio_bytes,
             source_proof_sha256=source_proof_sha256,
             presentation_projection_sha256=verified_presentation.projection_sha256,
             citation_graph_sha256=sha256_bytes(citations.json_bytes),
         )
         with _CANDIDATE_LOCK:
-            _CANDIDATE_STATES[key] = _CandidateState(owner=owner, snapshot=snapshot)
+            _CANDIDATE_STATES[key] = _CandidateState(
+                owner=owner, snapshot=snapshot, audio_outcome=audio_outcome
+            )
         return candidate
     except ResultConsistencyError:
         raise
