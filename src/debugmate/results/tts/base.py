@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from pathlib import Path
 from typing import Protocol
 
 from pydantic import Field
@@ -25,11 +24,18 @@ class TtsRequestIdentity(StrictFrozenModel):
     recap_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class AudioCandidate(StrictFrozenModel):
+class AudioPayload(StrictFrozenModel):
+    """Bounded immutable audio returned by an adapter, never a caller path.
+
+    Adapters are deliberately unable to choose a file name or directory.  The
+    fallback chain is the sole owner of its private output lease and writes a
+    verified canonical payload only after every media check has succeeded.
+    """
+
     backend: str = Field(pattern=r"^[a-z][a-z0-9_]{1,31}$")
     rate_profile: RateProfile
-    path: Path
     request_identity: TtsRequestIdentity
+    audio_bytes: bytes = Field(min_length=1, max_length=8_000_000)
     voice: str | None = None
 
 
@@ -39,10 +45,9 @@ class TtsAdapter(Protocol):
     def synthesize(
         self,
         text: SafeRecapText,
-        target: Path,
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
-    ) -> AudioCandidate: ...
+    ) -> AudioPayload: ...
 
 
 class TtsAdapterError(RuntimeError):

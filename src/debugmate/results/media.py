@@ -7,7 +7,6 @@ import math
 import os
 import stat
 import subprocess
-import tempfile
 import threading
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -20,10 +19,8 @@ from debugmate.hashing import sha256_file
 from debugmate.results.contracts import StrictFrozenModel
 
 _MAX_PROBE_OUTPUT_BYTES = 1024 * 1024
-_MAX_TRANSCODE_OUTPUT_BYTES = 64 * 1024
 _MIN_DURATION_SECONDS = 30.0
 _MAX_DURATION_SECONDS = 60.0
-_MP3_FRAME_TOLERANCE_SECONDS = 0.02
 _WINGET_FFMPEG_BIN = (
     Path("Microsoft")
     / "WinGet"
@@ -143,7 +140,7 @@ def trusted_media_tools() -> TrustedMediaTools:
 class MediaProbe(StrictFrozenModel):
     """Verified facts about one bounded, tag-free mono MP3 candidate."""
 
-    duration_ms: int = Field(strict=True, ge=29_980, le=60_020)
+    duration_ms: int = Field(strict=True, ge=30_000, le=60_000)
     codec: str = Field(pattern=r"^mp3$")
     channels: int = Field(strict=True, ge=1, le=1)
     bytes: int = Field(strict=True, gt=0)
@@ -249,10 +246,45 @@ def _trusted_media_tool_name(command: list[str]) -> str | None:
     return name
 
 
+def _open_bounded_process(command: list[str], *, accepts_input: bool) -> subprocess.Popen[bytes]:
+    """Open one audited process shape with either no input or bounded stdin."""
+
+    if accepts_input:
+        return subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+        )
+    return subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+    )
+
+
 def _run_bounded_process(
-    command: list[str], *, timeout_seconds: float, max_output_bytes: int
+    command: list[str],
+    *,
+    timeout_seconds: float,
+    max_output_bytes: int,
+    input_bytes: bytes | None = None,
+    max_input_bytes: int | None = None,
 ) -> tuple[int, bytes]:
-    """Run fixed argv with concurrent pipe draining and a hard per-stream cap."""
+    """Run fixed argv with bounded pipes and, when needed, bounded stdin bytes.
+
+    ``input_bytes`` is the only value channel for SAPI, FFmpeg and the isolated
+    edge worker.  No user-derived filesystem path reaches an external process.
+    """
+
+    if input_bytes is not None:
+        if not isinstance(input_bytes, bytes):
+            raise ValueError("process input must be bytes")
+        if max_input_bytes is None or len(input_bytes) > max_input_bytes:
+            raise ValueError("process input too large")
 
     tool_name = _trusted_media_tool_name(command)
     output_chunks: list[bytes] = []
@@ -282,14 +314,18 @@ def _run_bounded_process(
             with reader_lock:
                 reader_errors.append(exc)
 
+    def write_input(stream: Any) -> None:
+        try:
+            stream.write(input_bytes)
+            stream.flush()
+        except (BrokenPipeError, OSError):
+            return
+        finally:
+            with suppress(OSError):
+                stream.close()
+
     with _lease_verified_media_executable(tool_name) if tool_name else _null_context():
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=False,
-        )
+        process = _open_bounded_process(command, accepts_input=input_bytes is not None)
         assert process.stdout is not None and process.stderr is not None
         stdout_reader = threading.Thread(
             target=drain, args=(process.stdout,), kwargs={"capture": True}
@@ -297,6 +333,11 @@ def _run_bounded_process(
         stderr_reader = threading.Thread(
             target=drain, args=(process.stderr,), kwargs={"capture": False}
         )
+        input_writer: threading.Thread | None = None
+        if input_bytes is not None:
+            assert process.stdin is not None
+            input_writer = threading.Thread(target=write_input, args=(process.stdin,))
+            input_writer.start()
         stdout_reader.start()
         stderr_reader.start()
         try:
@@ -310,6 +351,8 @@ def _run_bounded_process(
                 process.kill()
         stdout_reader.join()
         stderr_reader.join()
+        if input_writer is not None:
+            input_writer.join()
     if reader_errors:
         raise OSError("bounded process stream failure") from None
     if exceeded.is_set():
@@ -421,11 +464,7 @@ def probe_mp3(
         _fail("duration_invalid")
     if not math.isfinite(duration) or duration <= 0:
         _fail("duration_invalid")
-    # MPEG Layer III duration is frame-granular (36 ms at this sample rate), so
-    # an exact source cutoff can probe up to half a frame either side of a bound.
-    if duration < (_MIN_DURATION_SECONDS - _MP3_FRAME_TOLERANCE_SECONDS) or duration > (
-        _MAX_DURATION_SECONDS + _MP3_FRAME_TOLERANCE_SECONDS
-    ):
+    if duration < _MIN_DURATION_SECONDS or duration > _MAX_DURATION_SECONDS:
         _fail("duration_out_of_range")
 
     return MediaProbe(
@@ -437,95 +476,74 @@ def probe_mp3(
     )
 
 
-def canonicalize_mp3(
-    source: Path,
-    target: Path,
+def canonicalize_mp3_bytes(
+    source_bytes: bytes,
     *,
     timeout_seconds: float,
     max_bytes: int,
-) -> MediaProbe:
-    """Re-encode one candidate into the fixed, tag-free publication profile."""
+) -> bytes:
+    """Re-encode one verified payload through bounded stdin/stdout only.
 
-    source_path = Path(source)
-    target_path = Path(target)
+    FFmpeg never receives a writable output path.  The chain writes the returned
+    tag-free MP3 once, through its private `CREATE_NEW` allocator.
+    """
+
     if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
         _fail("canonicalize_config_invalid")
-    if isinstance(max_bytes, bool) or max_bytes <= 0 or source_path == target_path:
+    if isinstance(max_bytes, bool) or max_bytes <= 0:
         _fail("canonicalize_config_invalid")
-    try:
-        if not source_path.is_file() or source_path.stat().st_size <= 0:
-            _fail("canonicalize_failed")
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-    except MediaProbeError:
-        raise
-    except OSError:
+    if not isinstance(source_bytes, bytes) or not source_bytes or len(source_bytes) > max_bytes:
         _fail("canonicalize_failed")
-
-    temporary_path: Path | None = None
+    if source_bytes[:3] == b"ID3" or len(source_bytes) < 2 or source_bytes[:1] != b"\xff":
+        _fail("canonicalize_failed")
     try:
-        with tempfile.NamedTemporaryFile(
-            prefix=f".{target_path.stem}-",
-            suffix=".mp3",
-            dir=target_path.parent,
-            delete=False,
-        ) as handle:
-            temporary_path = Path(handle.name)
         ffmpeg = trusted_media_tools().ffmpeg
-        command = [
-            str(ffmpeg),
-            "-v",
-            "error",
-            "-nostdin",
-            "-y",
-            "-i",
-            str(source_path),
-            "-map",
-            "0:a:0",
-            "-vn",
-            "-sn",
-            "-dn",
-            "-map_metadata",
-            "-1",
-            "-metadata",
-            "encoder=",
-            "-id3v2_version",
-            "0",
-            "-write_xing",
-            "0",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-codec:a",
-            "libmp3lame",
-            "-b:a",
-            "32k",
-            str(temporary_path),
-        ]
-        returncode, output = _run_bounded_process(
-            command,
+        returncode, canonical_bytes = _run_bounded_process(
+            [
+                str(ffmpeg),
+                "-v",
+                "error",
+                "-nostdin",
+                "-i",
+                "pipe:0",
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-sn",
+                "-dn",
+                "-map_metadata",
+                "-1",
+                "-metadata",
+                "encoder=",
+                "-id3v2_version",
+                "0",
+                "-write_xing",
+                "0",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "32k",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ],
             timeout_seconds=timeout_seconds,
-            max_output_bytes=_MAX_TRANSCODE_OUTPUT_BYTES,
+            max_output_bytes=max_bytes,
+            input_bytes=source_bytes,
+            max_input_bytes=max_bytes,
         )
-        if returncode != 0 or len(output) > _MAX_TRANSCODE_OUTPUT_BYTES:
-            _fail("canonicalize_failed")
-        probe = probe_mp3(
-            temporary_path,
-            timeout_seconds=timeout_seconds,
-            max_bytes=max_bytes,
-        )
-        os.replace(temporary_path, target_path)
-        temporary_path = None
-        return probe
     except subprocess.TimeoutExpired:
         _fail("canonicalize_timeout")
     except ProcessOutputLimitExceeded:
         _fail("canonicalize_failed")
-    except MediaProbeError:
-        raise
     except (OSError, ValueError):
         _fail("canonicalize_failed")
-    finally:
-        if temporary_path is not None:
-            with suppress(OSError):
-                temporary_path.unlink(missing_ok=True)
+    if returncode != 0:
+        _fail("canonicalize_failed")
+    if not canonical_bytes:
+        _fail("canonicalize_failed")
+    return canonical_bytes

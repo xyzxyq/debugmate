@@ -1,17 +1,19 @@
-"""Local Windows SAPI-to-WAV-to-tag-free-MP3 adapter."""
+"""Local Windows SAPI-to-tag-free-MP3 adapter without external output paths."""
 
 from __future__ import annotations
 
 import os
 import stat
-import tempfile
-from contextlib import suppress
 from pathlib import Path
 
-from debugmate.results.media import _run_bounded_process, trusted_media_tools
+from debugmate.results.media import (
+    ProcessOutputLimitExceeded,
+    _run_bounded_process,
+    trusted_media_tools,
+)
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import (
-    AudioCandidate,
+    AudioPayload,
     RateProfile,
     TtsAdapterError,
     TtsRequestIdentity,
@@ -23,7 +25,8 @@ class SapiTtsAdapter:
     backend = "sapi"
     voice = "Microsoft Huihui Desktop"
     _RATES = {RateProfile.NORMAL: 2, RateProfile.FASTER: 4}
-    _MAX_PROCESS_OUTPUT_BYTES = 64 * 1024
+    _MAX_PROCESS_OUTPUT_BYTES = 8_000_000
+    _MAX_RECAP_BYTES = 16 * 1024
 
     def __init__(
         self,
@@ -51,93 +54,87 @@ class SapiTtsAdapter:
             ffmpeg_path = trusted_media_tools().ffmpeg
             if not _is_regular_file(ffmpeg_path) or ffmpeg_path.name.casefold() != "ffmpeg.exe":
                 raise ValueError
+            if timeout_seconds <= 0:
+                raise ValueError
         except (AttributeError, KeyError, OSError, ValueError):
             raise ValueError("tts_sapi_config_invalid") from None
         self._script = script
         self._powershell = str(powershell_path)
         self._ffmpeg = str(ffmpeg_path)
-        self._timeout = timeout_seconds
+        self._timeout = float(timeout_seconds)
 
     def synthesize(
         self,
         text: SafeRecapText,
-        target: Path,
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
-    ) -> AudioCandidate:
+    ) -> AudioPayload:
         text, request_identity = validate_tts_request(text, request_identity)
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix="sapi-", dir=target.parent) as temp_name:
-                temp = Path(temp_name)
-                input_file, wave_file = temp / "recap.txt", temp / "recap.wav"
-                input_file.write_bytes(text.text.encode("utf-8"))
-                powershell_returncode, powershell_output = _run_bounded_process(
-                    [
-                        self._powershell,
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-File",
-                        str(self._script),
-                        "-InputTextFile",
-                        str(input_file),
-                        "-OutputWaveFile",
-                        str(wave_file),
-                        "-Voice",
-                        self.voice,
-                        "-Rate",
-                        str(self._RATES[rate_profile]),
-                    ],
-                    timeout_seconds=self._timeout,
-                    max_output_bytes=self._MAX_PROCESS_OUTPUT_BYTES,
-                )
-                if (
-                    powershell_returncode != 0
-                    or len(powershell_output) > self._MAX_PROCESS_OUTPUT_BYTES
-                    or not _is_regular_file(wave_file)
-                ):
-                    raise RuntimeError("sapi_process_failed")
-                ffmpeg_returncode, ffmpeg_output = _run_bounded_process(
-                    [
-                        self._ffmpeg,
-                        "-nostdin",
-                        "-v",
-                        "error",
-                        "-y",
-                        "-i",
-                        str(wave_file),
-                        "-map_metadata",
-                        "-1",
-                        "-metadata",
-                        "encoder=",
-                        "-id3v2_version",
-                        "0",
-                        "-write_xing",
-                        "0",
-                        "-ac",
-                        "1",
-                        "-codec:a",
-                        "libmp3lame",
-                        str(target),
-                    ],
-                    timeout_seconds=self._timeout,
-                    max_output_bytes=self._MAX_PROCESS_OUTPUT_BYTES,
-                )
-                if (
-                    ffmpeg_returncode != 0
-                    or len(ffmpeg_output) > self._MAX_PROCESS_OUTPUT_BYTES
-                    or not _is_regular_file(target)
-                ):
-                    raise RuntimeError("ffmpeg_process_failed")
-        except Exception:
-            with suppress(OSError):
-                target.unlink(missing_ok=True)
+        recap_bytes = text.text.encode("utf-8")
+        if len(recap_bytes) > self._MAX_RECAP_BYTES:
             raise TtsAdapterError() from None
-        return AudioCandidate(
+        try:
+            powershell_returncode, wav_bytes = _run_bounded_process(
+                [
+                    self._powershell,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-File",
+                    str(self._script),
+                    "-Voice",
+                    self.voice,
+                    "-Rate",
+                    str(self._RATES[rate_profile]),
+                ],
+                timeout_seconds=self._timeout,
+                max_output_bytes=self._MAX_PROCESS_OUTPUT_BYTES,
+                input_bytes=recap_bytes,
+                max_input_bytes=self._MAX_RECAP_BYTES,
+            )
+            if powershell_returncode != 0 or not wav_bytes.startswith(b"RIFF"):
+                raise RuntimeError
+            ffmpeg_returncode, mp3_bytes = _run_bounded_process(
+                [
+                    self._ffmpeg,
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-i",
+                    "pipe:0",
+                    "-map_metadata",
+                    "-1",
+                    "-metadata",
+                    "encoder=",
+                    "-id3v2_version",
+                    "0",
+                    "-write_xing",
+                    "0",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-codec:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "32k",
+                    "-f",
+                    "mp3",
+                    "pipe:1",
+                ],
+                timeout_seconds=self._timeout,
+                max_output_bytes=self._MAX_PROCESS_OUTPUT_BYTES,
+                input_bytes=wav_bytes,
+                max_input_bytes=self._MAX_PROCESS_OUTPUT_BYTES,
+            )
+            if ffmpeg_returncode != 0 or not mp3_bytes:
+                raise RuntimeError
+        except (OSError, RuntimeError, ValueError, ProcessOutputLimitExceeded):
+            raise TtsAdapterError() from None
+        return AudioPayload(
             backend=self.backend,
             rate_profile=rate_profile,
-            path=target,
             request_identity=request_identity,
+            audio_bytes=mp3_bytes,
             voice=self.voice,
         )
 

@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
-from contextlib import suppress
+import sys
 from pathlib import Path
 
-import edge_tts
-
+from debugmate.results.media import ProcessOutputLimitExceeded, _run_bounded_process
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import (
-    AudioCandidate,
+    AudioPayload,
     RateProfile,
     TtsAdapterError,
     TtsRequestIdentity,
@@ -34,40 +32,44 @@ class EdgeTtsAdapter:
     def synthesize(
         self,
         text: SafeRecapText,
-        target: Path,
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
-    ) -> AudioCandidate:
+    ) -> AudioPayload:
         text, request_identity = validate_tts_request(text, request_identity)
         try:
-            asyncio.run(
-                self._save_with_timeout(
-                    edge_tts.Communicate(
-                        text.text, self.voice, rate=self._RATES[rate_profile]
-                    ),
-                    target,
-                )
+            returncode, payload = _run_bounded_process(
+                _edge_worker_command(self._RATES[rate_profile]),
+                timeout_seconds=self._timeout_seconds,
+                max_output_bytes=8_000_000,
+                input_bytes=text.text.encode("utf-8"),
+                max_input_bytes=16 * 1024,
             )
-        except Exception:
-            with suppress(OSError):
-                target.unlink(missing_ok=True)
+        except (OSError, ValueError, ProcessOutputLimitExceeded, Exception):
             raise TtsAdapterError() from None
-        return AudioCandidate(
+        if returncode != 0 or not payload:
+            raise TtsAdapterError() from None
+        return AudioPayload(
             backend=self.backend,
             rate_profile=rate_profile,
-            path=target,
             request_identity=request_identity,
+            audio_bytes=payload,
             voice=self.voice,
         )
 
-    async def _save_with_timeout(self, communicate: object, target: Path) -> None:
-        """Bound a remote save and finish cancellation before closing the loop."""
 
-        task = asyncio.create_task(communicate.save(str(target)))
-        try:
-            await asyncio.wait_for(task, self._timeout_seconds)
-        except TimeoutError:
-            task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await task
-            raise
+def _edge_worker_command(rate: str) -> list[str]:
+    """Return the fixed, isolated worker argv used by the production adapter."""
+
+    interpreter = Path(sys.executable).resolve(strict=True)
+    if not interpreter.is_file() or rate not in EdgeTtsAdapter._RATES.values():
+        raise OSError
+    return [
+        str(interpreter),
+        "-I",
+        "-m",
+        "debugmate.results.tts.edge_worker",
+        "--voice",
+        EdgeTtsAdapter.voice,
+        "--rate",
+        rate,
+    ]

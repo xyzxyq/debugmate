@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
-from pathlib import Path
-
 import httpx
 
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import (
-    AudioCandidate,
+    AudioPayload,
     RateProfile,
     TtsAdapterError,
     TtsRequestIdentity,
@@ -35,10 +32,9 @@ class DifyTtsAdapter:
     def synthesize(
         self,
         text: SafeRecapText,
-        target: Path,
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
-    ) -> AudioCandidate:
+    ) -> AudioPayload:
         text, request_identity = validate_tts_request(text, request_identity)
         if self._settings.dify_api_key is None:
             raise TtsAdapterError("tts_not_configured")
@@ -66,15 +62,9 @@ class DifyTtsAdapter:
             raise TtsAdapterError() from None
         if not payload:
             raise TtsAdapterError() from None
-        try:
-            target.write_bytes(payload)
-        except OSError:
-            with suppress(OSError):
-                target.unlink(missing_ok=True)
-            raise TtsAdapterError() from None
-        return AudioCandidate(
+        return AudioPayload(
             backend=self.backend,
             rate_profile=rate_profile,
-            path=target,
             request_identity=request_identity,
+            audio_bytes=bytes(payload),
         )
