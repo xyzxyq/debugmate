@@ -30,7 +30,7 @@ patterns-established:
   - "Report, card and recap implementations consume the same sealed PresentationModel and ArtifactIdentity."
   - "Renderer failures cross the boundary only as report_render_failed or citation_render_failed with no exception chain."
 requirements-progressed: [MULTI-01, UX-01]
-duration: 52m
+duration: 78m
 completed: 2026-07-13
 ---
 
@@ -40,17 +40,17 @@ completed: 2026-07-13
 
 ## Performance
 
-- **Duration:** 52m including independent-review remediation
+- **Duration:** 78m including two independent-review remediation cycles
 - **Completed:** 2026-07-13T10:28:26+08:00
 - **Tasks:** 3 strict TDD tasks plus one adversarial identity-hardening cycle
-- **Focused tests:** 35 passed
-- **Full offline suite:** 545 passed, 22 deselected
+- **Focused tests:** 40 passed
+- **Full offline suite:** 550 passed, 22 deselected
 
 ## Accomplishments
 
 - Added frozen strict presentation records retaining every fact/evidence/candidate/support ID, exact technical literal, command and uncertainty field from one verified `LoadedDiagnosisSource`.
 - Revalidated the complete prepared context and current font bytes, then bound report/card/recap versions and font SHA-256 into one `ArtifactIdentity` with no timestamp or machine path.
-- Added a canonical projection seal and module-private validation authority so direct construction, `model_copy` identity changes and semantic changes fail before any renderer emits bytes.
+- Added a canonical projection seal plus a locked weak-reference instance registry; only the exact live object returned by `build_presentation` can render, while copies, constructs and private-state rewrites fail.
 - Rendered a deterministic UTF-8/LF Chinese report with exactly nine fixed sections, grounded/inference labels, adjacent command safety metadata and dynamically safe command fences.
 - Escaped Markdown, HTML, link, image and fence structure while preserving English error/package/version/path literals and command bodies byte-for-byte; unsafe secret/path/instruction content fails closed without echo.
 - Exported stable-ID ordered canonical citation JSON containing only verified source metadata and supported fact/candidate IDs; raw chunk bodies, provider text and reasoning are absent.
@@ -66,14 +66,17 @@ completed: 2026-07-13
 6. **Citation GREEN** — `c44ce4f`: 9 citation tests passed.
 7. **Projection-forgery RED** — `337c6b1`: missing seal and changed identity/content both reproduced.
 8. **Projection-forgery GREEN** — `7dddc01`: 32 combined presentation/report tests passed.
-9. **Public re-signing RED/GREEN** — `bd9611b` / `853c045`: a caller could previously recompute the public seal and call public revalidation; both report and citation paths now require the private authenticity attached only by `build_presentation`.
+9. **Public re-signing RED/GREEN** — `bd9611b` / `853c045`: a caller could previously recompute the public seal and call public revalidation; the public authorities were removed.
 10. **Honest source-label RED/GREEN** — `bdacd99` / `2b55fb2`: the absent `official_title` field failed first; citations now export the verified `source_id` under `source_label` and claim no title.
 11. **Grounded support-edge RED/GREEN** — `b9cb91c` / `4e53826`: an inference with no support link previously appeared in `supported_candidate_ids`; only a grounded candidate joined through a complete fact/evidence support edge is now emitted.
+12. **Copied private-state RED/GREEN** — `72249d9` / `85d133f`: copying private authority and rewriting its fingerprint reproduced acceptance; renderers now require the exact weak-registered build instance.
+13. **Partial/cross-spliced graph RED/GREEN** — `054b036` / `6e46953`: partial-fact and cross-spliced graphs failed first; partial-fact, partial-evidence and cross-spliced variants now all reject unless one support edge exactly equals both candidate ID sets.
+14. **Registry lifecycle evidence** — `eec969d`: 32 concurrent renders are byte-identical and the weak registry does not keep an otherwise unreachable presentation alive.
 
 ## Verification Gates
 
-- `python -m pytest -q tests/results/test_presentation.py tests/results/test_report.py` — **35 passed**.
-- `python -m pytest -q` — **545 passed, 22 deselected**.
+- `python -m pytest -q tests/results/test_presentation.py tests/results/test_report.py` — **40 passed**.
+- `python -m pytest -q` — **550 passed, 22 deselected**.
 - `python -m ruff check .` — **passed**.
 - `python -m pip check` — **no broken requirements**.
 - `git diff --check HEAD~6..HEAD` — **passed**.
@@ -88,7 +91,7 @@ completed: 2026-07-13
 
 - **Found during:** post-Task-3 adversarial review.
 - **Risk:** report and citation artifacts could share each other's forged identity while no longer representing the original presenter output.
-- **Fix:** added `projection_sha256`, canonical whole-model verification and module-private construction/revalidation authority.
+- **Fix:** added `projection_sha256`, canonical whole-model verification and build-only construction authorization; the later registry remediation below closes copyable capability state.
 - **Evidence:** both forged identity and forged content failed in RED, then both report and citation renderers rejected them after GREEN.
 
 ### Independent Review Remediation
@@ -96,7 +99,7 @@ completed: 2026-07-13
 **1. [Important] Public projection re-signing was still possible.**
 
 - **Verified issue:** `seal_for` plus `revalidate_presentation` allowed a caller to change a projection, recompute the seal and obtain renderer acceptance.
-- **Fix:** removed both public authorities. `build_presentation` now attaches a private source authority and original fingerprint; renderers only verify that chain and never issue authority to an arbitrary projection.
+- **Fix:** removed both public authorities. This was subsequently strengthened to exact instance registration after review proved private attributes remained copyable.
 - **Evidence:** a caller-resealed `model_copy` fails in both report and citation renderers, while an unchanged build result remains accepted.
 
 **2. [Important] `source_id` was mislabeled as an official title.**
@@ -107,7 +110,24 @@ completed: 2026-07-13
 **3. [Important] Inferred candidates were overstated as citation-supported.**
 
 - **Verified issue:** candidate support was derived from `candidate.evidence_ids` alone.
-- **Fix:** `supported_candidate_ids` now includes only grounded candidates with the cited evidence and an intersecting verified fact/evidence support link. The grounded graph is also validated in the reverse direction before export.
+- **Fix:** `supported_candidate_ids` includes only grounded candidates with a complete verified support edge; the second review strengthened this from intersection to exact fact/evidence set equality.
+
+### Second Independent Review Remediation
+
+**1. [Important] Private Pydantic attributes remained copyable capability state.**
+
+- **Verified issue:** `model_copy`, a recomputed public hash and direct `__pydantic_private__` fingerprint replacement could still forge renderer acceptance.
+- **Fix:** replaced copyable authority fields with a module-internal `id -> weakref` registry protected by `RLock`. Registration occurs only for the exact object returned by `build_presentation`; validation checks `reference() is value`, preventing copied objects and object-ID reuse confusion.
+- **Lifecycle:** weakref callbacks remove only the matching reference, so dead objects do not leak and a later reused ID cannot inherit authority. Concurrent render validation is lock-protected.
+- **Evidence:** the exact private-state attack now fails; 32 concurrent renders agree; deleting the final strong reference clears the weak reference.
+
+**2. [Important] Fact/evidence intersection was not a complete grounded graph.**
+
+- **Verified issue:** a candidate could join one fact to both evidence IDs or cross-splice two partial links and still appear fully supported.
+- **Fix:** one support link must have fact-ID and evidence-ID sets exactly equal to the grounded candidate's complete sets. Candidate IDs are emitted only after this validation.
+- **Evidence:** partial-fact, partial-evidence and cross-spliced verified-source fixtures all reject; an exact complete edge succeeds.
+
+**Test authenticity:** renderer variants now rebuild through a cloned, integrity-updated source bundle, `load_verified_outcome`, prepared context and `build_presentation`. Tests contain no helper or registry call that grants production authenticity to a forged projection.
 
 ## Remaining Scope
 
