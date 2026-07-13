@@ -37,7 +37,7 @@ def _card_inputs(completed_source_bundle, tmp_path: Path):
         project_font_candidates=(f"assets/fonts/{font.name}",),
         windows_font_candidates=(),
     )
-    loaded = load_verified_outcome(outcome, source_bundle=source)
+    loaded = load_verified_outcome(outcome, evidence_root=source.parents[1])
     return build_presentation(loaded, context), context
 
 
