@@ -42,7 +42,9 @@ def _service(tmp_path: Path, candidates=None, *, composer=None, workflow=None):
     )
 
 
-def _dynamic_composer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _dynamic_composer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fail_audio_once: bool = False
+):
     from tests.results.conftest import _AudioAdapter, _FailAdapter, _font_copy, _probe
 
     from debugmate.results import audio as audio_module
@@ -66,7 +68,11 @@ def _dynamic_composer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(audio_module, "canonicalize_mp3", lambda value, **_kwargs: value)
     monkeypatch.setattr(verifier_module, "probe_mp3", _probe)
 
+    calls = 0
+
     def compose(source, *, mode, fixture_id, fixture_name):
+        nonlocal calls
+        calls += 1
         presentation = build_presentation(source, context)
         report = render_report(presentation)
         citations = render_citations(presentation)
@@ -74,10 +80,15 @@ def _dynamic_composer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         card = render_card(
             presentation,
             context,
-            target=tmp_path / "cards" / f"{source.source_run_id}.png",
+            target=tmp_path / "cards" / f"{source.source_run_id}-{calls}.png",
+        )
+        adapters = (
+            (_FailAdapter("dify"), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
+            if fail_audio_once and calls == 1
+            else (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
         )
         audio = TtsFallbackChain(
-            (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
+            adapters
         ).synthesize(
             recap,
             TtsRequestIdentity(
@@ -227,3 +238,20 @@ def test_live_approved_input_runs_phase3_once_then_persists_source_before_result
     assert len(generator.calls) == 1
     assert (tmp_path / "evidence" / first.identity.case_id / first.identity.source_run_id).is_dir()
     assert (tmp_path / "outcomes" / first.identity.source_run_id / "outcome.json").is_file()
+
+
+def test_retry_reverifies_a_partial_bundle_then_creates_a_distinct_full_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _root, composer = _dynamic_composer(tmp_path, monkeypatch, fail_audio_once=True)
+    service = _service(tmp_path, composer=composer)
+
+    partial = service.load_replay("module-not-found")
+    assert partial.status.value == "partial"
+    assert partial.failure is not None and partial.failure.retry_scope == "tts"
+    assert partial.identity is not None and partial.result_id is not None
+
+    retried = service.retry_stage(partial.identity.case_id, partial.result_id)
+    assert retried.status.value == "completed"
+    assert retried.result_id != partial.result_id
+    assert retried.mode.value == "replay"
