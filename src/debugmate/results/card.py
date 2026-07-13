@@ -41,7 +41,9 @@ _PNG_ALLOWED_CHUNKS = {b"IHDR", b"IDAT", b"IEND"}
 class CardRenderFailure(ValueError):
     """Value-free visual failure safe to expose in a partial result."""
 
-    def __init__(self, code: Literal["png_layout_failed", "png_render_failed", "png_verify_failed"]):
+    def __init__(
+        self, code: Literal["png_layout_failed", "png_render_failed", "png_verify_failed"]
+    ):
         self.code = code
         self.failed_stage = "card"
         self.retry_scope = "card"
@@ -196,9 +198,7 @@ def _sections(presentation: PresentationModel) -> tuple[tuple[str, str, tuple[st
     )
 
 
-def measure_card(
-    presentation: PresentationModel, context: PreparedGenerationContext
-) -> CardLayout:
+def measure_card(presentation: PresentationModel, context: PreparedGenerationContext) -> CardLayout:
     """Build and validate the complete layout tree before allocating pixels."""
 
     font_record = verify_prepared_font(presentation, context)
@@ -215,7 +215,9 @@ def measure_card(
         line_texts = tuple(line for value in values for line in _wrap(value, body, content_width))
         heading_height = _text_size(heading, title)[1]
         line_height = max(_text_size(body, line)[1] for line in line_texts)
-        height = PADDING + heading_height + 24 + len(line_texts) * (line_height + LINE_GAP) + PADDING
+        height = (
+            PADDING + heading_height + 24 + len(line_texts) * (line_height + LINE_GAP) + PADDING
+        )
         lines = tuple(
             CardLine(
                 text=line,
@@ -308,6 +310,8 @@ def render_card(
 
     target = Path(target)
     temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    placed = False
+    verified = False
     try:
         layout = measure_card(presentation, context)
         font_record = verify_prepared_font(presentation, context)
@@ -338,8 +342,9 @@ def render_card(
         if target.exists():
             raise FileExistsError("card target already exists")
         os.replace(temporary, target)
+        placed = True
         verify_card_png(target, expected_size=(layout.canvas_width, layout.canvas_height))
-        return CardCandidate(
+        candidate = CardCandidate(
             identity=layout.identity,
             path=target,
             sha256=sha256_file(target),
@@ -348,6 +353,8 @@ def render_card(
             font_name=layout.font_name,
             font_sha256=layout.font_sha256,
         )
+        verified = True
+        return candidate
     except CardRenderFailure:
         raise
     except Exception:
@@ -355,3 +362,5 @@ def render_card(
         raise failure from None
     finally:
         temporary.unlink(missing_ok=True)
+        if placed and not verified:
+            target.unlink(missing_ok=True)
