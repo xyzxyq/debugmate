@@ -361,19 +361,28 @@ class ResultApplicationService:
     def load_replay(self, fixture_id: str) -> ResultViewState:
         """Allowlist a fixture, reverify source, then publish a new replay result."""
 
+        verified_fixture_id: str | None = None
+        verified_fixture_name: str | None = None
         try:
             row, outcome, source = self._load_fixture_source(fixture_id)
+            verified_fixture_id = str(row["fixture_id"])
+            verified_fixture_name = str(row["display_label"])
             with self._case_lock(source.case_id):
                 self._store_outcome(outcome)
                 return self._compose(
                     source,
                     mode=ResultMode.REPLAY,
-                    fixture_id=str(row["fixture_id"]),
-                    fixture_name=str(row["display_label"]),
+                    fixture_id=verified_fixture_id,
+                    fixture_name=verified_fixture_name,
                 )
         except ResultServiceError as error:
-            if _FIXTURE_ID.fullmatch(fixture_id):
-                return self._failure(error.code, mode=ResultMode.REPLAY)
+            if verified_fixture_id is not None and verified_fixture_name is not None:
+                return self._failure(
+                    error.code,
+                    mode=ResultMode.REPLAY,
+                    fixture_id=verified_fixture_id,
+                    fixture_name=verified_fixture_name,
+                )
             return self._failure(error.code)
         except Exception:
             return self._failure("replay_bundle_invalid")

@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import socket
 from collections.abc import Sequence
 from pathlib import Path
 
+from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
+from debugmate.results.card import CardRenderFailure, render_card
+from debugmate.results.consistency import validate_result_candidates
+from debugmate.results.font import prepare_generation_context
 from debugmate.results.outcome_store import DiagnosisOutcomeStore
-from debugmate.results.publisher import TrustedResultRoot
+from debugmate.results.presentation import build_presentation
+from debugmate.results.publisher import TrustedResultRoot, publish_result_bundle
+from debugmate.results.recap import compose_recap
+from debugmate.results.report import render_citations, render_report
 from debugmate.results.service import ResultApplicationService
+from debugmate.results.tts.base import TtsAdapterError, TtsRequestIdentity
+from debugmate.results.tts.dify import DifyTtsAdapter
+from debugmate.results.tts.edge import EdgeTtsAdapter
+from debugmate.results.tts.sapi import SapiTtsAdapter
+from debugmate.settings import DebugMateSettings
 from debugmate.ui.app import WORKBENCH_CSS, build_app
 
 
@@ -29,16 +42,97 @@ def _available_loopback_port(value: str) -> int:
     return port
 
 
-def _local_service() -> ResultApplicationService:
+class _UnavailableTtsAdapter:
+    """Keep the fixed chain shape when one optional local backend cannot start."""
+
+    def __init__(self, backend: str) -> None:
+        self.backend = backend
+
+    def synthesize(self, *_arguments: object, **_kwargs: object):
+        raise TtsAdapterError()
+
+
+def _optional_tts_adapter(backend: str, factory):
+    try:
+        return factory()
+    except (OSError, TypeError, ValueError):
+        return _UnavailableTtsAdapter(backend)
+
+
+def _local_composer(
+    *, project_root: Path, runtime_root: Path, results_root: TrustedResultRoot
+):
+    """Build the real Phase 4 chain used by fixed replay demonstrations."""
+
+    context = prepare_generation_context(project_root=project_root)
+    settings = DebugMateSettings.from_env()
+    tts = TtsFallbackChain(
+        (
+            _optional_tts_adapter("dify", lambda: DifyTtsAdapter(settings)),
+            _optional_tts_adapter("edge_tts", lambda: EdgeTtsAdapter(timeout_seconds=5.0)),
+            _optional_tts_adapter(
+                "sapi", lambda: SapiTtsAdapter(project_root=project_root)
+            ),
+        )
+    )
+    candidate_root = TrustedCandidateRoot.for_testing(runtime_root / "tts-candidates")
+    card_root = runtime_root / "cards"
+
+    def compose(source, *, mode, fixture_id, fixture_name):
+        presentation = build_presentation(source, context)
+        report = render_report(presentation)
+        citations = render_citations(presentation)
+        recap = compose_recap(presentation)
+        target = card_root / f"{source.source_run_id}-{secrets.token_hex(16)}.png"
+        try:
+            try:
+                card = render_card(presentation, context, target=target)
+            except CardRenderFailure as failure:
+                card = failure
+            audio = tts.synthesize(
+                recap,
+                TtsRequestIdentity(
+                    case_id=recap.identity.case_id,
+                    source_run_id=recap.identity.source_run_id,
+                    diagnosis_sha256=recap.identity.diagnosis_sha256,
+                    generation_version=recap.identity.generation_version,
+                    recap_sha256=recap.sha256,
+                ),
+                candidate_root,
+            )
+            candidates = validate_result_candidates(
+                source, presentation, report, citations, card, recap, audio
+            )
+            return publish_result_bundle(
+                results_root,
+                candidates,
+                mode=mode,
+                fixture_id=fixture_id,
+                fixture_name=fixture_name,
+            )
+        finally:
+            target.unlink(missing_ok=True)
+
+    return compose
+
+
+def _local_service(*, runtime_root: Path | None = None) -> ResultApplicationService:
     project_root = Path(__file__).resolve().parents[3]
-    runtime_root = project_root / ".debugmate-runtime"
+    runtime_root = runtime_root or project_root / ".debugmate-runtime"
+    runtime_root = Path(runtime_root).absolute()
     runtime_root.mkdir(exist_ok=True)
+    results_root = TrustedResultRoot.for_testing(runtime_root / "results")
     return ResultApplicationService(
         workflow=None,
         evidence_root=runtime_root / "evidence",
         outcome_store=DiagnosisOutcomeStore(runtime_root / "outcomes"),
-        results_root=TrustedResultRoot.for_testing(runtime_root / "results"),
+        results_root=results_root,
         replay_root=project_root / "fixtures" / "replay",
+        composer=_local_composer(
+            project_root=project_root,
+            runtime_root=runtime_root,
+            results_root=results_root,
+        ),
     )
 
 
