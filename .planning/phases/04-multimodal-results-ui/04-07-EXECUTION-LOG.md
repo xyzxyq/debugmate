@@ -94,7 +94,39 @@ platform files, scripts, README, or project configuration.
 
 ## Pending gates
 
-- Task 3: fresh local SAPI/ffprobe proof and truthful Dify/edge status.
 - Task 4: real loopback Edge/Playwright VQ-01..VQ-15 evidence and final rerun.
 - Independent Phase 4 verification remains pending and must be performed by a
   separate verifier after this execution plan is complete.
+
+## Task 3 — real local media and truthful external gates
+
+```text
+.venv\Scripts\python.exe -m pytest -q -m tts tests\results\test_tts_live.py
+3 passed, 2 skipped in 8.66s
+
+.venv\Scripts\python.exe -m pytest -q -m "(cloud or network) and tts" tests\results\test_tts_live.py
+2 skipped, 3 deselected in 1.17s
+```
+
+The three passing local-marker checks exercise the current Windows SAPI output,
+the nested Junction attack boundary, and the real leased candidate plus
+FFmpeg/ffprobe chain. The fresh value-safe media record is
+`evidence/media/phase4/local-sapi.json`:
+
+| Field | Observed value |
+|---|---|
+| backend / voice / rate | `sapi` / `Microsoft Huihui Desktop` / `normal` |
+| fallback path | Dify and edge failed safely; SAPI was the final backend |
+| MP3 format | 45,144 ms, mono, 180,576 bytes, decode exit `0` |
+| SHA-256 | `10fb8c17b2c1c31b51055a71fa223deeb9ae9412f0f9218c1936bd4b933f0db6` |
+| automatic audio signals | non-silent PCM; 0 full-scale clipping samples; peak 24,908 |
+| human listening | `human_needed` — no agent claim of intelligibility is made |
+
+| External gate | Current command result | Truthful status |
+|---|---|---|
+| Dify TTS | `DIFY_API_KEY` absent | clean-skipped / **open** |
+| edge-tts | `DEBUGMATE_ALLOW_NETWORK_TTS` not `1` | clean-skipped / **open** |
+| local SAPI | current-code marker + fresh ffprobe/decode record | passed, with separate human listening check pending |
+
+No key, provider response body, recap text, or temporary path is retained in
+the media evidence or this log.
