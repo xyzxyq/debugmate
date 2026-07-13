@@ -67,7 +67,7 @@ class ValidatedResultCandidates:
     recap_bytes: bytes
     card_bytes: bytes | None
     audio: AudioResult
-    _token: object | None
+    _token: object
 
 
 @dataclass(slots=True)
@@ -78,6 +78,7 @@ class _AudioState:
 
 _AUDIO_LOCK = threading.RLock()
 _AUDIO_STATES: dict[object, _AudioState] = {}
+_CANDIDATE_STATES: dict[object, weakref.ReferenceType[ValidatedResultCandidates]] = {}
 
 
 def _discard_state(token: object) -> None:
@@ -89,18 +90,38 @@ def _discard_state(token: object) -> None:
 
 def _forget_candidate(token: object):
     def finalize(_owner: object) -> None:
+        with _AUDIO_LOCK:
+            _CANDIDATE_STATES.pop(token, None)
         _discard_state(token)
 
     return finalize
 
 
+def is_issued_result_candidate(candidate: object) -> bool:
+    """Return whether ``candidate`` is the exact gate-issued object.
+
+    ``ValidatedResultCandidates`` is deliberately a public immutable data
+    shape so renderers can be typed independently.  Type checks alone would
+    nevertheless let in-process callers construct or ``replace`` one.  The
+    weak capability registry makes the publication boundary accept only the
+    exact instance returned by :func:`validate_result_candidates` without
+    retaining its lifetime or exposing renderer-owned paths.
+    """
+
+    if not isinstance(candidate, ValidatedResultCandidates):
+        return False
+    with _AUDIO_LOCK:
+        owner = _CANDIDATE_STATES.get(candidate._token)
+    return owner is not None and owner() is candidate
+
+
 def take_verified_audio_for_publication(candidate: ValidatedResultCandidates) -> bytes | None:
     """Consume the exact TTS handoff once inside the publisher transaction."""
 
-    if not isinstance(candidate, ValidatedResultCandidates):
+    if not is_issued_result_candidate(candidate):
         raise ResultConsistencyError("candidate_invalid")
     token = candidate._token
-    if token is None:
+    if not candidate.audio.available:
         return None
     with _AUDIO_LOCK:
         state = _AUDIO_STATES.pop(token, None)
@@ -118,7 +139,7 @@ def take_verified_audio_for_publication(candidate: ValidatedResultCandidates) ->
 def discard_audio_handoff(candidate: ValidatedResultCandidates) -> None:
     """Release an unneeded successful handoff without exposing its location."""
 
-    if isinstance(candidate, ValidatedResultCandidates) and candidate._token is not None:
+    if is_issued_result_candidate(candidate):
         _discard_state(candidate._token)
 
 
@@ -308,9 +329,7 @@ def validate_result_candidates(
             raise ResultConsistencyError("card_verify_failed")
         if status is ResultStatus.PARTIAL and failure is None:
             raise ResultConsistencyError("partial_availability_invalid")
-        token: object | None = None
-        if handoff_outcome is not None:
-            token = object()
+        token = object()
         candidate = ValidatedResultCandidates(
             identity=identity,
             status=status,
@@ -325,9 +344,10 @@ def validate_result_candidates(
             audio=audio,
             _token=token,
         )
-        if token is not None:
-            owner = weakref.ref(candidate, _forget_candidate(token))
-            with _AUDIO_LOCK:
+        owner = weakref.ref(candidate, _forget_candidate(token))
+        with _AUDIO_LOCK:
+            _CANDIDATE_STATES[token] = owner
+            if handoff_outcome is not None:
                 _AUDIO_STATES[token] = _AudioState(owner=owner, outcome=handoff_outcome)
         return candidate
     except ResultConsistencyError:

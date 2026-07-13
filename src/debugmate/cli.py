@@ -86,6 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
     diagnosis_publish = commands.add_parser("diagnosis-publish")
     diagnosis_publish.add_argument("path", type=Path)
     diagnosis_publish.add_argument("--output", type=Path, required=True)
+    result_verify = commands.add_parser("result-verify")
+    result_verify.add_argument("--root", type=Path, required=True)
+    result_verify.add_argument("--case-id", required=True)
+    result_verify.add_argument("--result-id", required=True)
     return parser
 
 
@@ -310,6 +314,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(_ascii_json(diagnosis_cli_view(outcome)))
         return 0
+    if args.command == "result-verify":
+        from debugmate.results.verifier import ResultVerificationError, verify_result_bundle
+
+        try:
+            root = args.root
+            if not root.is_absolute():
+                raise ResultVerificationError("result_root_invalid")
+            verified = verify_result_bundle(root / args.case_id / args.result_id)
+            print(
+                _ascii_json(
+                    {
+                        "availability": verified.manifest.availability.model_dump(mode="json"),
+                        "case_id": verified.manifest.identity.case_id,
+                        "ok": True,
+                        "result_id": verified.manifest.result_id,
+                        "status": verified.manifest.status.value,
+                    }
+                )
+            )
+            return 0
+        except ResultVerificationError as error:
+            print(_ascii_json({"code": error.code, "ok": False}))
+            return 1
     raise AssertionError("unreachable command")
 
 

@@ -1,93 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
-from debugmate.hashing import sha256_bytes
-from debugmate.results import audio as audio_module
-from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
-from debugmate.results.card import render_card
-from debugmate.results.font import prepare_generation_context
-from debugmate.results.loader import load_verified_outcome
-from debugmate.results.media import MediaProbe
-from debugmate.results.presentation import build_presentation
-from debugmate.results.recap import compose_recap
-from debugmate.results.report import render_citations, render_report
-from debugmate.results.tts.base import AudioPayload, RateProfile, TtsRequestIdentity
-
-
-def _font_copy(tmp_path: Path) -> Path:
-    source = next(
-        path
-        for path in (Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/simhei.ttf"))
-        if path.is_file()
-    )
-    target = tmp_path / "fonts" / source.name
-    target.parent.mkdir(parents=True)
-    target.write_bytes(source.read_bytes())
-    return target
-
-
-class _AudioAdapter:
-    backend = "dify"
-
-    def synthesize(self, _text, request: TtsRequestIdentity, rate: RateProfile) -> AudioPayload:
-        return AudioPayload(
-            backend=self.backend,
-            rate_profile=rate,
-            request_identity=request,
-            audio_bytes=b"\xff\xfb" + b"test-audio" * 32,
-            voice=None,
-        )
-
-
-class _FailAdapter:
-    def __init__(self, backend: str) -> None:
-        self.backend = backend
-
-    def synthesize(self, *_arguments: object) -> AudioPayload:
-        raise RuntimeError("offline")
-
-
-def _probe(path: Path, **_kwargs: object) -> MediaProbe:
-    return MediaProbe(
-        duration_ms=45_000,
-        codec="mp3",
-        channels=1,
-        bytes=path.stat().st_size,
-        sha256=sha256_bytes(path.read_bytes()),
-    )
-
-
-@pytest.fixture
-def candidates(completed_source_bundle, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    outcome, source_path = completed_source_bundle
-    font = _font_copy(tmp_path)
-    context = prepare_generation_context(
-        project_root=tmp_path,
-        project_font_candidates=(f"fonts/{font.name}",),
-        windows_font_candidates=(),
-    )
-    source = load_verified_outcome(outcome, evidence_root=source_path.parents[1])
-    presentation = build_presentation(source, context)
-    report = render_report(presentation)
-    citations = render_citations(presentation)
-    recap = compose_recap(presentation)
-    card = render_card(presentation, context, target=tmp_path / "card.png")
-    monkeypatch.setattr(audio_module, "probe_mp3", _probe)
-    monkeypatch.setattr(audio_module, "canonicalize_mp3", lambda value, **_kwargs: value)
-    request = TtsRequestIdentity(
-        case_id=recap.identity.case_id,
-        source_run_id=recap.identity.source_run_id,
-        diagnosis_sha256=recap.identity.diagnosis_sha256,
-        generation_version=recap.identity.generation_version,
-        recap_sha256=recap.sha256,
-    )
-    audio = TtsFallbackChain(
-        (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
-    ).synthesize(recap, request, TrustedCandidateRoot.for_testing(tmp_path / "private"))
-    return source, presentation, report, citations, card, recap, audio
 
 
 def test_gate_revalidates_all_modalities_without_exposing_a_candidate_path(candidates):
@@ -108,15 +21,26 @@ def test_gate_revalidates_all_modalities_without_exposing_a_candidate_path(candi
 
 
 @pytest.mark.parametrize(
-    "field", ["case_id", "source_run_id", "diagnosis_sha256", "generation_version"]
+    "field",
+    [
+        "case_id",
+        "source_run_id",
+        "diagnosis_sha256",
+        "schema_version",
+        "generation_version",
+    ],
 )
 def test_gate_rejects_each_shared_identity_drift(candidates, field: str):
     from debugmate.results import consistency as consistency_module
 
     source, presentation, report, citations, card, recap, audio = candidates
     original = getattr(report.identity, field)
-    replacement = "f" if original[-1] != "f" else "e"
-    bad_identity = report.identity.model_copy(update={field: original[:-1] + replacement})
+    replacement = (
+        "1.1.1"
+        if field == "schema_version"
+        else original[:-1] + ("f" if original[-1] != "f" else "e")
+    )
+    bad_identity = report.identity.model_copy(update={field: replacement})
     forged_report = report.model_copy(update={"identity": bad_identity})
 
     with pytest.raises(
@@ -125,6 +49,23 @@ def test_gate_rejects_each_shared_identity_drift(candidates, field: str):
     ):
         consistency_module.validate_result_candidates(
             source, presentation, forged_report, citations, card, recap, audio
+        )
+
+
+def test_gate_rejects_forged_citation_bytes_and_recap_text(candidates):
+    from debugmate.results import consistency as consistency_module
+
+    source, presentation, report, citations, card, recap, audio = candidates
+    forged_citations = citations.model_copy(update={"json_bytes": b"{}"})
+    with pytest.raises(consistency_module.ResultConsistencyError, match="citation_verify_failed"):
+        consistency_module.validate_result_candidates(
+            source, presentation, report, forged_citations, card, recap, audio
+        )
+
+    forged_recap = recap.model_copy(update={"text": recap.text + " unverified claim"})
+    with pytest.raises(consistency_module.ResultConsistencyError, match="recap_verify_failed"):
+        consistency_module.validate_result_candidates(
+            source, presentation, report, citations, card, forged_recap, audio
         )
 
 
@@ -141,7 +82,11 @@ def test_gate_rejects_modified_card_before_publication(candidates):
 
 
 def test_gate_allows_only_explicit_audio_partial(candidates):
+    from tests.results.conftest import _FailAdapter
+
     from debugmate.results import consistency as consistency_module
+    from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
+    from debugmate.results.tts.base import TtsRequestIdentity
 
     source, presentation, report, citations, card, recap, _audio = candidates
     unavailable = TtsFallbackChain(
@@ -155,7 +100,7 @@ def test_gate_allows_only_explicit_audio_partial(candidates):
             generation_version=recap.identity.generation_version,
             recap_sha256=recap.sha256,
         ),
-        TrustedCandidateRoot.for_testing(Path(card.path).parent / "partial-private"),
+        TrustedCandidateRoot.for_testing(card.path.parent / "partial-private"),
     )
 
     validated = consistency_module.validate_result_candidates(

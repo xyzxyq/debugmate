@@ -246,9 +246,7 @@ class AudioResult(StrictFrozenModel):
             self.failure is None
             or not self.attempts
             or any(item.succeeded for item in self.attempts)
-            or any(
-                value is not None for value in (self.backend, self.duration_ms, self.sha256)
-            )
+            or any(value is not None for value in (self.backend, self.duration_ms, self.sha256))
         ):
             raise ValueError("unavailable audio requires only failed attempts and safe failure")
         used_multiple_backends = len({item.backend for item in self.attempts}) > 1
@@ -283,17 +281,18 @@ class ResultManifest(StrictFrozenModel):
             raise ValueError("completed result requires every artifact and no failure")
         if self.status is ResultStatus.PARTIAL:
             expected_partial = {
-                "card": ArtifactAvailability(
-                    report=True, card=False, recap_text=True, audio=True
-                ),
-                "audio": ArtifactAvailability(
-                    report=True, card=True, recap_text=True, audio=False
-                ),
+                "card": ArtifactAvailability(report=True, card=False, recap_text=True, audio=True),
+                "audio": ArtifactAvailability(report=True, card=True, recap_text=True, audio=False),
             }
+            allowed_retry_scopes = (
+                {self.failure.failed_stage} if self.failure is not None else set()
+            )
+            if self.failure is not None and self.failure.failed_stage == "audio":
+                allowed_retry_scopes.add("tts")
             if (
                 self.failure is None
                 or expected_partial.get(self.failure.failed_stage) != self.availability
-                or self.failure.retry_scope != self.failure.failed_stage
+                or self.failure.retry_scope not in allowed_retry_scopes
             ):
                 raise ValueError("partial result must identify exactly one card or audio failure")
         if self.status is ResultStatus.FAILED and (
@@ -332,11 +331,7 @@ class ResultManifest(StrictFrozenModel):
                 or self.audio.sha256 != audio_record.sha256
             ):
                 raise ValueError("available audio record and AudioResult must match")
-        elif (
-            self.audio.available
-            or self.audio.failure != self.failure
-            or audio_record is not None
-        ):
+        elif self.audio.available or self.audio.failure != self.failure or audio_record is not None:
             raise ValueError("unavailable audio must match the manifest failure")
         return self
 
@@ -367,9 +362,7 @@ class ResultViewState(StrictFrozenModel):
             or self.failure is None
         ):
             raise ValueError("partial view requires verified partial artifacts and failure")
-        if self.status is ResultStatus.FAILED and (
-            self.failure is None or self.availability.any()
-        ):
+        if self.status is ResultStatus.FAILED and (self.failure is None or self.availability.any()):
             raise ValueError("failed view requires only a safe failure")
         if self.status is ResultStatus.RUNNING and not self.current_stage:
             raise ValueError("running view requires a current stage")
