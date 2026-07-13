@@ -203,7 +203,10 @@ class TtsFallbackChain:
         )
 
 
-@dataclass(frozen=True)
+_CANDIDATE_ROOT_CAPABILITY = object()
+
+
+@dataclass(frozen=True, init=False)
 class TrustedCandidateRoot:
     """An explicit capability for private, pre-publication TTS candidates.
 
@@ -219,12 +222,27 @@ class TrustedCandidateRoot:
 
     _root: Path
 
+    def __init__(self, root: Path, *, _capability: object) -> None:
+        if _capability is not _CANDIDATE_ROOT_CAPABILITY:
+            raise TypeError("TrustedCandidateRoot requires an approved factory")
+        object.__setattr__(self, "_root", Path(root))
+
+    @classmethod
+    def application_owned(cls) -> TrustedCandidateRoot:
+        """Return the fixed repository-owned private candidate space."""
+
+        project_root = Path(__file__).resolve().parents[3]
+        return cls(
+            project_root / ".debugmate-private" / "tts-candidates",
+            _capability=_CANDIDATE_ROOT_CAPABILITY,
+        )
+
     @classmethod
     def for_testing(cls, private_root: Path) -> TrustedCandidateRoot:
         root = Path(private_root)
         if not root.is_absolute():
             raise ValueError("tts_target_invalid") from None
-        return cls(root)
+        return cls(root, _capability=_CANDIDATE_ROOT_CAPABILITY)
 
     def allocate_leased(self, request: TtsRequestIdentity) -> _CandidateRootLease:
         """Allocate and lock one identity-derived private candidate directory."""
