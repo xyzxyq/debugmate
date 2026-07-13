@@ -130,3 +130,25 @@ FFmpeg/ffprobe chain. The fresh value-safe media record is
 
 No key, provider response body, recap text, or temporary path is retained in
 the media evidence or this log.
+
+## Task 4 — browser gate stopped by VQ-01
+
+The project-pinned `playwright==1.61.0` successfully launched the explicit
+`msedge` channel and navigated to the real loopback Gradio server.  The browser
+harness uses `domcontentloaded` plus an explicit `.gradio-container` wait;
+`networkidle` is intentionally not used because Gradio retains a queue
+connection while healthy.
+
+```text
+.venv\Scripts\python.exe -m pytest -q -m browser tests\ui\test_browser.py
+FAILED tests/ui/test_browser.py::test_vq_01_real_loopback_workbench_has_three_visible_regions
+actual widths: [67, 67, 67]
+expected minima: [280, 360, 440]
+```
+
+The test captured a real current-app screenshot before asserting the failure:
+`evidence/ui/phase4/VQ-01.png` SHA-256
+`12be2e55e45f78ddee0f8c6cdbc9cce4ffdd4c494192d63c2c22c6ef61fd10cc`.
+The nested grid collapse makes the fixed replay selector inaccessible, so the
+remaining VQ rows cannot be honestly accepted. See `04-07-GAPS.md` GAP-01.
+No source or CSS was changed in this verification-only plan.
