@@ -15,12 +15,12 @@ from debugmate.results.contracts import (
     PreparedGenerationContext,
     StrictFrozenModel,
 )
-from debugmate.results.loader import LoadedDiagnosisSource
+from debugmate.results.loader import LoadedDiagnosisSource, issued_source_snapshot
 
 _PRESENTATION_TOKEN = object()
 _PRESENTATION_REGISTRY_LOCK = threading.RLock()
 _PRESENTATION_REGISTRY: dict[
-    int, tuple[weakref.ReferenceType[PresentationModel], str]
+    int, tuple[weakref.ReferenceType[PresentationModel], str, str]
 ] = {}
 
 
@@ -37,21 +37,25 @@ def _forget_presentation(
             _PRESENTATION_REGISTRY.pop(key, None)
 
 
-def _register_presentation(value: PresentationModel) -> None:
+def _register_presentation(value: PresentationModel, *, source_proof_sha256: str) -> None:
     key = id(value)
     reference = weakref.ref(
         value, lambda current, identity=key: _forget_presentation(identity, current)
     )
     with _PRESENTATION_REGISTRY_LOCK:
-        _PRESENTATION_REGISTRY[key] = (reference, value.projection_sha256)
+        _PRESENTATION_REGISTRY[key] = (
+            reference,
+            value.projection_sha256,
+            source_proof_sha256,
+        )
 
 
-def _registered_projection_sha256(value: PresentationModel) -> str | None:
+def _registered_presentation(value: PresentationModel) -> tuple[str, str] | None:
     with _PRESENTATION_REGISTRY_LOCK:
         entry = _PRESENTATION_REGISTRY.get(id(value))
         if entry is None or entry[0]() is not value:
             return None
-        return entry[1]
+        return entry[1], entry[2]
 
 
 class PresentationBuildError(ValueError):
@@ -179,14 +183,25 @@ def _validated_presentation(value: object) -> PresentationModel:
     if not isinstance(value, PresentationModel):
         raise TypeError("presentation type")
     payload = value.model_dump(mode="json", exclude={"projection_sha256"})
-    registered_sha256 = _registered_projection_sha256(value)
+    registered = _registered_presentation(value)
     if (
-        registered_sha256 is None
-        or registered_sha256 != value.projection_sha256
+        registered is None
+        or registered[0] != value.projection_sha256
         or value.projection_sha256 != _projection_sha256(payload)
     ):
         raise ValueError("presentation source authenticity mismatch")
     return value
+
+
+def _presentation_source_proof(value: object) -> str:
+    """Return the private loader proof bound when this projection was built."""
+
+    if not isinstance(value, PresentationModel):
+        raise TypeError("presentation type")
+    registered = _registered_presentation(value)
+    if registered is None:
+        raise ValueError("presentation source authenticity mismatch")
+    return registered[1]
 
 
 def _command(value: object) -> PresentationCommand:
@@ -199,7 +214,7 @@ def build_presentation(
     """Project one verified diagnosis without inference, I/O, providers or repair."""
 
     try:
-        verified = _strict_source(source)
+        verified, source_proof = issued_source_snapshot(source, reverify=False)
         prepared = _strict_context(context)
         diagnosis = verified.diagnosis
         profile = prepared.generation_profile
@@ -292,7 +307,7 @@ def build_presentation(
             strict=True,
             context={"presentation_token": _PRESENTATION_TOKEN},
         )
-        _register_presentation(result)
+        _register_presentation(result, source_proof_sha256=source_proof)
         return result
     except Exception:
         failure = PresentationBuildError()

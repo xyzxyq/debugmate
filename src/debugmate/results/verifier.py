@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import stat
+import threading
+import weakref
 import zipfile
+import zlib
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +54,102 @@ class VerifiedResultBundle:
     path: Path
     manifest: ResultManifest
     publication: dict[str, object]
+
+
+@dataclass(slots=True)
+class _VerifiedDownloadState:
+    owner_ref: weakref.ReferenceType[VerifiedDownload]
+    payload: bytes
+    member_id: str
+    filename: str
+    mime_type: str
+    identity: object
+
+
+_DOWNLOAD_LOCK = threading.RLock()
+_DOWNLOAD_STATES: dict[object, _VerifiedDownloadState] = {}
+
+
+class VerifiedDownload:
+    """Opaque, one-shot bytes from a freshly reverified bundle member.
+
+    It intentionally has no filesystem path.  The returned bytes are read and
+    hash-checked while the verifier owns the operation, so a caller cannot
+    re-open a swapped server file after its authorization decision.
+    """
+
+    __slots__ = ("_token", "__weakref__")
+
+    def __init__(self, *_arguments: object, **_kwargs: object) -> None:
+        raise TypeError("VerifiedDownload requires the resolver")
+
+    @classmethod
+    def _issue(
+        cls, *, payload: bytes, member_id: str, filename: str, mime_type: str, identity: object
+    ) -> VerifiedDownload:
+        value = object.__new__(cls)
+        token = object()
+        object.__setattr__(value, "_token", token)
+
+        def forget(reference: weakref.ReferenceType[VerifiedDownload]) -> None:
+            with _DOWNLOAD_LOCK:
+                state = _DOWNLOAD_STATES.get(token)
+                if state is not None and state.owner_ref is reference:
+                    _DOWNLOAD_STATES.pop(token, None)
+
+        reference = weakref.ref(value, forget)
+        with _DOWNLOAD_LOCK:
+            _DOWNLOAD_STATES[token] = _VerifiedDownloadState(
+                owner_ref=reference,
+                payload=payload,
+                member_id=member_id,
+                filename=filename,
+                mime_type=mime_type,
+                identity=identity,
+            )
+        return value
+
+    def _state(self, *, consume: bool) -> _VerifiedDownloadState:
+        try:
+            token = object.__getattribute__(self, "_token")
+            with _DOWNLOAD_LOCK:
+                state = _DOWNLOAD_STATES.get(token)
+                if state is None or state.owner_ref() is not self:
+                    raise ValueError("download capability")
+                if consume:
+                    _DOWNLOAD_STATES.pop(token, None)
+                return state
+        except Exception:
+            raise ResultVerificationError("download_invalid") from None
+
+    @property
+    def member_id(self) -> str:
+        return self._state(consume=False).member_id
+
+    @property
+    def filename(self) -> str:
+        return self._state(consume=False).filename
+
+    @property
+    def mime_type(self) -> str:
+        return self._state(consume=False).mime_type
+
+    def read_bytes(self) -> bytes:
+        """Consume the already-verified byte copy exactly once."""
+
+        return self._state(consume=True).payload
+
+    def __copy__(self) -> VerifiedDownload:
+        raise TypeError("VerifiedDownload is not copyable")
+
+    def __deepcopy__(self, _memo: object) -> VerifiedDownload:
+        raise TypeError("VerifiedDownload is not copyable")
+
+    def __reduce__(self) -> object:
+        raise TypeError("VerifiedDownload is not serialisable")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("VerifiedDownload is not serialisable")
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -131,6 +232,76 @@ def _business_records(manifest: ResultManifest) -> dict[str, object]:
     return records
 
 
+def _expected_citation_rows(diagnosis: DiagnosisRecord) -> tuple[CitationRow, ...]:
+    """Rebuild citation evidence/fact/candidate relationships from diagnosis.
+
+    The source summary alone cannot prove a rendered URL or support edge.  The
+    committed diagnosis is itself manifest-hashed and schema-validated, so it
+    is the authoritative graph for public citation rows during disk restore.
+    """
+
+    fact_ids = {item.fact_id for item in diagnosis.observed_facts}
+    evidence_ids = {item.evidence_id for item in diagnosis.evidence}
+    if len(fact_ids) != len(diagnosis.observed_facts) or len(evidence_ids) != len(
+        diagnosis.evidence
+    ):
+        raise ResultVerificationError("citation_verify_failed")
+    links = tuple(diagnosis.support_links)
+    for link in links:
+        if (
+            not link.fact_ids
+            or not link.evidence_ids
+            or len(link.fact_ids) != len(set(link.fact_ids))
+            or len(link.evidence_ids) != len(set(link.evidence_ids))
+            or not set(link.fact_ids) <= fact_ids
+            or not set(link.evidence_ids) <= evidence_ids
+        ):
+            raise ResultVerificationError("citation_verify_failed")
+
+    rows: list[CitationRow] = []
+    for evidence in sorted(diagnosis.evidence, key=lambda value: value.evidence_id):
+        supported_facts = tuple(
+            sorted(
+                {
+                    fact_id
+                    for link in links
+                    if evidence.evidence_id in link.evidence_ids
+                    for fact_id in link.fact_ids
+                }
+            )
+        )
+        supported_candidates: list[str] = []
+        for candidate in diagnosis.root_cause_candidates:
+            if (
+                candidate.claim_kind.value != "grounded"
+                or evidence.evidence_id not in candidate.evidence_ids
+            ):
+                continue
+            matching_edges = sum(
+                1
+                for link in links
+                if set(candidate.fact_ids) == set(link.fact_ids)
+                and set(candidate.evidence_ids) == set(link.evidence_ids)
+            )
+            if matching_edges != 1:
+                raise ResultVerificationError("citation_verify_failed")
+            supported_candidates.append(candidate.candidate_id)
+        rows.append(
+            CitationRow(
+                evidence_id=evidence.evidence_id,
+                source_label=evidence.source_id,
+                source_url=evidence.source_url,
+                source_locator=evidence.locator,
+                chunk_id=evidence.chunk_id,
+                source_id=evidence.source_id,
+                knowledge_build_id=evidence.knowledge_build_id,
+                supported_candidate_ids=tuple(sorted(supported_candidates)),
+                supported_fact_ids=supported_facts,
+            )
+        )
+    return tuple(rows)
+
+
 def _validate_business_payloads(root: Path, manifest: ResultManifest) -> dict[str, bytes]:
     records = _business_records(manifest)
     values: dict[str, bytes] = {}
@@ -169,7 +340,10 @@ def _validate_business_payloads(root: Path, manifest: ResultManifest) -> dict[st
         raise ResultVerificationError("recap_verify_failed")
     try:
         citation_payload = json.loads(values["citations"].decode("utf-8"))
-        if canonical_json_bytes(citation_payload) != values["citations"]:
+        if (
+            set(citation_payload) != {"identity", "rows"}
+            or canonical_json_bytes(citation_payload) != values["citations"]
+        ):
             raise ValueError("canonical")
         if citation_payload.get("identity") != manifest.identity.model_dump(mode="json"):
             raise ValueError("identity")
@@ -179,6 +353,8 @@ def _validate_business_payloads(root: Path, manifest: ResultManifest) -> dict[st
         )
         if len(rows) != len(citation_payload.get("rows", [])):
             raise ValueError("rows")
+        if rows != _expected_citation_rows(diagnosis):
+            raise ValueError("source graph")
         assert_export_safe(_mask_known_identifiers(values["citations"].decode("utf-8")))
     except Exception:
         raise ResultVerificationError("citation_verify_failed") from None
@@ -322,14 +498,19 @@ def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, byte
     try:
         with zipfile.ZipFile(archive_path) as archive:
             infos = archive.infolist()
+            names = [info.filename for info in infos]
             if (
                 len(infos) != len(expected_names)
-                or [info.filename for info in infos] != expected_names
+                or names != expected_names
+                or len(names) != len(set(names))
             ):
                 raise ValueError("members")
-            if archive.comment or archive.testzip() is not None:
-                raise ValueError("crc")
-            total = 0
+            if archive.comment:
+                raise ValueError("comment")
+            total = compressed_total = 0
+            # Validate the complete central-directory contract before opening
+            # any payload.  In particular, never call ``testzip`` here: it
+            # decompresses members before size/ratio policy is known.
             for info in infos:
                 if (
                     not _safe_zip_name(info.filename)
@@ -340,21 +521,51 @@ def _verify_archive(root: Path, manifest: ResultManifest, values: dict[str, byte
                     or info.extra
                     or info.comment
                     or info.compress_type != zipfile.ZIP_DEFLATED
+                    or info.flag_bits != 0
+                    or info.is_dir()
+                    or info.header_offset < 0
+                    or info.CRC < 0
                     or info.file_size <= 0
                     or info.file_size > MAX_MEMBER_BYTES
-                    or info.file_size / max(1, info.compress_size) > 100
+                    or info.compress_size <= 0
+                    or info.compress_size > MAX_MEMBER_BYTES
+                    or info.file_size > info.compress_size * 100
                 ):
                     raise ValueError("metadata")
                 total += info.file_size
+                compressed_total += info.compress_size
                 if total > MAX_TOTAL_BYTES:
                     raise ValueError("size")
-                data = archive.read(info)
+                if compressed_total > MAX_TOTAL_BYTES:
+                    raise ValueError("compressed size")
+
+            for info in infos:
                 expected = (
                     checksums_path.read_bytes()
                     if info.filename == CHECKSUMS_NAME
                     else member_values[info.filename]
                 )
-                if data != expected:
+                if len(expected) != info.file_size:
+                    raise ValueError("payload")
+                chunks: list[bytes] = []
+                total_read = 0
+                crc = 0
+                with archive.open(info, "r") as member:
+                    while True:
+                        block = member.read(min(64 * 1024, info.file_size + 1 - total_read))
+                        if not block:
+                            break
+                        total_read += len(block)
+                        if total_read > info.file_size:
+                            raise ValueError("unbounded payload")
+                        crc = zlib.crc32(block, crc)
+                        chunks.append(block)
+                data = b"".join(chunks)
+                if (
+                    total_read != info.file_size
+                    or (crc & 0xFFFFFFFF) != info.CRC
+                    or sha256_bytes(data) != sha256_bytes(expected)
+                ):
                     raise ValueError("payload")
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError):
         raise ResultVerificationError("archive_verify_failed") from None
@@ -469,10 +680,57 @@ def _result_id_from_manifest(manifest: ResultManifest, values: dict[str, bytes])
     return f"result_{sha256_bytes(canonical_json_bytes(payload))[:32]}"
 
 
+def _read_verified_member(
+    path: Path, root: Path, *, expected_bytes: int, expected_sha256: str
+) -> bytes:
+    """Read a bounded member once and prove the pathname did not swap mid-read."""
+
+    if expected_bytes <= 0 or expected_bytes > MAX_TOTAL_BYTES or not _safe_file(path, root):
+        raise ResultVerificationError("download_invalid")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = -1
+    try:
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size != expected_bytes:
+            raise ValueError("shape")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            block = os.read(descriptor, min(64 * 1024, expected_bytes + 1 - total))
+            if not block:
+                break
+            total += len(block)
+            if total > expected_bytes:
+                raise ValueError("bound")
+            chunks.append(block)
+        after = os.fstat(descriptor)
+        payload = b"".join(chunks)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or len(payload) != expected_bytes
+            or sha256_bytes(payload) != expected_sha256
+        ):
+            raise ValueError("hash")
+        return payload
+    except (OSError, ValueError):
+        raise ResultVerificationError("download_invalid") from None
+    finally:
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
 def resolve_verified_download(
     results_root: Path, case_id: str, result_id: str, member_id: str
-) -> Path:
-    """Resolve one fixed member ID only after a complete fresh disk verification."""
+) -> VerifiedDownload:
+    """Issue one opaque byte copy after a full fresh on-disk revalidation."""
 
     try:
         if _CASE_ID.fullmatch(case_id) is None or _RESULT_ID.fullmatch(result_id) is None:
@@ -500,17 +758,36 @@ def resolve_verified_download(
         if not _safe_file(selected, bundle.path):
             raise ValueError("path")
         if member_id == "bundle":
-            if sha256_file(selected) != bundle.publication["archive_sha256"]:
+            digest = bundle.publication["archive_sha256"]
+            if not isinstance(digest, str):
                 raise ValueError("archive")
+            payload = _read_verified_member(
+                selected,
+                bundle.path,
+                expected_bytes=selected.stat(follow_symlinks=False).st_size,
+                expected_sha256=digest,
+            )
+            mime_type = "application/zip"
         else:
             record = next((item for item in bundle.manifest.artifacts if item.path == name), None)
             if (
                 record is None
-                or selected.stat().st_size != record.bytes
-                or sha256_file(selected) != record.sha256
             ):
                 raise ValueError("member")
-        return selected
+            payload = _read_verified_member(
+                selected,
+                bundle.path,
+                expected_bytes=record.bytes,
+                expected_sha256=record.sha256,
+            )
+            mime_type = record.mime_type
+        return VerifiedDownload._issue(
+            payload=payload,
+            member_id=member_id,
+            filename=name,
+            mime_type=mime_type,
+            identity=bundle.manifest.identity,
+        )
     except ResultVerificationError:
         raise
     except Exception:

@@ -14,14 +14,73 @@ from debugmate.results import publisher as publisher_module
 from debugmate.results import verifier as verifier_module
 
 
+def _trusted_root(path: Path):
+    return publisher_module.TrustedResultRoot.for_testing(path)
+
+
+def test_publisher_requires_factory_issued_root_and_private_candidate_snapshot(
+    candidates, tmp_path: Path
+):
+    from debugmate.results.consistency import validate_result_candidates
+
+    candidate = validate_result_candidates(*candidates)
+    expected_report = candidate.report_bytes
+    object.__setattr__(candidate, "report_bytes", b"forged publisher input")
+
+    with pytest.raises(publisher_module.ResultPublishError, match="candidate_invalid"):
+        publisher_module.publish_result_bundle(tmp_path / "raw-results", candidate)
+
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(tmp_path / "results"), candidate
+    )
+    assert (bundle.path / "report.md").read_bytes() == expected_report
+
+
+def test_temp_directory_reparse_race_never_writes_external_target(
+    candidates, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A swap immediately after mkdir must fail before any member write."""
+
+    from debugmate.results.consistency import validate_result_candidates
+
+    external = tmp_path / "external-target"
+    external.mkdir()
+    real_mkdir = publisher_module.os.mkdir
+    raced = False
+
+    def mkdir_with_reparse(path, *args, **kwargs):
+        nonlocal raced
+        result = real_mkdir(path, *args, **kwargs)
+        candidate_path = Path(path)
+        if candidate_path.name.startswith(".tmp-result_") and not raced:
+            raced = True
+            candidate_path.rmdir()
+            try:
+                candidate_path.symlink_to(external, target_is_directory=True)
+            except OSError:
+                pytest.skip("this Windows test process cannot create a directory reparse point")
+        return result
+
+    monkeypatch.setattr(publisher_module.os, "mkdir", mkdir_with_reparse)
+    with pytest.raises(publisher_module.ResultPublishError):
+        publisher_module.publish_result_bundle(
+            _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
+        )
+    assert raced is True
+    assert list(external.iterdir()) == []
+    result_root = tmp_path / "results"
+    assert not list(result_root.rglob(".tmp-result_*")) if result_root.exists() else True
+
+
 def test_publish_full_bundle_is_atomic_deterministic_and_freshly_downloadable(
     candidates, tmp_path: Path
 ):
     from debugmate.results.consistency import validate_result_candidates
 
     validated = validate_result_candidates(*candidates)
-    first = publisher_module.publish_result_bundle(tmp_path / "results", validated)
-    second = publisher_module.publish_result_bundle(tmp_path / "results", validated)
+    root = _trusted_root(tmp_path / "results")
+    first = publisher_module.publish_result_bundle(root, validated)
+    second = publisher_module.publish_result_bundle(root, validated)
 
     assert first.path == second.path
     assert verifier_module.verify_result_bundle(first.path).manifest == first.manifest
@@ -53,15 +112,15 @@ def test_verifier_and_download_resolver_reject_tamper_and_path_like_member(
     from debugmate.results.consistency import validate_result_candidates
 
     bundle = publisher_module.publish_result_bundle(
-        tmp_path / "results", validate_result_candidates(*candidates)
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
     )
     result_root = tmp_path / "results"
-    assert (
-        verifier_module.resolve_verified_download(
-            result_root, bundle.manifest.identity.case_id, bundle.manifest.result_id, "report"
-        ).name
-        == "report.md"
+    download = verifier_module.resolve_verified_download(
+        result_root, bundle.manifest.identity.case_id, bundle.manifest.result_id, "report"
     )
+    assert download.member_id == "report"
+    assert download.read_bytes() == (bundle.path / "report.md").read_bytes()
+    assert not hasattr(download, "path")
     with pytest.raises(verifier_module.ResultVerificationError):
         verifier_module.resolve_verified_download(
             result_root, bundle.manifest.identity.case_id, bundle.manifest.result_id, "../report.md"
@@ -75,11 +134,59 @@ def test_verifier_and_download_resolver_reject_tamper_and_path_like_member(
         )
 
 
+def test_download_is_opaque_one_shot_bytes_not_a_reopenable_path(candidates, tmp_path: Path):
+    from debugmate.results.consistency import validate_result_candidates
+
+    root = tmp_path / "results"
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(root), validate_result_candidates(*candidates)
+    )
+    download = verifier_module.resolve_verified_download(
+        root, bundle.manifest.identity.case_id, bundle.manifest.result_id, "report"
+    )
+    assert not hasattr(download, "path")
+    assert download.filename == "report.md"
+    assert download.read_bytes() == (bundle.path / "report.md").read_bytes()
+    with pytest.raises(verifier_module.ResultVerificationError, match="download_invalid"):
+        download.read_bytes()
+    with pytest.raises(TypeError):
+        verifier_module.VerifiedDownload()
+
+
+def test_disk_verifier_rederives_citation_url_and_support_graph(candidates, tmp_path: Path):
+    """A well-shaped, rehashed citation row still needs diagnosis support."""
+
+    from debugmate.hashing import canonical_json_bytes, sha256_bytes
+    from debugmate.results.consistency import validate_result_candidates
+
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
+    )
+    citation_path = bundle.path / "citations.json"
+    payload = json.loads(citation_path.read_text(encoding="utf-8"))
+    payload["rows"][0]["source_url"] = "https://forged.example.invalid/claim"
+    forged_bytes = canonical_json_bytes(payload)
+    os.chmod(citation_path, stat.S_IWRITE)
+    citation_path.write_bytes(forged_bytes)
+    forged_records = tuple(
+        record.model_copy(
+            update={"bytes": len(forged_bytes), "sha256": sha256_bytes(forged_bytes)}
+        )
+        if record.kind == "citations"
+        else record
+        for record in bundle.manifest.artifacts
+    )
+    forged_manifest = bundle.manifest.model_copy(update={"artifacts": forged_records})
+
+    with pytest.raises(verifier_module.ResultVerificationError, match="citation_verify_failed"):
+        verifier_module._validate_business_payloads(bundle.path, forged_manifest)
+
+
 def test_verifier_rejects_manifest_hash_cycles_and_zip_slip(candidates, tmp_path: Path):
     from debugmate.results.consistency import validate_result_candidates
 
     bundle = publisher_module.publish_result_bundle(
-        tmp_path / "results", validate_result_candidates(*candidates)
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
     )
     manifest_path = bundle.path / "result-manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -124,7 +231,7 @@ def test_publish_audio_partial_uses_only_the_partial_archive_and_safe_tts_retry(
     )
 
     bundle = publisher_module.publish_result_bundle(
-        tmp_path / "results",
+        _trusted_root(tmp_path / "results"),
         validate_result_candidates(
             source, presentation, report, citations, card, recap, unavailable
         ),
@@ -163,7 +270,7 @@ def test_publisher_rejects_a_handcrafted_partial_candidate(candidates, tmp_path:
 
     with pytest.raises(publisher_module.ResultPublishError, match="candidate_invalid"):
         publisher_module.publish_result_bundle(
-            tmp_path / "results", replace(valid, _token=object())
+            _trusted_root(tmp_path / "results"), replace(valid, _token=object())
         )
 
 
@@ -173,7 +280,9 @@ def test_result_verify_cli_accepts_only_root_and_strict_identifiers(
     from debugmate.results.consistency import validate_result_candidates
 
     root = tmp_path / "results"
-    bundle = publisher_module.publish_result_bundle(root, validate_result_candidates(*candidates))
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(root), validate_result_candidates(*candidates)
+    )
 
     assert (
         main(
@@ -205,7 +314,7 @@ def test_independent_full_rebuilds_have_identical_fixed_archive_metadata(
 
     source, presentation, report, citations, card, recap, audio = candidates
     first = publisher_module.publish_result_bundle(
-        tmp_path / "first", validate_result_candidates(*candidates)
+        _trusted_root(tmp_path / "first"), validate_result_candidates(*candidates)
     )
     request = TtsRequestIdentity(
         case_id=recap.identity.case_id,
@@ -218,7 +327,7 @@ def test_independent_full_rebuilds_have_identical_fixed_archive_metadata(
         (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
     ).synthesize(recap, request, TrustedCandidateRoot.for_testing(tmp_path / "second-private"))
     second = publisher_module.publish_result_bundle(
-        tmp_path / "second",
+        _trusted_root(tmp_path / "second"),
         validate_result_candidates(
             source, presentation, report, citations, card, recap, rebuilt_audio
         ),
@@ -241,7 +350,7 @@ def test_verifier_rejects_extra_file_and_atomic_failure_leaves_no_temp_or_final(
     from debugmate.results.consistency import validate_result_candidates
 
     first = publisher_module.publish_result_bundle(
-        tmp_path / "published", validate_result_candidates(*candidates)
+        _trusted_root(tmp_path / "published"), validate_result_candidates(*candidates)
     )
     (first.path / "unexpected.txt").write_text("not allowed", encoding="utf-8")
     with pytest.raises(verifier_module.ResultVerificationError):
@@ -270,7 +379,7 @@ def test_verifier_rejects_extra_file_and_atomic_failure_leaves_no_temp_or_final(
     monkeypatch.setattr(verifier_module, "verify_result_bundle", interrupted)
     with pytest.raises(publisher_module.ResultPublishError):
         publisher_module.publish_result_bundle(
-            tmp_path / "failed",
+            _trusted_root(tmp_path / "failed"),
             validate_result_candidates(
                 source, presentation, report, citations, card, recap, fresh_audio
             ),
@@ -288,7 +397,7 @@ def test_verifier_rejects_zip_slip_and_oversized_archive_members(candidates, tmp
     from debugmate.results.tts.base import TtsRequestIdentity
 
     bundle = publisher_module.publish_result_bundle(
-        tmp_path / "results", validate_result_candidates(*candidates)
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
     )
     archive_path = bundle.path / "debugmate-result.zip"
 
@@ -318,7 +427,7 @@ def test_verifier_rejects_zip_slip_and_oversized_archive_members(candidates, tmp
         (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
     ).synthesize(recap, request, TrustedCandidateRoot.for_testing(tmp_path / "second-private"))
     fresh = publisher_module.publish_result_bundle(
-        tmp_path / "second",
+        _trusted_root(tmp_path / "second"),
         validate_result_candidates(
             source, presentation, report, citations, card, recap, fresh_audio
         ),
@@ -327,6 +436,40 @@ def test_verifier_rejects_zip_slip_and_oversized_archive_members(candidates, tmp
     rewrite("report.md", b"0" * (publisher_module.MAX_MEMBER_BYTES + 1))
     with pytest.raises(verifier_module.ResultVerificationError):
         verifier_module.verify_result_bundle(fresh.path)
+
+
+def test_zip_bomb_metadata_rejects_before_any_member_open(
+    candidates, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Central-directory caps must run before a bomb can be decompressed."""
+
+    from debugmate.results.consistency import validate_result_candidates
+
+    bundle = publisher_module.publish_result_bundle(
+        _trusted_root(tmp_path / "results"), validate_result_candidates(*candidates)
+    )
+    archive_path = bundle.path / "debugmate-result.zip"
+    original_infolist = zipfile.ZipFile.infolist
+    original_open = zipfile.ZipFile.open
+    opened = False
+
+    def forged_infolist(archive: zipfile.ZipFile):
+        infos = original_infolist(archive)
+        if Path(archive.filename) == archive_path:
+            infos[0].file_size = publisher_module.MAX_MEMBER_BYTES + 1
+        return infos
+
+    def tracked_open(archive: zipfile.ZipFile, *args, **kwargs):
+        nonlocal opened
+        if Path(archive.filename) == archive_path:
+            opened = True
+        return original_open(archive, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", forged_infolist)
+    monkeypatch.setattr(zipfile.ZipFile, "open", tracked_open)
+    with pytest.raises(verifier_module.ResultVerificationError, match="archive_verify_failed"):
+        verifier_module.verify_result_bundle(bundle.path)
+    assert opened is False
 
 
 def test_verifier_rejects_stale_version_and_download_file_swap(candidates, tmp_path: Path):
@@ -338,7 +481,7 @@ def test_verifier_rejects_stale_version_and_download_file_swap(candidates, tmp_p
 
     result_root = tmp_path / "results"
     bundle = publisher_module.publish_result_bundle(
-        result_root, validate_result_candidates(*candidates)
+        _trusted_root(result_root), validate_result_candidates(*candidates)
     )
     manifest_path = bundle.path / "result-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -365,7 +508,7 @@ def test_verifier_rejects_stale_version_and_download_file_swap(candidates, tmp_p
         (_AudioAdapter(), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
     ).synthesize(recap, request, TrustedCandidateRoot.for_testing(tmp_path / "swap-private"))
     second = publisher_module.publish_result_bundle(
-        tmp_path / "swap",
+        _trusted_root(tmp_path / "swap"),
         validate_result_candidates(
             source, presentation, report, citations, card, recap, fresh_audio
         ),

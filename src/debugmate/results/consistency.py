@@ -14,7 +14,6 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 
-from debugmate.diagnosis.workflow import WorkflowStatus
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.audio import TtsSynthesisOutcome
@@ -26,8 +25,12 @@ from debugmate.results.contracts import (
     ResultStatus,
     SafeFailure,
 )
-from debugmate.results.loader import LoadedDiagnosisSource
-from debugmate.results.presentation import PresentationModel, _validated_presentation
+from debugmate.results.loader import LoadedDiagnosisSource, issued_source_snapshot
+from debugmate.results.presentation import (
+    PresentationModel,
+    _presentation_source_proof,
+    _validated_presentation,
+)
 from debugmate.results.recap import SafeRecapText, compose_recap
 from debugmate.results.report import (
     RenderedCitations,
@@ -70,29 +73,44 @@ class ValidatedResultCandidates:
     _token: object
 
 
+@dataclass(frozen=True, slots=True)
+class _CandidateSnapshot:
+    """Private immutable business payload issued only by the consistency gate."""
+
+    identity: ArtifactIdentity
+    status: ResultStatus
+    availability: ArtifactAvailability
+    failure: SafeFailure | None
+    diagnosis_bytes: bytes
+    report_bytes: bytes
+    citations_bytes: bytes
+    source_manifest_bytes: bytes
+    recap_bytes: bytes
+    card_bytes: bytes | None
+    audio: AudioResult
+    audio_bytes: bytes | None
+    source_proof_sha256: str
+    presentation_projection_sha256: str
+    citation_graph_sha256: str
+
+
 @dataclass(slots=True)
-class _AudioState:
+class _CandidateState:
     owner: weakref.ReferenceType[ValidatedResultCandidates]
-    outcome: TtsSynthesisOutcome
+    snapshot: _CandidateSnapshot
+    checked_out: bool = False
 
 
-_AUDIO_LOCK = threading.RLock()
-_AUDIO_STATES: dict[object, _AudioState] = {}
-_CANDIDATE_STATES: dict[object, weakref.ReferenceType[ValidatedResultCandidates]] = {}
+_CANDIDATE_LOCK = threading.RLock()
+_CANDIDATE_STATES: dict[int, _CandidateState] = {}
 
 
-def _discard_state(token: object) -> None:
-    with _AUDIO_LOCK:
-        state = _AUDIO_STATES.pop(token, None)
-    if state is not None and state.outcome.handoff is not None:
-        state.outcome.handoff.close()
-
-
-def _forget_candidate(token: object):
+def _forget_candidate(key: int):
     def finalize(_owner: object) -> None:
-        with _AUDIO_LOCK:
-            _CANDIDATE_STATES.pop(token, None)
-        _discard_state(token)
+        with _CANDIDATE_LOCK:
+            state = _CANDIDATE_STATES.get(key)
+            if state is not None and state.owner() is None:
+                _CANDIDATE_STATES.pop(key, None)
 
     return finalize
 
@@ -110,59 +128,56 @@ def is_issued_result_candidate(candidate: object) -> bool:
 
     if not isinstance(candidate, ValidatedResultCandidates):
         return False
-    with _AUDIO_LOCK:
-        owner = _CANDIDATE_STATES.get(candidate._token)
-    return owner is not None and owner() is candidate
+    with _CANDIDATE_LOCK:
+        state = _CANDIDATE_STATES.get(id(candidate))
+    return state is not None and state.owner() is candidate
+
+
+def checkout_verified_candidate_for_publication(
+    candidate: object,
+) -> _CandidateSnapshot:
+    """Atomically claim the gate snapshot for exactly one publisher transaction.
+
+    Publication must use the returned private snapshot rather than the public
+    dataclass fields.  This makes ``object.__setattr__``, dataclass copies,
+    pickles and concurrent attempts unable to change business bytes.
+    """
+
+    if not isinstance(candidate, ValidatedResultCandidates):
+        raise ResultConsistencyError("candidate_invalid")
+    with _CANDIDATE_LOCK:
+        state = _CANDIDATE_STATES.get(id(candidate))
+        if state is None or state.owner() is not candidate:
+            raise ResultConsistencyError("candidate_invalid")
+        if state.checked_out:
+            raise ResultConsistencyError("candidate_busy")
+        state.checked_out = True
+        return state.snapshot
+
+
+def release_verified_candidate_checkout(candidate: object) -> None:
+    """Release a completed/failed publisher transaction without exposing state."""
+
+    if not isinstance(candidate, ValidatedResultCandidates):
+        return
+    with _CANDIDATE_LOCK:
+        state = _CANDIDATE_STATES.get(id(candidate))
+        if state is not None and state.owner() is candidate:
+            state.checked_out = False
 
 
 def take_verified_audio_for_publication(candidate: ValidatedResultCandidates) -> bytes | None:
-    """Consume the exact TTS handoff once inside the publisher transaction."""
+    """Compatibility accessor for a claimed private snapshot only."""
 
-    if not is_issued_result_candidate(candidate):
-        raise ResultConsistencyError("candidate_invalid")
-    token = candidate._token
-    if not candidate.audio.available:
-        return None
-    with _AUDIO_LOCK:
-        state = _AUDIO_STATES.pop(token, None)
-    if state is None or state.owner() is not candidate or state.outcome.handoff is None:
-        raise ResultConsistencyError("audio_handoff_invalid")
+    snapshot = checkout_verified_candidate_for_publication(candidate)
     try:
-        payload = state.outcome.handoff.take_verified_bytes(state.outcome.audio)
-    except Exception:
-        raise ResultConsistencyError("audio_handoff_invalid") from None
-    if not payload or sha256_bytes(payload) != candidate.audio.sha256 or len(payload) > 8_000_000:
-        raise ResultConsistencyError("audio_handoff_invalid")
-    return payload
+        return snapshot.audio_bytes
+    finally:
+        release_verified_candidate_checkout(candidate)
 
 
 def discard_audio_handoff(candidate: ValidatedResultCandidates) -> None:
-    """Release an unneeded successful handoff without exposing its location."""
-
-    if is_issued_result_candidate(candidate):
-        _discard_state(candidate._token)
-
-
-def _strict_source(value: object) -> LoadedDiagnosisSource:
-    if not isinstance(value, LoadedDiagnosisSource):
-        raise ValueError("source type")
-    source = LoadedDiagnosisSource.model_validate_json(
-        canonical_json_bytes(value.model_dump(mode="json")), strict=True
-    )
-    diagnosis = source.diagnosis
-    if (
-        source.outcome.status is not WorkflowStatus.COMPLETED
-        or source.outcome.diagnosis != diagnosis
-        or source.case_id != diagnosis.case_id
-        or source.source_run_id != source.outcome.run_id
-        or source.source_manifest.case_id != source.case_id
-        or source.source_manifest.run_id != source.source_run_id
-        or source.source_manifest.schema_version != diagnosis.schema_version
-        or source.diagnosis_sha256
-        != sha256_bytes(canonical_json_bytes(diagnosis.model_dump(mode="json")))
-    ):
-        raise ValueError("source identity")
-    return source
+    """Compatibility no-op: the gate consumes/rechecks audio before issuance."""
 
 
 def _safe_regular_file(path: Path) -> bool:
@@ -237,7 +252,7 @@ def _strict_identity(*values: ArtifactIdentity) -> ArtifactIdentity:
 
 def _validated_audio(
     value: object, identity: ArtifactIdentity
-) -> tuple[AudioResult, TtsSynthesisOutcome | None]:
+) -> tuple[AudioResult, bytes | None]:
     if not isinstance(value, TtsSynthesisOutcome):
         raise ResultConsistencyError("audio_handoff_invalid")
     audio = value.audio
@@ -246,7 +261,13 @@ def _validated_audio(
     if audio.available:
         if value.handoff is None:
             raise ResultConsistencyError("audio_handoff_invalid")
-        return audio, value
+        try:
+            payload = value.handoff.take_verified_bytes(audio)
+        except Exception:
+            raise ResultConsistencyError("audio_handoff_invalid") from None
+        if not payload or len(payload) > 8_000_000 or sha256_bytes(payload) != audio.sha256:
+            raise ResultConsistencyError("audio_handoff_invalid")
+        return audio, payload
     if value.handoff is not None or audio.failure is None:
         raise ResultConsistencyError("audio_handoff_invalid")
     if audio.failure.failed_stage != "audio":
@@ -266,8 +287,10 @@ def validate_result_candidates(
     """Revalidate one same-identity modality set before any public file exists."""
 
     try:
-        verified_source = _strict_source(source)
+        verified_source, source_proof_sha256 = issued_source_snapshot(source, reverify=True)
         verified_presentation = _validated_presentation(presentation)
+        if _presentation_source_proof(verified_presentation) != source_proof_sha256:
+            raise ResultConsistencyError("artifact_identity_mismatch")
         expected_identity = ArtifactIdentity(
             case_id=verified_source.case_id,
             source_run_id=verified_source.source_run_id,
@@ -295,7 +318,7 @@ def validate_result_candidates(
         assert_export_safe(diagnosis_payload)
         diagnosis_bytes = canonical_json_bytes(diagnosis_payload)
         source_bytes = _source_manifest_bytes(verified_source)
-        audio, handoff_outcome = _validated_audio(audio_result, identity)
+        audio, audio_bytes = _validated_audio(audio_result, identity)
 
         card_bytes: bytes | None
         failure: SafeFailure | None
@@ -344,11 +367,27 @@ def validate_result_candidates(
             audio=audio,
             _token=token,
         )
-        owner = weakref.ref(candidate, _forget_candidate(token))
-        with _AUDIO_LOCK:
-            _CANDIDATE_STATES[token] = owner
-            if handoff_outcome is not None:
-                _AUDIO_STATES[token] = _AudioState(owner=owner, outcome=handoff_outcome)
+        key = id(candidate)
+        owner = weakref.ref(candidate, _forget_candidate(key))
+        snapshot = _CandidateSnapshot(
+            identity=identity,
+            status=status,
+            availability=availability,
+            failure=failure,
+            diagnosis_bytes=diagnosis_bytes,
+            report_bytes=report.markdown.encode("utf-8"),
+            citations_bytes=citations.json_bytes,
+            source_manifest_bytes=source_bytes,
+            recap_bytes=recap.text.encode("utf-8"),
+            card_bytes=card_bytes,
+            audio=audio,
+            audio_bytes=audio_bytes,
+            source_proof_sha256=source_proof_sha256,
+            presentation_projection_sha256=verified_presentation.projection_sha256,
+            citation_graph_sha256=sha256_bytes(citations.json_bytes),
+        )
+        with _CANDIDATE_LOCK:
+            _CANDIDATE_STATES[key] = _CandidateState(owner=owner, snapshot=snapshot)
         return candidate
     except ResultConsistencyError:
         raise

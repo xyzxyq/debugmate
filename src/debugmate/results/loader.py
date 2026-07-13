@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import threading
 import warnings
+import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -62,6 +65,105 @@ class LoadedDiagnosisSource(StrictFrozenModel):
     outcome: DiagnosisRunOutcome
     diagnosis: DiagnosisRecord
     source_manifest: SourceManifestSummary
+
+
+@dataclass(frozen=True, slots=True)
+class _IssuedSourceCapability:
+    """Private proof that one exact source object came from the strict loader.
+
+    The public Pydantic model is intentionally serialisable for diagnostics,
+    but that makes it unsuitable as an in-process authority.  Keep the
+    evidence-root binding and canonical Phase 3 snapshot outside that model so
+    ``model_copy``/``model_construct`` and post-construction mutation cannot
+    inherit source authority.
+    """
+
+    owner_ref: weakref.ReferenceType[LoadedDiagnosisSource]
+    source_bytes: bytes
+    outcome_bytes: bytes
+    evidence_root: Path
+    proof_sha256: str
+
+
+_SOURCE_CAPABILITY_LOCK = threading.RLock()
+_SOURCE_CAPABILITIES: dict[int, _IssuedSourceCapability] = {}
+
+
+def _forget_issued_source(
+    key: int, reference: weakref.ReferenceType[LoadedDiagnosisSource]
+) -> None:
+    with _SOURCE_CAPABILITY_LOCK:
+        current = _SOURCE_CAPABILITIES.get(key)
+        if current is not None and current.owner_ref is reference:
+            _SOURCE_CAPABILITIES.pop(key, None)
+
+
+def _issue_source_capability(
+    source: LoadedDiagnosisSource, *, outcome: DiagnosisRunOutcome, evidence_root: Path
+) -> None:
+    """Register only the exact loader return object with its proof snapshot."""
+
+    key = id(source)
+    source_bytes = canonical_json_bytes(source.model_dump(mode="json"))
+    outcome_bytes = canonical_json_bytes(outcome.model_dump(mode="json"))
+    root = Path(evidence_root)
+    reference = weakref.ref(
+        source, lambda current, identity=key: _forget_issued_source(identity, current)
+    )
+    proof = sha256_bytes(
+        canonical_json_bytes(
+            {
+                "source": sha256_bytes(source_bytes),
+                "outcome": sha256_bytes(outcome_bytes),
+                "evidence_root": str(root),
+            }
+        )
+    )
+    capability = _IssuedSourceCapability(
+        owner_ref=reference,
+        source_bytes=source_bytes,
+        outcome_bytes=outcome_bytes,
+        evidence_root=root,
+        proof_sha256=proof,
+    )
+    with _SOURCE_CAPABILITY_LOCK:
+        _SOURCE_CAPABILITIES[key] = capability
+
+
+def issued_source_snapshot(
+    value: object, *, reverify: bool
+) -> tuple[LoadedDiagnosisSource, str]:
+    """Return the exact loader-issued snapshot, optionally rechecking Phase 3.
+
+    The caller's object must still serialise byte-for-byte to the issued
+    snapshot.  This catches ``object.__setattr__`` as well as copied/rebuilt
+    values, while the optional replay of :func:`load_verified_outcome` proves
+    the Phase 3 bundle remains current immediately before publication.
+    """
+
+    if not isinstance(value, LoadedDiagnosisSource):
+        raise ResultLoadError("source_outcome_invalid", "source")
+    try:
+        current_bytes = canonical_json_bytes(value.model_dump(mode="json"))
+        with _SOURCE_CAPABILITY_LOCK:
+            capability = _SOURCE_CAPABILITIES.get(id(value))
+        if (
+            capability is None
+            or capability.owner_ref() is not value
+            or current_bytes != capability.source_bytes
+        ):
+            raise ValueError("source capability")
+        snapshot = LoadedDiagnosisSource.model_validate_json(capability.source_bytes, strict=True)
+        if reverify:
+            outcome = DiagnosisRunOutcome.model_validate_json(capability.outcome_bytes, strict=True)
+            reloaded = load_verified_outcome(outcome, evidence_root=capability.evidence_root)
+            if canonical_json_bytes(reloaded.model_dump(mode="json")) != capability.source_bytes:
+                raise ValueError("source changed")
+        return snapshot, capability.proof_sha256
+    except ResultLoadError:
+        raise
+    except Exception:
+        raise ResultLoadError("source_bundle_invalid", "source") from None
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -196,7 +298,7 @@ def load_verified_outcome(
             for stage, state in sorted(manifest.node_states.items())
         ),
     )
-    return LoadedDiagnosisSource(
+    result = LoadedDiagnosisSource(
         case_id=strict.case_id,
         source_run_id=strict.run_id,
         diagnosis_sha256=diagnosis_sha256,
@@ -204,6 +306,8 @@ def load_verified_outcome(
         diagnosis=diagnosis,
         source_manifest=summary,
     )
+    _issue_source_capability(result, outcome=strict, evidence_root=root)
+    return result
 
 
 def atomic_replace_directory(source: Path, target: Path) -> None:

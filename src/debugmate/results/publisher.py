@@ -6,18 +6,22 @@ import os
 import re
 import shutil
 import stat
+import threading
+import weakref
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
+from debugmate.results.audio import _acquire_directory_lease, _DirectoryLease, _TargetInvalid
 from debugmate.results.consistency import (
     ResultConsistencyError,
     ValidatedResultCandidates,
-    discard_audio_handoff,
+    _CandidateSnapshot,
+    checkout_verified_candidate_for_publication,
     is_issued_result_candidate,
-    take_verified_audio_for_publication,
+    release_verified_candidate_checkout,
 )
 from debugmate.results.contracts import (
     ArtifactIdentity,
@@ -65,6 +69,128 @@ class PublishedResultBundle:
     archive_name: str
 
 
+@dataclass(slots=True)
+class _RegisteredResultRoot:
+    owner_ref: weakref.ReferenceType[TrustedResultRoot]
+    root: Path
+
+
+_RESULT_ROOT_TOKEN = object()
+_RESULT_ROOT_LOCK = threading.RLock()
+_RESULT_ROOTS: dict[object, _RegisteredResultRoot] = {}
+
+
+class TrustedResultRoot:
+    """Factory-issued, private authority for publication directories.
+
+    A raw ``Path`` is deliberately not a publication capability.  The root is
+    retained in a private weak registry so construction, copying, pickling and
+    ``object.__setattr__`` cannot redirect a result transaction to arbitrary
+    filesystem locations.
+    """
+
+    __slots__ = ("_token", "__weakref__")
+
+    def __init__(self, *_arguments: object, **_kwargs: object) -> None:
+        raise TypeError("TrustedResultRoot requires an approved factory")
+
+    @classmethod
+    def _issue(cls, root: Path) -> TrustedResultRoot:
+        value = object.__new__(cls)
+        token = object()
+        object.__setattr__(value, "_token", token)
+
+        def forget(reference: weakref.ReferenceType[TrustedResultRoot]) -> None:
+            with _RESULT_ROOT_LOCK:
+                current = _RESULT_ROOTS.get(token)
+                if current is not None and current.owner_ref is reference:
+                    _RESULT_ROOTS.pop(token, None)
+
+        reference = weakref.ref(value, forget)
+        with _RESULT_ROOT_LOCK:
+            _RESULT_ROOTS[token] = _RegisteredResultRoot(owner_ref=reference, root=root)
+        return value
+
+    @classmethod
+    def application_owned(cls) -> TrustedResultRoot:
+        project_root = Path(__file__).resolve().parents[3]
+        return cls._issue(project_root / ".debugmate-private" / "results")
+
+    @classmethod
+    def for_testing(cls, root: Path) -> TrustedResultRoot:
+        value = Path(root)
+        if not value.is_absolute():
+            raise ValueError("results_root_invalid")
+        return cls._issue(value)
+
+    def __copy__(self) -> TrustedResultRoot:
+        raise TypeError("TrustedResultRoot is not copyable")
+
+    def __deepcopy__(self, _memo: object) -> TrustedResultRoot:
+        raise TypeError("TrustedResultRoot is not copyable")
+
+    def __reduce__(self) -> object:
+        raise TypeError("TrustedResultRoot is not serialisable")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("TrustedResultRoot is not serialisable")
+
+
+def _trusted_root_path(value: object) -> Path:
+    if not isinstance(value, TrustedResultRoot):
+        raise ResultPublishError("results_root_invalid")
+    try:
+        token = object.__getattribute__(value, "_token")
+        with _RESULT_ROOT_LOCK:
+            state = _RESULT_ROOTS.get(token)
+        if state is None or state.owner_ref() is not value:
+            raise ValueError("root capability")
+        return state.root
+    except Exception:
+        raise ResultPublishError("results_root_invalid") from None
+
+
+@dataclass(slots=True)
+class _ResultTransaction:
+    root: Path
+    case_root: Path
+    final: Path
+    temporary: Path | None
+    parent_lease: _DirectoryLease
+    root_lease: _DirectoryLease
+    case_lease: _DirectoryLease
+    temporary_lease: _DirectoryLease | None = None
+    final_lease: _DirectoryLease | None = None
+
+    def promote(self) -> None:
+        if self.temporary is None:
+            raise ResultPublishError("result_path_invalid")
+        if self.temporary_lease is not None:
+            self.temporary_lease.close()
+            self.temporary_lease = None
+        if not _safe_directory(self.case_root) or self.final.exists():
+            raise ResultPublishError("publication_in_progress")
+        try:
+            os.replace(self.temporary, self.final)
+            self.temporary = None
+            self.final_lease = _acquire_directory_lease(self.final)
+            if not _safe_directory(self.final):
+                raise OSError
+        except (OSError, ValueError):
+            raise ResultPublishError("result_path_invalid") from None
+
+    def close(self) -> None:
+        if self.final_lease is not None:
+            self.final_lease.close()
+            self.final_lease = None
+        if self.temporary_lease is not None:
+            self.temporary_lease.close()
+            self.temporary_lease = None
+        self.case_lease.close()
+        self.root_lease.close()
+        self.parent_lease.close()
+
+
 def _is_link_or_reparse(path: Path) -> bool:
     if path.is_symlink():
         return True
@@ -110,10 +236,102 @@ def _prepare_results_root(root: Path) -> Path:
         raise ResultPublishError("results_root_invalid")
     if root.exists() and (not root.is_dir() or _is_link_or_reparse(root)):
         raise ResultPublishError("results_root_invalid")
-    root.mkdir(exist_ok=True)
+    try:
+        root.mkdir(exist_ok=True)
+    except OSError:
+        raise ResultPublishError("results_root_invalid") from None
     if not _safe_directory(root):
         raise ResultPublishError("results_root_invalid")
     return root
+
+
+def _begin_transaction(root_capability: object, case_id: str, result_id: str) -> _ResultTransaction:
+    """Create an exclusive, leased case/temp boundary before any byte writes.
+
+    Each directory is rechecked after creation and held with no-delete sharing
+    on Windows.  If an attacker races a new directory into a junction, the
+    lease/reparse validation fails before any member path is opened.
+    """
+
+    root = _trusted_root_path(root_capability)
+    parent_lease: _DirectoryLease | None = None
+    root_lease: _DirectoryLease | None = None
+    case_lease: _DirectoryLease | None = None
+    temporary_lease: _DirectoryLease | None = None
+    temporary: Path | None = None
+    try:
+        if _CASE_ID.fullmatch(case_id) is None or _RESULT_ID.fullmatch(result_id) is None:
+            raise ResultPublishError("result_identity_invalid")
+        parent = root.parent
+        if not _safe_directory(parent):
+            raise ResultPublishError("results_root_invalid")
+        parent_lease = _acquire_directory_lease(parent)
+        root = _prepare_results_root(root)
+        root_lease = _acquire_directory_lease(root)
+        if not _safe_directory(root):
+            raise ResultPublishError("results_root_invalid")
+        case_root = root / case_id
+        if case_root.exists() and (not case_root.is_dir() or _is_link_or_reparse(case_root)):
+            raise ResultPublishError("result_path_invalid")
+        if not case_root.exists():
+            os.mkdir(case_root)
+        case_lease = _acquire_directory_lease(case_root)
+        if not _safe_directory(case_root):
+            raise ResultPublishError("result_path_invalid")
+        final = case_root / result_id
+        if final.exists():
+            if not _safe_directory(final):
+                raise ResultPublishError("result_path_invalid")
+            return _ResultTransaction(
+                root=root,
+                case_root=case_root,
+                final=final,
+                temporary=None,
+                parent_lease=parent_lease,
+                root_lease=root_lease,
+                case_lease=case_lease,
+            )
+        temporary = case_root / f".tmp-{result_id}"
+        if temporary.exists():
+            raise ResultPublishError("publication_in_progress")
+        os.mkdir(temporary)
+        temporary_lease = _acquire_directory_lease(temporary)
+        if not _safe_directory(temporary):
+            raise ResultPublishError("result_path_invalid")
+        return _ResultTransaction(
+            root=root,
+            case_root=case_root,
+            final=final,
+            temporary=temporary,
+            parent_lease=parent_lease,
+            root_lease=root_lease,
+            case_lease=case_lease,
+            temporary_lease=temporary_lease,
+        )
+    except ResultPublishError:
+        if temporary_lease is not None:
+            temporary_lease.close()
+        if case_lease is not None:
+            case_lease.close()
+        if root_lease is not None:
+            root_lease.close()
+        if parent_lease is not None:
+            parent_lease.close()
+        if temporary is not None:
+            _remove_temporary_tree(temporary)
+        raise
+    except (OSError, ValueError, _TargetInvalid):
+        if temporary_lease is not None:
+            temporary_lease.close()
+        if case_lease is not None:
+            case_lease.close()
+        if root_lease is not None:
+            root_lease.close()
+        if parent_lease is not None:
+            parent_lease.close()
+        if temporary is not None:
+            _remove_temporary_tree(temporary)
+        raise ResultPublishError("result_path_invalid") from None
 
 
 def _write_new(path: Path, payload: bytes) -> None:
@@ -137,7 +355,18 @@ def _write_new(path: Path, payload: bytes) -> None:
 def _remove_temporary_tree(path: Path) -> None:
     """Remove only our exclusive, non-reparse transaction directory on Windows too."""
 
-    if not path.exists() or path.is_symlink() or not _safe_directory(path):
+    if not os.path.lexists(path):
+        return
+    if _is_link_or_reparse(path):
+        # Delete only the link/junction itself; never recurse into a hostile
+        # target.  This is deliberately best-effort because an attacker may
+        # keep its own link open, but it never leaves our code traversing it.
+        with suppress(OSError):
+            os.rmdir(path)
+        with suppress(OSError):
+            os.unlink(path)
+        return
+    if not _safe_directory(path):
         return
 
     def make_writable(action, target, _exception) -> None:
@@ -152,7 +381,7 @@ def _remove_temporary_tree(path: Path) -> None:
 
 
 def _candidate_payloads(
-    candidate: ValidatedResultCandidates, audio: bytes | None
+    candidate: _CandidateSnapshot, audio: bytes | None
 ) -> dict[str, bytes]:
     payloads = {
         "diagnosis": candidate.diagnosis_bytes,
@@ -177,7 +406,7 @@ def _candidate_payloads(
 
 
 def _result_id(
-    candidate: ValidatedResultCandidates,
+    candidate: _CandidateSnapshot,
     *,
     mode: ResultMode,
     fixture_id: str | None,
@@ -219,7 +448,7 @@ def _record(kind: str, payload: bytes, identity: ArtifactIdentity) -> ArtifactRe
 
 
 def _manifest(
-    candidate: ValidatedResultCandidates,
+    candidate: _CandidateSnapshot,
     payloads: dict[str, bytes],
     *,
     result_id: str,
@@ -305,16 +534,19 @@ def _publication_bytes(manifest: ResultManifest, archive_name: str, archive_byte
 class ResultBundlePublisher:
     """Create exactly one identity-derived final directory without overwriting it."""
 
-    def __init__(self, results_root: Path, case_id: str, result_identity: ArtifactIdentity) -> None:
+    def __init__(
+        self, results_root: TrustedResultRoot, case_id: str, result_identity: ArtifactIdentity
+    ) -> None:
         if _CASE_ID.fullmatch(case_id) is None or result_identity.case_id != case_id:
             raise ResultPublishError("result_identity_invalid")
-        self.results_root = _prepare_results_root(results_root)
+        _trusted_root_path(results_root)
+        self.results_root = results_root
         self.case_id = case_id
         self.result_identity = result_identity
 
     @classmethod
     def begin(
-        cls, results_root: Path, case_id: str, result_identity: ArtifactIdentity
+        cls, results_root: TrustedResultRoot, case_id: str, result_identity: ArtifactIdentity
     ) -> ResultBundlePublisher:
         return cls(results_root, case_id, result_identity)
 
@@ -326,32 +558,29 @@ class ResultBundlePublisher:
         fixture_id: str | None,
         fixture_name: str | None,
     ) -> PublishedResultBundle:
-        if not is_issued_result_candidate(candidate) or candidate.identity != self.result_identity:
+        if not is_issued_result_candidate(candidate):
             raise ResultPublishError("candidate_invalid")
-        result_id = _result_id(
-            candidate, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
-        )
-        case_root = self.results_root / self.case_id
-        if case_root.exists() and (not case_root.is_dir() or _is_link_or_reparse(case_root)):
-            raise ResultPublishError("result_path_invalid")
-        case_root.mkdir(exist_ok=True)
-        if not _safe_directory(case_root):
-            raise ResultPublishError("result_path_invalid")
-        final = case_root / result_id
-        temporary = case_root / f".tmp-{result_id}"
-        if final.exists():
-            return _reuse_existing(final, candidate, result_id, mode, fixture_id, fixture_name)
         try:
-            temporary.mkdir()
-        except FileExistsError:
-            raise ResultPublishError("publication_in_progress") from None
-        except OSError:
-            raise ResultPublishError("result_path_invalid") from None
+            snapshot = checkout_verified_candidate_for_publication(candidate)
+        except ResultConsistencyError as error:
+            raise ResultPublishError(error.code) from None
+        transaction: _ResultTransaction | None = None
         try:
-            audio = take_verified_audio_for_publication(candidate)
-            payloads = _candidate_payloads(candidate, audio)
+            if snapshot.identity != self.result_identity:
+                raise ResultPublishError("candidate_invalid")
+            result_id = _result_id(
+                snapshot, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+            )
+            transaction = _begin_transaction(self.results_root, self.case_id, result_id)
+            if transaction.temporary is None:
+                return _reuse_existing(
+                    transaction.final, snapshot, result_id, mode, fixture_id, fixture_name
+                )
+            temporary = transaction.temporary
+            audio = snapshot.audio_bytes
+            payloads = _candidate_payloads(snapshot, audio)
             manifest = _manifest(
-                candidate,
+                snapshot,
                 payloads,
                 result_id=result_id,
                 mode=mode,
@@ -382,11 +611,10 @@ class ResultBundlePublisher:
             from debugmate.results.verifier import verify_result_bundle
 
             verify_result_bundle(temporary, allow_temporary=True)
-            try:
-                os.replace(temporary, final)
-            except FileExistsError:
-                return _reuse_existing(final, candidate, result_id, mode, fixture_id, fixture_name)
-            return PublishedResultBundle(path=final, manifest=manifest, archive_name=archive_name)
+            transaction.promote()
+            return PublishedResultBundle(
+                path=transaction.final, manifest=manifest, archive_name=archive_name
+            )
         except ResultPublishError:
             raise
         except ResultConsistencyError:
@@ -394,13 +622,17 @@ class ResultBundlePublisher:
         except Exception:
             raise ResultPublishError() from None
         finally:
-            _remove_temporary_tree(temporary)
-            discard_audio_handoff(candidate)
+            if transaction is not None:
+                temporary = transaction.temporary
+                transaction.close()
+                if temporary is not None:
+                    _remove_temporary_tree(temporary)
+            release_verified_candidate_checkout(candidate)
 
 
 def _reuse_existing(
     final: Path,
-    candidate: ValidatedResultCandidates,
+    candidate: _CandidateSnapshot,
     result_id: str,
     mode: ResultMode,
     fixture_id: str | None,
@@ -441,15 +673,13 @@ def _reuse_existing(
         archive_name = (
             FULL_ARCHIVE_NAME if manifest.status is ResultStatus.COMPLETED else PARTIAL_ARCHIVE_NAME
         )
-        discard_audio_handoff(candidate)
         return PublishedResultBundle(path=final, manifest=manifest, archive_name=archive_name)
     except Exception:
-        discard_audio_handoff(candidate)
         raise ResultPublishError("result_already_exists") from None
 
 
 def publish_result_bundle(
-    results_root: Path,
+    results_root: TrustedResultRoot,
     candidate: ValidatedResultCandidates,
     *,
     mode: ResultMode = ResultMode.LIVE,
@@ -458,7 +688,7 @@ def publish_result_bundle(
 ) -> PublishedResultBundle:
     """Publish only a consistency-gated candidate into ``results/case/result``."""
 
-    if not is_issued_result_candidate(candidate):
+    if not isinstance(results_root, TrustedResultRoot) or not is_issued_result_candidate(candidate):
         raise ResultPublishError("candidate_invalid")
     publisher = ResultBundlePublisher.begin(
         results_root, candidate.identity.case_id, candidate.identity

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 
@@ -110,3 +112,54 @@ def test_gate_allows_only_explicit_audio_partial(candidates):
     assert validated.status.value == "partial"
     assert validated.failure.failed_stage == "audio"
     assert validated.availability.audio is False
+
+
+def test_gate_rejects_source_revision_model_copy_before_any_publication(candidates):
+    """A copied source must not inherit the loader's Phase 3 authority."""
+
+    from debugmate.results import consistency as consistency_module
+
+    source, presentation, report, citations, card, recap, audio = candidates
+    forged_summary = source.source_manifest.model_copy(
+        update={"facts_revision": source.source_manifest.facts_revision + 1}
+    )
+    forged_source = source.model_copy(update={"source_manifest": forged_summary})
+
+    with pytest.raises(
+        consistency_module.ResultConsistencyError, match="candidate_validation_failed"
+    ):
+        consistency_module.validate_result_candidates(
+            forged_source, presentation, report, citations, card, recap, audio
+        )
+
+
+def test_gate_issued_candidate_has_a_private_immutable_business_snapshot(candidates):
+    """Frozen dataclasses are not a trust boundary against object.__setattr__."""
+
+    from debugmate.results import consistency as consistency_module
+
+    validated = consistency_module.validate_result_candidates(*candidates)
+    original = validated.report_bytes
+    object.__setattr__(validated, "report_bytes", b"forged report bytes")
+
+    snapshot = consistency_module.checkout_verified_candidate_for_publication(validated)
+    try:
+        assert snapshot.report_bytes == original
+        assert snapshot.report_bytes != validated.report_bytes
+    finally:
+        consistency_module.release_verified_candidate_checkout(validated)
+
+
+def test_gate_rejects_copied_or_concurrently_checked_out_candidate(candidates):
+    from debugmate.results import consistency as consistency_module
+
+    validated = consistency_module.validate_result_candidates(*candidates)
+    with pytest.raises(consistency_module.ResultConsistencyError, match="candidate_invalid"):
+        consistency_module.checkout_verified_candidate_for_publication(replace(validated))
+
+    consistency_module.checkout_verified_candidate_for_publication(validated)
+    try:
+        with pytest.raises(consistency_module.ResultConsistencyError, match="candidate_busy"):
+            consistency_module.checkout_verified_candidate_for_publication(validated)
+    finally:
+        consistency_module.release_verified_candidate_checkout(validated)
