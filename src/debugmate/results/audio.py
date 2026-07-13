@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import stat
 import tempfile
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 
 from debugmate.privacy.output_scan import assert_export_safe
@@ -49,8 +51,13 @@ class TtsFallbackChain:
         )
 
     def synthesize(
-        self, recap: SafeRecapText, request: TtsRequestIdentity, target_root: Path
+        self,
+        recap: SafeRecapText,
+        request: TtsRequestIdentity,
+        candidate_root: TrustedCandidateRoot,
     ) -> AudioResult:
+        if not isinstance(candidate_root, TrustedCandidateRoot):
+            raise TypeError("candidate_root must be a TrustedCandidateRoot")
         try:
             recap, request = validate_tts_request(recap, request)
         except Exception:
@@ -65,7 +72,12 @@ class TtsFallbackChain:
         ):
             raise ValueError("tts_identity_mismatch") from None
         assert_export_safe(recap.text)
-        target_root = _prepare_target_root(target_root)
+        with candidate_root.allocate_leased(request) as target_root:
+            return self._synthesize_in_private_root(recap, request, target_root)
+
+    def _synthesize_in_private_root(
+        self, recap: SafeRecapText, request: TtsRequestIdentity, target_root: Path
+    ) -> AudioResult:
         final_path = target_root / "recap.mp3"
         if final_path.exists() or final_path.is_symlink():
             raise ValueError("tts_target_invalid") from None
@@ -191,6 +203,142 @@ class TtsFallbackChain:
         )
 
 
+@dataclass(frozen=True)
+class TrustedCandidateRoot:
+    """An explicit capability for private, pre-publication TTS candidates.
+
+    ``TtsFallbackChain`` deliberately accepts this object rather than a caller
+    path.  The Phase 5 publisher will copy a freshly verified candidate into its
+    separate immutable result transaction; speech synthesis itself never writes
+    directly to a publish root selected by a UI or API caller.
+
+    ``for_testing`` is the only injectable constructor.  It is intentionally
+    explicit so tests can use isolated temporary storage without restoring the
+    unsafe raw-``Path`` synthesis API.
+    """
+
+    _root: Path
+
+    @classmethod
+    def for_testing(cls, private_root: Path) -> TrustedCandidateRoot:
+        root = Path(private_root)
+        if not root.is_absolute():
+            raise ValueError("tts_target_invalid") from None
+        return cls(root)
+
+    def allocate_leased(self, request: TtsRequestIdentity) -> _CandidateRootLease:
+        """Allocate and lock one identity-derived private candidate directory."""
+
+        root = self._root
+        root_lease: _DirectoryLease | None = None
+        run_lease: _DirectoryLease | None = None
+        try:
+            _prepare_private_candidate_root(root)
+            root_lease = _acquire_directory_lease(root)
+            _require_safe_directory(root)
+            # The recap hash is part of the request identity and gives a stable
+            # hand-off name without accepting a caller-provided directory name.
+            run = root / f"tts-{request.recap_sha256[:32]}"
+            if run.exists() or run.is_symlink():
+                raise _TargetInvalid
+            run.mkdir()
+            _require_safe_directory(root)
+            _require_safe_directory(run)
+            run_lease = _acquire_directory_lease(run)
+            _require_safe_directory(root)
+            _require_safe_directory(run)
+            return _CandidateRootLease(path=run, root_lease=root_lease, run_lease=run_lease)
+        except (OSError, _TargetInvalid):
+            if run_lease is not None:
+                run_lease.close()
+            if root_lease is not None:
+                root_lease.close()
+            raise ValueError("tts_target_invalid") from None
+
+
+@dataclass
+class _DirectoryLease:
+    """A Windows directory handle that denies delete/rename while active."""
+
+    handle: int | None
+
+    def close(self) -> None:
+        if self.handle is None:
+            return
+        handle, self.handle = self.handle, None
+        if os.name == "nt":
+            try:
+                import ctypes
+
+                ctypes.windll.kernel32.CloseHandle(handle)
+            except (AttributeError, OSError):
+                pass
+
+
+@dataclass
+class _CandidateRootLease:
+    path: Path
+    root_lease: _DirectoryLease
+    run_lease: _DirectoryLease
+
+    def __enter__(self) -> Path:
+        return self.path
+
+    def __exit__(self, *_arguments: object) -> None:
+        self.run_lease.close()
+        self.root_lease.close()
+
+
+def _acquire_directory_lease(path: Path) -> _DirectoryLease:
+    """Hold a directory open without DELETE sharing for the candidate operation."""
+
+    _require_safe_directory(path)
+    if os.name != "nt":
+        return _DirectoryLease(handle=None)
+    try:
+        import ctypes
+
+        generic_read = 0x80000000
+        file_share_read_write = 0x00000001 | 0x00000002
+        open_existing = 3
+        file_flag_backup_semantics = 0x02000000
+        file_flag_open_reparse_point = 0x00200000
+        create_file = ctypes.windll.kernel32.CreateFileW
+        create_file.argtypes = (
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        )
+        create_file.restype = ctypes.c_void_p
+        handle = create_file(
+            str(path),
+            generic_read,
+            file_share_read_write,
+            None,
+            open_existing,
+            file_flag_backup_semantics | file_flag_open_reparse_point,
+            None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle in (None, invalid_handle):
+            raise OSError
+        lease = _DirectoryLease(handle=int(handle))
+        try:
+            # Recheck after acquiring the non-delete handle.  A successful
+            # reparse-free check now remains stable for the lifetime of lease.
+            _require_safe_directory(path)
+            return lease
+        except Exception:
+            lease.close()
+            raise
+    except (AttributeError, OSError, ValueError):
+        raise _TargetInvalid from None
+
+
 class _CandidateInvalid(Exception):
     pass
 
@@ -228,25 +376,22 @@ def _require_safe_directory(path: Path) -> None:
         current = parent
 
 
-def _prepare_target_root(root: Path) -> Path:
-    candidate = Path(root)
+def _prepare_private_candidate_root(candidate: Path) -> None:
+    """Prepare the capability-owned root; never create a caller publish path."""
+
     if not candidate.is_absolute():
-        raise ValueError("tts_target_invalid") from None
+        raise _TargetInvalid
     probe = candidate
     while not probe.exists() and not probe.is_symlink():
         parent = probe.parent
         if parent == probe:
-            raise ValueError("tts_target_invalid") from None
+            raise _TargetInvalid
         probe = parent
-    try:
-        _require_safe_directory(probe)
-        candidate.mkdir(parents=True, exist_ok=True)
-        # Recheck the whole resulting path immediately after mkdir to surface a
-        # junction/reparse swap before any adapter receives a writable filename.
-        _require_safe_directory(candidate)
-    except (OSError, _TargetInvalid):
-        raise ValueError("tts_target_invalid") from None
-    return candidate
+    _require_safe_directory(probe)
+    candidate.mkdir(parents=True, exist_ok=True)
+    # Recheck the whole resulting path immediately after mkdir to surface a
+    # junction/reparse swap before any adapter receives a writable filename.
+    _require_safe_directory(candidate)
 
 
 def _require_safe_new_path(path: Path, root: Path) -> None:
