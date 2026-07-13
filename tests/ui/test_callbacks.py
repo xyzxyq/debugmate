@@ -116,12 +116,15 @@ def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_
     assert service.replay_calls == ["module-not-found"]
     assert payload.state == service.state
     assert payload.report_markdown == "# DebugMate\n\nverified report"
-    assert payload.card_path is not None
-    assert Path(payload.card_path).read_bytes() == b"verified-card"
-    assert payload.audio_path is not None
-    assert Path(payload.audio_path).read_bytes() == b"verified-audio"
-    assert payload.download_path is not None
-    assert Path(payload.download_path).read_bytes() == b"verified-zip"
+    assert payload.card_url is not None
+    assert callbacks.resolve_content(payload.card_url).payload == b"verified-card"
+    assert payload.audio_url is not None
+    assert callbacks.resolve_content(payload.audio_url).payload == b"verified-audio"
+    assert payload.download_url is not None
+    archive = callbacks.resolve_content(payload.download_url)
+    assert archive.payload == b"verified-zip"
+    assert archive.attachment is True
+    assert "ui-cache" not in repr(payload)
     assert payload.field_values[0] == "ModuleNotFoundError"
     assert "回放" in payload.view.result_metadata
 
