@@ -36,6 +36,44 @@ _FAILURE_DETAIL_LABELS = (
     "建议操作",
 )
 _SAFE_FAILURE_COPY = "此阶段未完成。请按“可重试范围”操作；详细开发日志不会显示在页面中。"
+_SAFE_FAILURE_COPY_BY_CODE = {
+    "replay_bundle_invalid": "回放案例校验失败（replay_bundle_invalid）。请选择其他固定案例。",
+    "source_bundle_invalid": "来源证据未通过校验（source_bundle_invalid），未生成结果。",
+}
+_SAFE_STAGE_LABELS = {
+    **_STAGE_LABELS,
+    "audio": "生成语音",
+    "card": "绘制诊断卡",
+    "correction": "字段修正",
+    "download": "下载验证",
+    "identity": "身份校验",
+    "input": "已审批输入",
+    "replay": "固定回放案例",
+    "result": "结果生成",
+    "source": "验证来源",
+    "store": "结果存储",
+    "tts": "语音复盘",
+    "workflow": "诊断工作流",
+}
+_ARTIFACT_LABELS = {
+    "report": "文字报告",
+    "card": "诊断卡",
+    "recap_text": "复盘稿",
+    "audio": "语音复盘",
+}
+_RETRY_COPY = {
+    "audio": ("语音复盘", "仅重试语音复盘生成。"),
+    "card": ("诊断卡", "仅重试诊断卡生成。"),
+    "correction": ("字段修正", "检查已确认的字段修正后重试。"),
+    "download": ("下载验证", "重新验证结果包后重试下载。"),
+    "input": ("已审批输入", "重新提交已审批的脱敏输入。"),
+    "replay": ("固定回放案例", "请选择其他固定案例。"),
+    "result": ("结果生成", "重新生成结果后重试。"),
+    "source": ("来源证据", "重新验证来源证据后重试。"),
+    "store": ("结果存储", "重新验证已保存结果后重试。"),
+    "tts": ("语音复盘", "仅重试语音复盘生成。"),
+    "workflow": ("诊断工作流", "确认诊断工作流配置后重试。"),
+}
 _EMPTY_BODY = (
     "提交已脱敏输入，或从固定案例中选择一个回放案例。"
     "结果会在此显示文字报告、诊断卡和语音复盘。"
@@ -62,6 +100,7 @@ class ComponentViewModel:
     audio_metadata: str | None
     fallback_badge: str | None
     failure_detail_labels: tuple[str, ...]
+    failure_details: tuple[tuple[str, str], ...]
     failure_code: str | None
     safe_failure_copy: str | None
     stage_label: str | None
@@ -127,6 +166,37 @@ def _missing_artifact_copy(state: ResultViewState) -> str | None:
     return None
 
 
+def _safe_stage_list(stages: tuple[str, ...]) -> str:
+    labels = tuple(_SAFE_STAGE_LABELS[stage] for stage in stages if stage in _SAFE_STAGE_LABELS)
+    return "、".join(labels) if labels else "无"
+
+
+def _safe_artifact_list(available: tuple[str, ...]) -> str:
+    labels = tuple(_ARTIFACT_LABELS[name] for name in available if name in _ARTIFACT_LABELS)
+    return "、".join(labels) if labels else "无"
+
+
+def _failure_details(
+    state: ResultViewState, available: tuple[str, ...]
+) -> tuple[tuple[str, str], ...]:
+    assert state.failure is not None
+    failure = state.failure
+    retry_label, recommendation = _retry_copy(failure.retry_scope)
+    return (
+        ("失败节点", _SAFE_STAGE_LABELS.get(failure.failed_stage, "安全处理")),
+        ("安全错误码", failure.code),
+        ("已完成阶段", _safe_stage_list(state.completed_stages)),
+        ("继承阶段", _safe_stage_list(state.inherited_stages)),
+        ("仍可使用的结果", _safe_artifact_list(available)),
+        ("可重试范围", retry_label),
+        ("建议操作", recommendation),
+    )
+
+
+def _retry_copy(scope: str) -> tuple[str, str]:
+    return _RETRY_COPY.get(scope, ("安全重试", "请按安全重试范围操作。"))
+
+
 def render_view_state(state: ResultViewState) -> ComponentViewModel:
     """Map one strict state without I/O, service calls, paths, or exceptions."""
 
@@ -160,6 +230,7 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
             tabs_enabled=False,
             download_label=None,
             failure_detail_labels=(),
+            failure_details=(),
             failure_code=None,
             safe_failure_copy=None,
             stage_label=None,
@@ -182,6 +253,7 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
             tabs_enabled=False,
             download_label=None,
             failure_detail_labels=(),
+            failure_details=(),
             failure_code=None,
             safe_failure_copy=None,
             stage_label=stage_label,
@@ -202,6 +274,7 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
             tabs_enabled=True,
             download_label="下载完整证据包",
             failure_detail_labels=(),
+            failure_details=(),
             failure_code=None,
             safe_failure_copy=None,
             stage_label=None,
@@ -217,14 +290,17 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
             **common,
             status_badge="⚠ 部分完成",
             accessible_status="状态：部分完成",
-            primary_action=f"重试：{state.failure.retry_scope}",
-            retry_label=f"重试：{state.failure.retry_scope}",
+            primary_action=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
+            retry_label=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
             actions_enabled=True,
             tabs_enabled=True,
             download_label="下载部分结果包",
             failure_detail_labels=_FAILURE_DETAIL_LABELS,
+            failure_details=_failure_details(state, available),
             failure_code=state.failure.code,
-            safe_failure_copy=_SAFE_FAILURE_COPY,
+            safe_failure_copy=_SAFE_FAILURE_COPY_BY_CODE.get(
+                state.failure.code, _SAFE_FAILURE_COPY
+            ),
             stage_label=None,
             running_copy=None,
             empty_heading=None,
@@ -238,14 +314,17 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
         **common,
         status_badge="✕ 失败",
         accessible_status="状态：失败",
-        primary_action=f"重试：{state.failure.retry_scope}",
-        retry_label=f"重试：{state.failure.retry_scope}",
+        primary_action=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
+        retry_label=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
         actions_enabled=True,
         tabs_enabled=False,
         download_label=None,
         failure_detail_labels=_FAILURE_DETAIL_LABELS,
+        failure_details=_failure_details(state, available),
         failure_code=state.failure.code,
-        safe_failure_copy=_SAFE_FAILURE_COPY,
+        safe_failure_copy=_SAFE_FAILURE_COPY_BY_CODE.get(
+            state.failure.code, _SAFE_FAILURE_COPY
+        ),
         stage_label=None,
         running_copy=None,
         empty_heading=None,

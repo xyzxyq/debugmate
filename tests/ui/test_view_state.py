@@ -170,3 +170,44 @@ def test_fallback_is_an_audio_fact_and_not_an_outcome_substitute() -> None:
         view.audio_metadata
         == "语音后端：edge_tts；时长：40000 ms；是否降级：是；降级原因：tts_backend_failed"
     )
+
+
+def test_failure_details_have_only_safe_derived_values_and_exact_invalid_copy() -> None:
+    source = render_view_state(
+        _state(
+            ResultStatus.FAILED,
+            completed_stages=("source",),
+            inherited_stages=("presentation",),
+        )
+    )
+
+    assert source.safe_failure_copy == "来源证据未通过校验（source_bundle_invalid），未生成结果。"
+    assert source.failure_details == (
+        ("失败节点", "验证来源"),
+        ("安全错误码", "source_bundle_invalid"),
+        ("已完成阶段", "验证来源"),
+        ("继承阶段", "整理诊断"),
+        ("仍可使用的结果", "无"),
+        ("可重试范围", "来源证据"),
+        ("建议操作", "重新验证来源证据后重试。"),
+    )
+
+    replay = render_view_state(
+        _state(
+            ResultStatus.FAILED,
+            mode=ResultMode.REPLAY,
+            fixture_id="module-not-found",
+            fixture_name="ModuleNotFoundError：缺少虚构依赖包",
+            failure=SafeFailure(
+                code="replay_bundle_invalid", failed_stage="replay", retry_scope="replay"
+            ),
+        )
+    )
+    assert replay.safe_failure_copy == (
+        "回放案例校验失败（replay_bundle_invalid）。请选择其他固定案例。"
+    )
+    assert replay.failure_details[-2:] == (
+        ("可重试范围", "固定回放案例"),
+        ("建议操作", "请选择其他固定案例。"),
+    )
+    assert "C:" not in repr(source.failure_details + replay.failure_details)

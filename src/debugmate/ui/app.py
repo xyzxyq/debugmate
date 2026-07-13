@@ -249,6 +249,7 @@ class CallbackPayload:
     fact_rows: tuple[tuple[str, str, str, str, str], ...] = ()
     citation_rows: tuple[tuple[str, str, str, str], ...] = ()
     recap_text: str = ""
+    failure_details: tuple[tuple[str, str], ...] = ()
 
 
 class UiCallbacks:
@@ -384,6 +385,7 @@ class UiCallbacks:
                 audio_url=None,
                 download_url=None,
                 field_values=_EMPTY_FIELD_VALUES,
+                failure_details=render_view_state(state).failure_details,
             )
         try:
             report = self._member(state, "report").read_bytes().decode("utf-8")
@@ -409,6 +411,7 @@ class UiCallbacks:
                 fact_rows=details[3],
                 citation_rows=details[4],
                 recap_text=details[5],
+                failure_details=render_view_state(state).failure_details,
             )
         except (ResultServiceError, UnicodeError, OSError, ValueError):
             failed = self._failure(state, "download_invalid")
@@ -420,6 +423,7 @@ class UiCallbacks:
                 audio_url=None,
                 download_url=None,
                 field_values=_EMPTY_FIELD_VALUES,
+                failure_details=render_view_state(failed).failure_details,
             )
 
     def load_replay(self, fixture_id: object, *, request: object | None = None) -> CallbackPayload:
@@ -604,11 +608,11 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
 
     view = payload.view
     failure = ""
-    if view.failure_detail_labels:
+    if payload.failure_details:
         failure = "\n\n".join(
             (
                 "#### 运行详情",
-                *view.failure_detail_labels,
+                *(f"**{label}：** {value}" for label, value in payload.failure_details),
                 view.safe_failure_copy or "",
             )
         )

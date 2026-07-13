@@ -19,6 +19,7 @@ from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui.app import (
     UiCallbacks,
     UiContentUrl,
+    _component_updates,
     _verified_audio,
     _verified_download_button,
     _verified_image,
@@ -232,6 +233,33 @@ def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(
     assert payload.audio_url is None
     assert payload.download_url is None
     assert "C:" not in repr(payload)
+
+
+def test_failure_component_update_renders_all_safe_detail_values_not_labels_only() -> None:
+    from debugmate.results.contracts import SafeFailure
+
+    service = _Service()
+    callbacks = UiCallbacks(service)
+    failed = ResultViewState(
+        mode=ResultMode.LIVE,
+        status=ResultStatus.FAILED,
+        availability=ArtifactAvailability(),
+        failure=SafeFailure(
+            code="source_bundle_invalid", failed_stage="source", retry_scope="source"
+        ),
+        completed_stages=("source",),
+        inherited_stages=("presentation",),
+    )
+
+    updates = _component_updates(callbacks._render(failed))
+
+    assert "**失败节点：** 验证来源" in updates[2]
+    assert "**已完成阶段：** 验证来源" in updates[2]
+    assert "**继承阶段：** 整理诊断" in updates[2]
+    assert "**仍可使用的结果：** 无" in updates[2]
+    assert "**可重试范围：** 来源证据" in updates[2]
+    assert "**建议操作：** 重新验证来源证据后重试。" in updates[2]
+    assert "来源证据未通过校验（source_bundle_invalid），未生成结果。" in updates[2]
 
 
 def test_correction_callback_accepts_only_strict_run_id_and_draft_and_never_a_path(
