@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from debugmate.hashing import sha256_bytes
+from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import probe_mp3
 from debugmate.results.recap import SafeRecapText
@@ -52,13 +54,16 @@ def _identity(recap: SafeRecapText) -> TtsRequestIdentity:
     )
 
 
-def _assert_live_candidate(candidate, *, backend: str, request: TtsRequestIdentity) -> None:
-    probe = probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000)
+def _assert_live_candidate(
+    candidate, *, backend: str, request: TtsRequestIdentity, tmp_path: Path
+) -> None:
+    media = tmp_path / f"{backend}.mp3"
+    media.write_bytes(candidate.audio_bytes)
+    probe = probe_mp3(media, timeout_seconds=15, max_bytes=8_000_000)
     assert candidate.backend == backend
     assert candidate.rate_profile is RateProfile.NORMAL
     assert candidate.request_identity == request
-    assert candidate.path.is_file()
-    assert candidate.path.stat().st_size == probe.bytes
+    assert len(candidate.audio_bytes) == probe.bytes
     assert probe.codec == "mp3"
     assert probe.channels == 1
     assert probe.sha256 != "0" * 64
@@ -67,29 +72,81 @@ def _assert_live_candidate(candidate, *, backend: str, request: TtsRequestIdenti
     assert "DIFY_API_KEY" not in evidence
 
 
-def _assert_value_free_rejection(adapter, recap: SafeRecapText, tmp_path: Path) -> None:
+def _assert_value_free_rejection(adapter, recap: SafeRecapText) -> None:
     secret = "token=debugmate-fictional-secret-0123456789"
     unsafe = recap.model_copy(
         update={"text": secret, "sha256": sha256_bytes(secret.encode("utf-8"))}
     )
     with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
-        adapter.synthesize(unsafe, tmp_path / "unsafe.mp3", _identity(recap), RateProfile.NORMAL)
+        adapter.synthesize(unsafe, _identity(recap), RateProfile.NORMAL)
     assert secret not in str(caught.value)
-    assert not (tmp_path / "unsafe.mp3").exists()
 
 
 @pytest.mark.tts
 @pytest.mark.skipif(os.name != "nt", reason="Windows SAPI gate")
 def test_real_local_sapi_produces_verified_tag_free_mono_mp3(tmp_path: Path) -> None:
     recap = _safe_recap()
+    candidate = SapiTtsAdapter().synthesize(recap, _identity(recap), RateProfile.NORMAL)
     target = tmp_path / "sapi.mp3"
-    candidate = SapiTtsAdapter().synthesize(recap, target, _identity(recap), RateProfile.NORMAL)
-    probe = probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000)
+    target.write_bytes(candidate.audio_bytes)
+    probe = probe_mp3(target, timeout_seconds=15, max_bytes=8_000_000)
     assert probe.codec == "mp3"
     assert probe.channels == 1
     assert 30_000 <= probe.duration_ms <= 60_000
     assert candidate.voice == "Microsoft Huihui Desktop"
-    assert not list(tmp_path.rglob("*.wav"))
+
+
+@pytest.mark.tts
+@pytest.mark.skipif(os.name != "nt", reason="Windows SAPI junction gate")
+def test_real_sapi_cannot_write_recap_into_a_nested_temp_junction(tmp_path: Path) -> None:
+    """The real adapter has no temp-file output argument to redirect through a Junction."""
+
+    safe = tmp_path / "safe"
+    outside = tmp_path / "outside"
+    safe.mkdir()
+    outside.mkdir()
+    junction = safe / "nested"
+    created = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(outside)],
+        capture_output=True,
+        check=False,
+        shell=False,
+        timeout=10,
+    )
+    if created.returncode != 0:  # pragma: no cover - host capability gate
+        pytest.fail("could not create required SAPI junction attack fixture")
+
+    SapiTtsAdapter().synthesize(_safe_recap(), _identity(_safe_recap()), RateProfile.NORMAL)
+
+    assert not list(outside.iterdir())
+
+
+@pytest.mark.tts
+@pytest.mark.skipif(os.name != "nt", reason="Windows controlled-chain gate")
+def test_real_sapi_payload_survives_the_leased_candidate_and_canonicalisation_chain(
+    tmp_path: Path,
+) -> None:
+    """Exercise the real SAPI result through the lease, ffprobe and bytes-only FFmpeg path."""
+
+    class FailingAdapter:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def synthesize(self, *_args: object) -> object:
+            raise RuntimeError("deliberate test fallback")
+
+    recap = _safe_recap()
+    result = TtsFallbackChain(
+        (FailingAdapter("dify"), FailingAdapter("edge_tts"), SapiTtsAdapter())
+    ).synthesize(
+        recap,
+        _identity(recap),
+        TrustedCandidateRoot.for_testing(tmp_path / "private-candidates"),
+    )
+
+    assert result.available is True
+    assert result.backend == "sapi"
+    assert 30_000 <= result.duration_ms <= 60_000
 
 
 @pytest.mark.cloud
@@ -101,9 +158,9 @@ def test_live_dify_tts_gate(tmp_path: Path) -> None:
     recap = _safe_recap()
     request = _identity(recap)
     adapter = DifyTtsAdapter(settings)
-    candidate = adapter.synthesize(recap, tmp_path / "dify.mp3", request, RateProfile.NORMAL)
-    _assert_live_candidate(candidate, backend="dify", request=request)
-    _assert_value_free_rejection(adapter, recap, tmp_path)
+    candidate = adapter.synthesize(recap, request, RateProfile.NORMAL)
+    _assert_live_candidate(candidate, backend="dify", request=request, tmp_path=tmp_path)
+    _assert_value_free_rejection(adapter, recap)
 
 
 @pytest.mark.network
@@ -114,7 +171,7 @@ def test_live_edge_tts_gate(tmp_path: Path) -> None:
     recap = _safe_recap()
     request = _identity(recap)
     adapter = EdgeTtsAdapter()
-    candidate = adapter.synthesize(recap, tmp_path / "edge.mp3", request, RateProfile.NORMAL)
-    _assert_live_candidate(candidate, backend="edge_tts", request=request)
+    candidate = adapter.synthesize(recap, request, RateProfile.NORMAL)
+    _assert_live_candidate(candidate, backend="edge_tts", request=request, tmp_path=tmp_path)
     assert candidate.voice == "zh-CN-XiaoxiaoNeural"
-    _assert_value_free_rejection(adapter, recap, tmp_path)
+    _assert_value_free_rejection(adapter, recap)

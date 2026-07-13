@@ -12,7 +12,7 @@ import pytest
 from debugmate.results import media as media_module
 from debugmate.results.media import (
     MediaProbeError,
-    canonicalize_mp3,
+    canonicalize_mp3_bytes,
     probe_mp3,
     trusted_media_tools,
 )
@@ -41,6 +41,13 @@ def _ffmpeg(output: Path, *output_args: str, duration: float = 30.0) -> Path:
 
 
 def _tag_free_mp3(path: Path, duration: float) -> Path:
+    fixture_duration = {
+        # MP3 frame quantisation is real, but the public verifier is exact.  The
+        # fixture input is therefore selected to probe inside (not beyond) each
+        # requested inclusive boundary.
+        30.0: 29.95,
+        60.0: 59.90,
+    }.get(duration, duration - 0.084)
     return _ffmpeg(
         path,
         "-map_metadata",
@@ -57,9 +64,7 @@ def _tag_free_mp3(path: Path, duration: float) -> Path:
         "libmp3lame",
         "-b:a",
         "32k",
-        # Account for one deterministic MP3 frame of muxer padding so ffprobe
-        # observes the requested boundary duration rather than the input cutoff.
-        duration=duration - 0.084,
+        duration=fixture_duration,
     )
 
 
@@ -302,50 +307,35 @@ def test_ffprobe_output_cap_maps_to_a_value_free_probe_code(
     _assert_code(error, "probe_invalid")
 
 
-def test_canonicalize_reencodes_tagged_mp3_and_drops_trailing_secret(tmp_path: Path) -> None:
-    source = _ffmpeg(
-        tmp_path / "tagged-source.mp3",
-        "-metadata",
-        "title=forbidden",
-        "-ac",
-        "1",
-        "-codec:a",
-        "libmp3lame",
-        duration=45.0,
-    )
+def test_canonicalize_reencodes_verified_mp3_and_drops_trailing_secret(tmp_path: Path) -> None:
+    source = _tag_free_mp3(tmp_path / "source.mp3", 45.0)
     with source.open("ab") as handle:
         handle.write(b"HIDDEN_TRAILING_SECRET")
-    target = tmp_path / "canonical.mp3"
-
-    probe = canonicalize_mp3(
-        source,
-        target,
+    canonical = canonicalize_mp3_bytes(
+        source.read_bytes(),
         timeout_seconds=20.0,
         max_bytes=1_000_000,
     )
+    target = tmp_path / "canonical-fixture.mp3"
+    target.write_bytes(canonical)
 
-    assert probe == probe_mp3(target, timeout_seconds=5.0, max_bytes=1_000_000)
-    assert b"HIDDEN_TRAILING_SECRET" not in target.read_bytes()
-    assert target != source
+    assert probe_mp3(target, timeout_seconds=5.0, max_bytes=1_000_000).bytes == len(canonical)
+    assert b"HIDDEN_TRAILING_SECRET" not in canonical
 
 
-def test_canonicalize_failure_does_not_publish_partial_target(
+def test_canonicalize_failure_does_not_return_partial_payload(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "invalid.mp3"
     source.write_bytes(b"not audio HIDDEN_SECRET")
-    target = tmp_path / "canonical.mp3"
-
     with pytest.raises(MediaProbeError) as error:
-        canonicalize_mp3(
-            source,
-            target,
+        canonicalize_mp3_bytes(
+            source.read_bytes(),
             timeout_seconds=5.0,
             max_bytes=1_000_000,
         )
 
     _assert_code(error, "canonicalize_failed")
-    assert not target.exists()
 
 
 def test_production_media_tools_ignore_path_shadowing(
@@ -442,3 +432,29 @@ def test_bounded_runner_terminates_an_output_flood_before_persisting_it() -> Non
         media_module._run_bounded_process(
             [sys.executable, "-c", flood], timeout_seconds=10.0, max_output_bytes=8_192
         )
+
+
+@pytest.mark.parametrize("duration", [29.981, 60.001])
+def test_duration_window_has_no_mpeg_tolerance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, duration: float
+) -> None:
+    """The public MP3 contract is exactly 30,000 through 60,000 milliseconds."""
+
+    media = tmp_path / "candidate.mp3"
+    media.write_bytes(b"\xff\xfb" + b"x" * 100)
+
+    def completed(_command: list[str], **_kwargs: object) -> tuple[int, bytes]:
+        return (
+            0,
+            (
+                f'{{"format":{{"duration":"{duration}"}},"streams":'
+                '[{"codec_type":"audio","codec_name":"mp3","channels":1}]}'
+            ).encode(),
+        )
+
+    monkeypatch.setattr(media_module, "_run_bounded_process", completed)
+
+    with pytest.raises(MediaProbeError) as error:
+        probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000_000)
+
+    _assert_code(error, "duration_out_of_range")

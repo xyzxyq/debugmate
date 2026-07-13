@@ -61,7 +61,10 @@ def _scan_process_capabilities(
             and isinstance(call.args[0], ast.Name)
             and call.args[0].id == "command"
             and set(keyword_values) == expected_keywords
-            and _is_subprocess_attribute(keyword_values["stdin"], "DEVNULL")
+            and (
+                _is_subprocess_attribute(keyword_values["stdin"], "DEVNULL")
+                or _is_subprocess_attribute(keyword_values["stdin"], "PIPE")
+            )
             and _is_subprocess_attribute(keyword_values["stdout"], "PIPE")
             and _is_subprocess_attribute(keyword_values["stderr"], "PIPE")
             and isinstance(keyword_values["shell"], ast.Constant)
@@ -289,7 +292,7 @@ def test_process_allowlist_rejects_extra_or_wrong_popen_boundary_arguments(
                 "command = ['fixed']\n"
                 "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
                 "stderr=subprocess.PIPE, shell=False, cwd='extra')\n"
-                "subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, "
+                "subprocess.Popen(command, stdin=stdout, stdout=subprocess.PIPE, "
                 "stderr=subprocess.PIPE, shell=False)\n"
                 "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
                 "stderr=subprocess.PIPE, shell=False)\n"
