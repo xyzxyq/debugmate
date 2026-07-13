@@ -69,7 +69,7 @@ models and ordinary path checks could not close.  They are repaired in
 
 Updated verification after the remediation:
 
-- `python -m pytest -q tests/results` — 187 passed, 5 deselected.
+- `python -m pytest -q tests/results` — 188 passed, 5 deselected.
 - `python -m pytest -q -m "not cloud and not ocr and not network and not browser and not tts"`
-  — 659 passed, 27 deselected.
+  — 660 passed, 27 deselected.
 - Targeted Ruff, `pip check`, and `git diff --check` — passed.

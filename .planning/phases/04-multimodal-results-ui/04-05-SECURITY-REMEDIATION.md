@@ -30,8 +30,8 @@ the new value.
 
 ## Verification record
 
-- Result suite: `187 passed, 5 deselected`.
-- Full offline suite: `659 passed, 27 deselected`.
+- Result suite: `188 passed, 5 deselected`.
+- Full offline suite: `660 passed, 27 deselected`.
 - Ruff (changed result modules/tests), `pip check`, and `git diff --check`:
   passed.
 

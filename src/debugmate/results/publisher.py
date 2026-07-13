@@ -75,7 +75,6 @@ class _RegisteredResultRoot:
     root: Path
 
 
-_RESULT_ROOT_TOKEN = object()
 _RESULT_ROOT_LOCK = threading.RLock()
 _RESULT_ROOTS: dict[object, _RegisteredResultRoot] = {}
 
