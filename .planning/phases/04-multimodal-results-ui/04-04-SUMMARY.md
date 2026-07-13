@@ -143,6 +143,35 @@ skips`. See `04-04-TOCTOU-REMEDIATION-REPORT.md` for exact attack evidence,
 Plan 05 publication implications and the explicitly bounded Windows residual
 limits.
 
+## Closing remediation: exact temp-child lease and edge deadline
+
+The closing review exposed a second-level race that the root/run leases did not
+cover: the exact `TemporaryDirectory` child handed to an adapter could be renamed
+to a Junction before candidate validation, and Python's default recursive cleanup
+could then raise a raw operating-system error. The test-first pair
+`f4080f3` / `2c88383` replaces that behavior with a leased `mkdtemp` child:
+
+- `test_leased_temp_child_blocks_junction_swap_during_adapter` attempts a real
+  directory rename during the adapter call and would create a real Junction plus
+  external candidate write if allowed. The active Windows no-delete lease blocks
+  the swap; both before/after outside snapshots stay empty and the chain returns
+  a normal fixed result with no raw `OSError`.
+- Cleanup never invokes recursive removal on a candidate temp child. While the
+  original lease is active it removes only direct proven regular files and marks
+  that exact empty open directory for deletion. A suspicious or uncleanable child
+  remains a private, unreferenced orphan instead of being traversed.
+- `EdgeTtsAdapter` now has a fixed validated `30s` default deadline. The adapter
+  wraps `Communicate.save()` in `asyncio.wait_for`, cancels/awaits a timeout,
+  deletes its target value-free and lets the chain fall through. The never-ending
+  coroutine regression uses `0.05s`, finishes in under one second and reaches
+  the verified SAPI fallback.
+
+This final pass produced `23 passed` for `test_tts_chain.py`, `48 passed, 2
+deselected` for the focused audio suite, `1 passed, 2 explicit external skips`
+for the real local marker, and `628 passed, 25 deselected` for the full offline
+suite. Ruff and `pip check` both pass; Dify and edge network gates remain
+truthfully open without credentials or an explicit network opt-in.
+
 ## Verification
 
 - `tests/results/test_recap.py`: 6 passed.
