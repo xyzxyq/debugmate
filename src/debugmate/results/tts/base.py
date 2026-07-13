@@ -29,6 +29,7 @@ class AudioCandidate(StrictFrozenModel):
     backend: str = Field(pattern=r"^[a-z][a-z0-9_]{1,31}$")
     rate_profile: RateProfile
     path: Path
+    request_identity: TtsRequestIdentity
     voice: str | None = None
 
 

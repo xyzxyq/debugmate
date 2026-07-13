@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 
@@ -26,6 +27,12 @@ class TtsFallbackChain:
         probe_timeout: float = 15.0,
         max_bytes: int = 8_000_000,
     ) -> None:
+        if tuple(adapter.backend for adapter in adapters) != (
+            "dify",
+            "edge_tts",
+            "sapi",
+        ):
+            raise ValueError("tts_chain_invalid") from None
         self._adapters = adapters
         self._probe_timeout = probe_timeout
         self._max_bytes = max_bytes
@@ -54,6 +61,12 @@ class TtsFallbackChain:
             raise ValueError("tts_identity_mismatch") from None
         assert_export_safe(recap.text)
         target_root.mkdir(parents=True, exist_ok=True)
+        if _is_link_or_reparse(target_root):
+            raise ValueError("tts_target_invalid") from None
+        target_root = target_root.resolve(strict=True)
+        final_path = target_root / "recap.mp3"
+        if final_path.exists() or final_path.is_symlink():
+            raise ValueError("tts_target_invalid") from None
         attempts: list[AudioAttempt] = []
         with tempfile.TemporaryDirectory(prefix="debugmate-tts-", dir=target_root) as temp_name:
             temp = Path(temp_name)
@@ -63,11 +76,30 @@ class TtsFallbackChain:
                     try:
                         assert_export_safe(recap.text)
                         candidate = adapter.synthesize(recap, candidate_path, request, rate)
+                        if not _candidate_matches(
+                            candidate,
+                            expected_path=candidate_path,
+                            backend=adapter.backend,
+                            rate=rate,
+                            request=request,
+                        ):
+                            raise _CandidateInvalid
                         probe = probe_mp3(
                             candidate.path,
                             timeout_seconds=self._probe_timeout,
                             max_bytes=self._max_bytes,
                         )
+                    except _CandidateInvalid:
+                        attempts.append(
+                            AudioAttempt(
+                                backend=adapter.backend,
+                                rate_profile=rate.value,
+                                succeeded=False,
+                                safe_error_code="tts_candidate_invalid",
+                            )
+                        )
+                        candidate_path.unlink(missing_ok=True)
+                        break
                     except MediaProbeError as exc:
                         code = getattr(exc, "code", str(exc))
                         attempts.append(
@@ -95,8 +127,15 @@ class TtsFallbackChain:
                         )
                         candidate_path.unlink(missing_ok=True)
                         break
-                    final_path = target_root / "recap.mp3"
                     shutil.copyfile(candidate.path, final_path)
+                    published_probe = probe_mp3(
+                        final_path,
+                        timeout_seconds=self._probe_timeout,
+                        max_bytes=self._max_bytes,
+                    )
+                    if published_probe != probe:
+                        final_path.unlink(missing_ok=True)
+                        raise ValueError("tts_publish_changed") from None
                     attempts.append(
                         AudioAttempt(
                             backend=adapter.backend,
@@ -122,3 +161,46 @@ class TtsFallbackChain:
             attempts=tuple(attempts),
             failure=SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts"),
         )
+
+
+class _CandidateInvalid(Exception):
+    pass
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        info = path.stat(follow_symlinks=False)
+        return (
+            not stat.S_ISREG(info.st_mode)
+            and not stat.S_ISDIR(info.st_mode)
+            or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+        )
+    except OSError:
+        return True
+
+
+def _candidate_matches(
+    candidate: object,
+    *,
+    expected_path: Path,
+    backend: str,
+    rate: RateProfile,
+    request: TtsRequestIdentity,
+) -> bool:
+    if not hasattr(candidate, "path"):
+        return False
+    value = candidate
+    try:
+        return (
+            value.backend == backend
+            and value.rate_profile is rate
+            and value.request_identity == request
+            and value.path == expected_path
+            and expected_path.is_file()
+            and not _is_link_or_reparse(expected_path)
+            and stat.S_ISREG(expected_path.stat(follow_symlinks=False).st_mode)
+        )
+    except (AttributeError, OSError):
+        return False
