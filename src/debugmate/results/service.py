@@ -682,7 +682,8 @@ class ResultApplicationService:
         if (
             _CASE_ID.fullmatch(case_id) is None
             or _RESULT_ID.fullmatch(result_id) is None
-            or member_id not in {"bundle", "report", "card", "audio", "citations"}
+            or member_id
+            not in {"bundle", "report", "diagnosis", "card", "audio", "recap_text", "citations"}
         ):
             raise ResultServiceError("download_invalid")
         try:

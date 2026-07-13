@@ -849,8 +849,10 @@ def resolve_verified_download(
             if bundle.manifest.status is ResultStatus.COMPLETED
             else PARTIAL_ARCHIVE_NAME,
             "report": _BUSINESS_SPECS["report"][0],
+            "diagnosis": _BUSINESS_SPECS["diagnosis"][0],
             "card": _BUSINESS_SPECS["card"][0],
             "audio": _BUSINESS_SPECS["audio"][0],
+            "recap_text": _BUSINESS_SPECS["recap_text"][0],
             "citations": _BUSINESS_SPECS["citations"][0],
         }
         name = names.get(member_id)

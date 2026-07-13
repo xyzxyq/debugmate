@@ -10,6 +10,7 @@ import gradio as gr
 from fastapi import HTTPException
 from fastapi.responses import Response
 
+from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.hashing import sha256_bytes
 from debugmate.results.contracts import (
@@ -142,6 +143,12 @@ class CallbackPayload:
     audio_url: str | None
     download_url: str | None
     field_values: tuple[str, str, str, str, str, str]
+    redacted_input: str = ""
+    category: str = "等待诊断"
+    confidence: str = "暂无"
+    fact_rows: tuple[tuple[str, str, str, str, str], ...] = ()
+    citation_rows: tuple[tuple[str, str, str, str], ...] = ()
+    recap_text: str = ""
 
 
 class UiCallbacks:
@@ -206,6 +213,56 @@ class UiCallbacks:
         except (AttributeError, ResultServiceError, TypeError, ValueError):
             return _EMPTY_FIELD_VALUES
 
+    def _details(
+        self, state: ResultViewState
+    ) -> tuple[
+        str,
+        str,
+        str,
+        tuple[tuple[str, str, str, str, str], ...],
+        tuple[tuple[str, str, str, str], ...],
+        str,
+    ]:
+        """Derive UI facts only from freshly verified public result members."""
+
+        try:
+            diagnosis = DiagnosisRecord.model_validate_json(
+                self._member(state, "diagnosis").read_bytes(), strict=True
+            )
+            recap = self._member(state, "recap_text").read_bytes().decode("utf-8")
+            summary = "\n".join(
+                f"{fact.field_id}：{fact.value}" for fact in diagnosis.observed_facts
+            )
+            evidence_by_fact = {
+                fact_id: evidence_id
+                for link in diagnosis.support_links
+                for fact_id in link.fact_ids
+                for evidence_id in link.evidence_ids[:1]
+            }
+            facts = tuple(
+                (
+                    fact.fact_id,
+                    fact.value,
+                    evidence_by_fact.get(fact.fact_id, ""),
+                    str(fact.source_kind),
+                    "有依据" if fact.fact_id in evidence_by_fact else "观察",
+                )
+                for fact in diagnosis.observed_facts
+            )
+            citations = tuple(
+                (item.evidence_id, item.source_id, item.source_url, item.locator)
+                for item in diagnosis.evidence
+            )
+            return (
+                summary,
+                str(diagnosis.category),
+                f"{diagnosis.confidence:.2f}",
+                facts,
+                citations,
+                recap,
+            )
+        except (KeyError, ResultServiceError, TypeError, ValueError, UnicodeError):
+            return "", "等待诊断", "暂无", (), (), ""
     def _render(self, state: ResultViewState) -> CallbackPayload:
         if state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}:
             return CallbackPayload(
@@ -226,6 +283,7 @@ class UiCallbacks:
             if state.availability.audio:
                 audio_url = self._content.issue(self._member(state, "audio"), attachment=False)
             download_url = self._content.issue(self._member(state, "bundle"), attachment=True)
+            details = self._details(state)
             return CallbackPayload(
                 state=state,
                 view=render_view_state(state),
@@ -234,6 +292,12 @@ class UiCallbacks:
                 audio_url=audio_url,
                 download_url=download_url,
                 field_values=self._correction_fields(state),
+                redacted_input=details[0],
+                category=details[1],
+                confidence=details[2],
+                fact_rows=details[3],
+                citation_rows=details[4],
+                recap_text=details[5],
             )
         except (ResultServiceError, UnicodeError, OSError, ValueError):
             failed = self._failure(state, "download_invalid")
@@ -438,7 +502,7 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
         with gr.Group(elem_classes="workbench-grid"):
             with gr.Column(elem_classes="region"):
                 gr.Markdown("## 输入与抽取")
-                gr.Textbox(
+                redacted_input = gr.Textbox(
                     label="脱敏后的输入",
                     interactive=False,
                     lines=5,
@@ -473,8 +537,8 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
 
             with gr.Column(elem_classes="region"):
                 gr.Markdown("## 诊断与证据")
-                gr.Markdown("类别：等待诊断\n\n置信度：暂无")
-                gr.Dataframe(
+                category_confidence = gr.Markdown("类别：等待诊断\n\n置信度：暂无")
+                fact_table = gr.Dataframe(
                     headers=["事实 ID", "观察或结论", "证据 ID", "来源", "支持关系"],
                     datatype=["str", "str", "str", "str", "str"],
                     interactive=False,
@@ -506,9 +570,14 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                             recording=False,
                             buttons=[],
                         )
-                        gr.Markdown("复盘稿会与语音一并经过验证后显示。")
+                        recap = gr.Textbox(
+                            label="已验证复盘稿",
+                            interactive=False,
+                            lines=6,
+                            value="复盘稿会与语音一并经过验证后显示。",
+                        )
                     with gr.Tab("引用与下载"):
-                        gr.Dataframe(
+                        citation_table = gr.Dataframe(
                             headers=["证据 ID", "标题", "官方来源", "版本范围"],
                             datatype=["str", "str", "str", "str"],
                             interactive=False,
@@ -539,6 +608,11 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
             create_button,
             replay_button,
             start_button,
+            redacted_input,
+            category_confidence,
+            fact_table,
+            citation_table,
+            recap,
         ]
 
         def apply_payload(payload: CallbackPayload) -> tuple[object, ...]:
@@ -563,6 +637,11 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                 gr.update(interactive=False),
                 gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
                 gr.update(interactive=False),
+                gr.update(value=payload.redacted_input),
+                gr.update(value=f"类别：{payload.category}\n\n置信度：{payload.confidence}"),
+                gr.update(value=list(payload.fact_rows)),
+                gr.update(value=list(payload.citation_rows)),
+                gr.update(value=payload.recap_text),
             )
 
         def load_replay(fixture_id: str | None):
