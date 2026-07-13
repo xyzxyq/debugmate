@@ -440,3 +440,52 @@ def test_result_contract_collections_are_deeply_immutable_and_roundtrip_stably()
     first = canonical_json_bytes(manifest.model_dump(mode="json"))
     restored = ResultManifest.model_validate_json(first, strict=True)
     assert canonical_json_bytes(restored.model_dump(mode="json")) == first
+
+
+def test_terminal_view_state_carries_only_verified_result_and_audio_metadata() -> None:
+    """The pure UI mapping cannot infer a result ID or fallback from a path."""
+
+    identity = _identity()
+    first_attempt = AudioAttempt(
+        backend="dify",
+        rate_profile="normal",
+        succeeded=False,
+        safe_error_code="tts_backend_failed",
+    )
+    final_attempt = AudioAttempt(
+        backend="edge_tts",
+        rate_profile="faster",
+        succeeded=True,
+        duration_ms=40_000,
+        sha256="7" * 64,
+    )
+    audio = AudioResult(
+        identity=identity,
+        available=True,
+        backend="edge_tts",
+        fallback_used=True,
+        attempts=(first_attempt, final_attempt),
+        duration_ms=40_000,
+        sha256="7" * 64,
+    )
+    view = ResultViewState(
+        mode=ResultMode.REPLAY,
+        fixture_id="module-not-found",
+        fixture_name="ModuleNotFoundError：缺少虚构依赖包",
+        status=ResultStatus.COMPLETED,
+        identity=identity,
+        result_id="result_" + "6" * 32,
+        availability=ArtifactAvailability(report=True, card=True, recap_text=True, audio=True),
+        audio=audio,
+    )
+    assert view.result_id == "result_" + "6" * 32
+    assert view.audio is not None and view.audio.fallback_used is True
+
+    with pytest.raises(ValidationError):
+        ResultViewState(
+            mode=ResultMode.LIVE,
+            status=ResultStatus.COMPLETED,
+            identity=identity,
+            availability=ArtifactAvailability(report=True, card=True, recap_text=True, audio=True),
+            audio=audio,
+        )
