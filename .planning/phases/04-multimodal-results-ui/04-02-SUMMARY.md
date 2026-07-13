@@ -25,7 +25,7 @@ key-files:
 key-decisions:
   - "Renderer inputs are authorized and canonical-sealed projections, not mutable DiagnosisRecord copies or provider payloads."
   - "Only command bodies bypass Markdown escaping; their fence is deterministically longer than every embedded backtick run."
-  - "Citation titles are the already-verified source_id literals; no renderer performs title lookup, URL repair or content-summary export."
+  - "Citation source_label is the already-verified source_id literal; EvidenceAnchor has no title, so no title is claimed or invented."
 patterns-established:
   - "Report, card and recap implementations consume the same sealed PresentationModel and ArtifactIdentity."
   - "Renderer failures cross the boundary only as report_render_failed or citation_render_failed with no exception chain."

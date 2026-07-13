@@ -37,7 +37,7 @@ class RenderedReport(StrictFrozenModel):
 
 class CitationRow(StrictFrozenModel):
     evidence_id: str = Field(pattern=r"^evidence_[0-9a-f]{32}$")
-    official_title: str
+    source_label: str
     source_url: str
     source_locator: str
     chunk_id: str
@@ -270,7 +270,7 @@ def _citation_rows(presentation: PresentationModel) -> tuple[CitationRow, ...]:
         rows.append(
             CitationRow(
                 evidence_id=item.evidence_id,
-                official_title=item.source_id,
+                source_label=item.source_id,
                 source_url=item.source_url,
                 source_locator=item.source_locator,
                 chunk_id=item.chunk_id,
