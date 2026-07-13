@@ -99,6 +99,8 @@ def test_chain_requires_a_trusted_candidate_root_capability(
     """An arbitrary caller directory must not be an output authority."""
 
     calls: list[tuple[str, str]] = []
+    with pytest.raises(TypeError):
+        TrustedCandidateRoot(tmp_path)
     monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
     monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
     chain = TtsFallbackChain(
