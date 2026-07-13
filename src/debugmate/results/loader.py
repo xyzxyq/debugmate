@@ -71,12 +71,16 @@ def _is_link_or_reparse(path: Path) -> bool:
 def _safe_directory(path: Path) -> bool:
     if not path.is_absolute() or not path.is_dir() or _is_link_or_reparse(path):
         return False
+    return not _has_unsafe_ancestor(path)
+
+
+def _has_unsafe_ancestor(path: Path) -> bool:
     current = path
     while current != current.parent:
         if _is_link_or_reparse(current):
-            return False
+            return True
         current = current.parent
-    return True
+    return _is_link_or_reparse(current)
 
 
 def _strict_outcome(value: DiagnosisRunOutcome) -> DiagnosisRunOutcome:

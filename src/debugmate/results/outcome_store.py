@@ -12,6 +12,7 @@ from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.loader import (
     ResultLoadError,
+    _has_unsafe_ancestor,
     _is_link_or_reparse,
     _strict_outcome,
     atomic_replace_directory,
@@ -28,7 +29,7 @@ class DiagnosisOutcomeStore:
 
     def _prepare_root(self) -> None:
         parent = self._root.parent
-        if not parent.is_dir() or _is_link_or_reparse(parent):
+        if not parent.is_dir() or _has_unsafe_ancestor(parent):
             raise ResultLoadError("outcome_store_invalid", "store")
         if self._root.exists() and (
             not self._root.is_dir() or _is_link_or_reparse(self._root)

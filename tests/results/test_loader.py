@@ -133,3 +133,20 @@ def test_source_and_store_reject_symlink_boundaries(
     with pytest.raises(ResultLoadError) as caught:
         load_verified_outcome(outcome, evidence_root=linked)
     assert caught.value.code == "source_bundle_invalid"
+
+
+def test_outcome_store_rejects_a_reparse_ancestor(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    outcome, _ = completed_source_bundle
+    actual = tmp_path / "actual"
+    (actual / "child").mkdir(parents=True)
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(actual, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    store = DiagnosisOutcomeStore(linked / "child" / "outcomes")
+    with pytest.raises(ResultLoadError) as caught:
+        store.write(outcome)
+    assert caught.value.code == "outcome_store_invalid"
