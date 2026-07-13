@@ -19,6 +19,7 @@ from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.loader import ResultLoadError, load_verified_outcome
 from debugmate.results.presentation import (
+    PresentationCause,
     PresentationCommand,
     PresentationSupport,
     build_presentation,
@@ -364,6 +365,44 @@ def test_copying_private_authority_and_rewriting_fingerprint_cannot_forge_capabi
         render_report(forged)
     with pytest.raises(CitationRenderError, match="citation_render_failed"):
         render_citations(forged)
+
+
+@pytest.mark.parametrize("mutation", ["limitations", "root_causes", "commands"])
+def test_registered_instance_rejects_in_place_business_mutation_and_reseal(
+    completed_source_bundle, tmp_path: Path, mutation: str
+) -> None:
+    presentation = _presentation(completed_source_bundle, tmp_path)
+    if mutation == "limitations":
+        object.__setattr__(
+            presentation,
+            "limitations",
+            (*presentation.limitations, "in-place-forgery"),
+        )
+    elif mutation == "root_causes":
+        cause = PresentationCause(
+            candidate_id="candidate_cccccccccccccccccccccccccccccccc",
+            cause="in-place inferred cause",
+            claim_kind=ClaimKind.INFERENCE,
+            fact_ids=(presentation.observed_facts[0].fact_id,),
+            evidence_ids=(),
+            confidence=0.2,
+            applicability="forgery",
+            counterevidence_or_limits="not verified",
+        )
+        object.__setattr__(presentation, "root_causes", (cause,))
+    else:
+        object.__setattr__(presentation, "checks", tuple(reversed(presentation.checks)))
+
+    payload = presentation.model_dump(mode="json", exclude={"projection_sha256"})
+    object.__setattr__(
+        presentation,
+        "projection_sha256",
+        sha256_bytes(canonical_json_bytes(payload)),
+    )
+    with pytest.raises(ReportRenderError, match="report_render_failed"):
+        render_report(presentation)
+    with pytest.raises(CitationRenderError, match="citation_render_failed"):
+        render_citations(presentation)
 
 
 def test_supported_candidate_ids_require_a_complete_grounded_support_edge(
