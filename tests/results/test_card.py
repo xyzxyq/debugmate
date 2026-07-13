@@ -157,6 +157,75 @@ def test_failure_is_safe_partial_and_cleans_target(
     assert str(tmp_path) not in str(caught.value)
 
 
+def test_height_and_pixel_limits_accept_exact_and_reject_plus_one(
+    completed_source_bundle, tmp_path: Path, monkeypatch
+) -> None:
+    presentation, context = _card_inputs(completed_source_bundle, tmp_path)
+    from debugmate.results import card
+
+    baseline = measure_card(presentation, context)
+    monkeypatch.setattr(card, "MAX_PNG_HEIGHT", baseline.canvas_height)
+    monkeypatch.setattr(card, "MAX_PNG_PIXELS", 1600 * baseline.canvas_height)
+    assert measure_card(presentation, context).canvas_height == baseline.canvas_height
+    monkeypatch.setattr(card, "MAX_PNG_HEIGHT", baseline.canvas_height - 1)
+    with pytest.raises(CardRenderFailure, match="png_layout_failed"):
+        measure_card(presentation, context)
+
+
+def test_item_limit_accepts_exact_and_rejects_plus_one(
+    completed_source_bundle, tmp_path: Path, monkeypatch
+) -> None:
+    presentation, context = _card_inputs(completed_source_bundle, tmp_path)
+    from debugmate.results import card
+
+    def definitions(count: int):
+        return (("phenomenon", "现象", tuple("x" for _ in range(count))),)
+
+    monkeypatch.setattr(card, "MAX_PNG_HEIGHT", 100_000)
+    monkeypatch.setattr(card, "MAX_PNG_PIXELS", 160_000_000)
+    monkeypatch.setattr(card, "_sections", lambda _: definitions(card.MAX_CARD_ITEMS))
+    assert measure_card(presentation, context).sections[0].lines
+    monkeypatch.setattr(card, "_sections", lambda _: definitions(card.MAX_CARD_ITEMS + 1))
+    with pytest.raises(CardRenderFailure, match="png_layout_failed"):
+        measure_card(presentation, context)
+
+
+def test_text_limit_and_multilingual_long_tokens_are_measured(
+    completed_source_bundle, tmp_path: Path, monkeypatch
+) -> None:
+    presentation, context = _card_inputs(completed_source_bundle, tmp_path)
+    from debugmate.results import card
+
+    monkeypatch.setattr(card, "MAX_PNG_HEIGHT", 100_000)
+    monkeypatch.setattr(card, "MAX_PNG_PIXELS", 160_000_000)
+    mixed = "中文报错 " + "C:/fictional/" + "A" * 500 + " --flag=value"
+    monkeypatch.setattr(card, "_sections", lambda _: (("phenomenon", "现象", (mixed,)),))
+    layout = measure_card(presentation, context)
+    assert len(layout.sections[0].lines) > 1
+    assert all(line.width <= layout.sections[0].content_width for line in layout.sections[0].lines)
+
+    monkeypatch.setattr(card, "MAX_CARD_TEXT_CHARS", len(mixed) - 1)
+    with pytest.raises(CardRenderFailure, match="png_layout_failed"):
+        measure_card(presentation, context)
+
+
+def test_paint_exception_is_value_free_and_cleans_temp(
+    completed_source_bundle, tmp_path: Path, monkeypatch
+) -> None:
+    presentation, context = _card_inputs(completed_source_bundle, tmp_path)
+    target = tmp_path / "card.png"
+
+    def explode(*args, **kwargs):
+        raise RuntimeError(f"sensitive {tmp_path}")
+
+    monkeypatch.setattr("debugmate.results.card.Image.new", explode)
+    with pytest.raises(CardRenderFailure, match="png_render_failed") as caught:
+        render_card(presentation, context, target=target)
+    assert str(tmp_path) not in str(caught.value)
+    assert not target.exists()
+    assert not list(tmp_path.glob(".card.png.*.tmp"))
+
+
 def test_layout_golden_is_font_hash_qualified(completed_source_bundle, tmp_path: Path) -> None:
     presentation, context = _card_inputs(completed_source_bundle, tmp_path)
     layout = measure_card(presentation, context)
