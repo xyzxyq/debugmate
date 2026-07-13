@@ -22,6 +22,11 @@ class ReportRenderError(ValueError):
         super().__init__("report_render_failed")
 
 
+class CitationRenderError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("citation_render_failed")
+
+
 class RenderedReport(StrictFrozenModel):
     identity: ArtifactIdentity
     markdown: str
@@ -189,3 +194,8 @@ def render_report(presentation: PresentationModel) -> RenderedReport:
     except Exception:
         failure = ReportRenderError()
     raise failure from None
+
+
+def render_citations(presentation: PresentationModel) -> object:
+    del presentation
+    raise CitationRenderError()
