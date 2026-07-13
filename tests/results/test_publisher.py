@@ -559,7 +559,11 @@ def test_zip_bomb_metadata_rejects_before_any_member_open(
 
 @pytest.mark.parametrize(
     ("prefix", "suffix"),
-    [(b"SFX", b""), (b"", b"unexpected trailing bytes")],
+    [
+        (b"SFX", b""),
+        (b"PK\x03\x04" + b"JUNK" * 200, b""),
+        (b"", b"unexpected trailing bytes"),
+    ],
 )
 def test_verifier_rejects_rehashed_zip_preamble_and_trailing_bytes(
     candidates, tmp_path: Path, prefix: bytes, suffix: bytes

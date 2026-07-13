@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import struct
 import threading
 import weakref
 import zipfile
@@ -545,10 +546,29 @@ def _assert_exact_zip_boundary(archive: zipfile.ZipFile, raw: bytes) -> None:
             + len(info.comment)
             for info in infos
         )
-        expected_end = archive.start_dir + central_bytes + 22 + len(archive.comment)
+        eocd_offset = archive.start_dir + central_bytes
+        expected_end = eocd_offset + 22 + len(archive.comment)
+        if (
+            raw[eocd_offset : eocd_offset + 4] != b"PK\x05\x06"
+            or len(raw) < eocd_offset + 22
+        ):
+            raise ValueError("end record")
+        stored_central_bytes, stored_central_offset = struct.unpack_from(
+            "<II", raw, eocd_offset + 12
+        )
         if expected_end != len(raw):
             raise ValueError("archive boundary")
-    except (AttributeError, UnicodeEncodeError, ValueError):
+        # ``ZipFile`` accepts self-extracting archives by adding its private
+        # concat offset to ``start_dir``.  DebugMate's deterministic format
+        # does not: the EOCD must name the same central-directory offset that
+        # the parser observed in the raw byte copy.
+        if (
+            stored_central_bytes != central_bytes
+            or stored_central_offset != archive.start_dir
+            or infos[0].header_offset != 0
+        ):
+            raise ValueError("archive concat")
+    except (AttributeError, IndexError, UnicodeEncodeError, ValueError):
         raise ResultVerificationError("archive_verify_failed") from None
 
 
