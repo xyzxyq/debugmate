@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from debugmate.results.audio import TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
@@ -10,6 +11,7 @@ from debugmate.results.media import MediaProbe, MediaProbeError
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import AudioCandidate, RateProfile, TtsRequestIdentity
 from debugmate.results.tts.dify import DifyTtsAdapter
+from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
 from debugmate.settings import DebugMateSettings
 
@@ -45,7 +47,12 @@ class FakeAdapter:
         if outcome != "ok":
             raise RuntimeError(outcome)
         target.write_bytes(b"\xff\xfb" + b"x" * 64)
-        return AudioCandidate(backend=self.backend, rate_profile=rate_profile, path=target)
+        return AudioCandidate(
+            backend=self.backend,
+            rate_profile=rate_profile,
+            path=target,
+            request_identity=request_identity,
+        )
 
 
 def _identity() -> TtsRequestIdentity:
@@ -83,6 +90,54 @@ def test_fallback_order_and_success_short_circuit(tmp_path: Path, monkeypatch) -
     assert result.attempts[-1].sha256 == "b" * 64
 
 
+def test_chain_rejects_missing_duplicate_custom_or_reordered_backends() -> None:
+    calls: list[tuple[str, str]] = []
+    dify = FakeAdapter("dify", ["ok"], calls)
+    edge = FakeAdapter("edge_tts", ["ok"], calls)
+    sapi = FakeAdapter("sapi", ["ok"], calls)
+    for adapters in (
+        (dify, edge),
+        (dify, edge, edge),
+        (edge, dify, sapi),
+        (dify, FakeAdapter("custom", ["ok"], calls), sapi),
+    ):
+        with pytest.raises(ValueError, match="tts_chain_invalid"):
+            TtsFallbackChain(adapters)
+
+
+def test_chain_rejects_external_or_identity_mismatched_candidate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    outside = tmp_path.parent / "outside-valid.mp3"
+    outside.write_bytes(b"\xff\xfb" + b"x" * 64)
+
+    class MaliciousAdapter(FakeAdapter):
+        def synthesize(self, text, target, request_identity, rate_profile):
+            self._calls.append((self.backend, rate_profile.value))
+            return AudioCandidate(
+                backend=self.backend,
+                rate_profile=rate_profile,
+                path=outside,
+                request_identity=request_identity.model_copy(
+                    update={"recap_sha256": "9" * 64}
+                ),
+            )
+
+    calls: list[tuple[str, str]] = []
+    chain = TtsFallbackChain(
+        (
+            MaliciousAdapter("dify", [], calls),
+            FakeAdapter("edge_tts", ["timeout"], calls),
+            FakeAdapter("sapi", ["process"], calls),
+        )
+    )
+    result = chain.synthesize(_recap(), _identity(), tmp_path / "result")
+    assert result.available is False
+    assert result.attempts[0].safe_error_code == "tts_candidate_invalid"
+    assert not (tmp_path / "result" / "recap.mp3").exists()
+
+
 def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
     adapter = FakeAdapter("dify", ["ok", "ok"], calls)
@@ -95,7 +150,13 @@ def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkey
         return value(path, **kwargs)
 
     monkeypatch.setattr("debugmate.results.audio.probe_mp3", varying_probe)
-    result = TtsFallbackChain((adapter,)).synthesize(_recap(), _identity(), tmp_path)
+    result = TtsFallbackChain(
+        (
+            adapter,
+            FakeAdapter("edge_tts", ["timeout"], calls),
+            FakeAdapter("sapi", ["process"], calls),
+        )
+    ).synthesize(_recap(), _identity(), tmp_path)
     assert calls == [("dify", "normal"), ("dify", "faster")]
     assert result.available is True
     assert len(result.attempts) == 2
@@ -171,3 +232,28 @@ def test_sapi_uses_file_boundary_and_never_places_recap_in_argv(
     assert calls[0][0][3] == "-File"
     assert target.exists()
     assert not list(tmp_path.rglob("*.wav"))
+
+
+def test_all_adapters_reject_constructed_secret_and_mismatched_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    secret = "token=debugmate-fictional-secret-0123456789"
+    unsafe = _recap().model_copy(
+        update={"text": secret, "sha256": sha256_bytes(secret.encode("utf-8"))}
+    )
+    wrong_identity = _identity().model_copy(update={"recap_sha256": "f" * 64})
+    settings = DebugMateSettings.from_env({"DIFY_API_KEY": "fictional-test-key"})
+    adapters = (
+        DifyTtsAdapter(settings, client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500)))),
+        EdgeTtsAdapter(),
+        SapiTtsAdapter(project_root=Path.cwd()),
+    )
+    monkeypatch.setattr("debugmate.results.tts.edge.asyncio.run", lambda _: None)
+    monkeypatch.setattr("debugmate.results.tts.sapi.subprocess.run", lambda *_a, **_kw: None)
+
+    for index, adapter in enumerate(adapters):
+        with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
+            adapter.synthesize(unsafe, tmp_path / f"unsafe-{index}.mp3", _identity(), RateProfile.NORMAL)
+        assert secret not in str(caught.value)
+        with pytest.raises(RuntimeError, match="^tts_backend_failed$"):
+            adapter.synthesize(_recap(), tmp_path / f"identity-{index}.mp3", wrong_identity, RateProfile.NORMAL)
