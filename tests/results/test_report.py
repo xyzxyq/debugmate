@@ -514,3 +514,35 @@ def test_grounded_candidate_requires_one_complete_fact_and_evidence_support_edge
     )
     with pytest.raises(CitationRenderError, match="citation_render_failed"):
         render_citations(presentation)
+
+
+def test_grounded_candidate_rejects_duplicate_identical_complete_edges(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    outcome, _ = completed_source_bundle
+    diagnosis = outcome.diagnosis
+    fact_id = diagnosis.observed_facts[0].fact_id
+    evidence_id = diagnosis.evidence[0].evidence_id
+    candidate = RootCauseCandidate(
+        candidate_id="candidate_dddddddddddddddddddddddddddddddd",
+        cause="duplicate edge candidate",
+        claim_kind=ClaimKind.GROUNDED,
+        fact_ids=[fact_id],
+        evidence_ids=[evidence_id],
+        confidence=0.7,
+        applicability="fixture",
+        counterevidence_or_limits="duplicate edges are ambiguous",
+    )
+    link = SupportLink(
+        fact_ids=[fact_id],
+        evidence_ids=[evidence_id],
+        support_type="supports",
+    )
+    presentation = _presentation_from_verified_diagnosis(
+        completed_source_bundle,
+        tmp_path,
+        root_cause_candidates=[candidate.model_dump(mode="json")],
+        support_links=[link.model_dump(mode="json"), link.model_dump(mode="json")],
+    )
+    with pytest.raises(CitationRenderError, match="citation_render_failed"):
+        render_citations(presentation)
