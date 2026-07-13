@@ -40,11 +40,12 @@ completed: 2026-07-13
 7. `82be205` — RED traceability, CRC, duplicate/split/order and pre-decode resource attacks.
 8. `4a6b661` — GREEN identity/evidence rendering, canonical chunks, CRC validation and independent resource gates.
 9. `c5ae359` — fixed font-hash-qualified geometry golden plus decompression-bomb mapping evidence.
+10. `669d76c` / `e78ebd2` — RED/GREEN non-empty `IEND` hidden data and abnormal `IHDR` length rejection at the parser boundary.
 
 ## Verification
 
-- Focused card suite: **15 passed**.
-- Full offline suite: **569 passed, 22 deselected**.
+- Focused card suite: **16 passed**.
+- Full offline suite: **570 passed, 22 deselected**.
 - Ruff: **passed**.
 - `pip check`: **no broken requirements**.
 - `git diff --check ad87b2a`: **passed**.
@@ -61,6 +62,7 @@ completed: 2026-07-13
 - Replaced the permissive PNG walk with a canonical three-chunk contract that validates every CRC and rejects duplicate, split, reordered or trailing chunks, including corrupt `IEND`.
 - Added a compressed-byte gate before reading, parsed and bounded `IHDR` before decoding, and independently enforced 1600px width, maximum height/pixels and safe decompression-bomb handling instead of trusting caller-provided dimensions.
 - Upgraded the structural golden from section-count assertions to a font-SHA-qualified canvas height, title/identity element, every section rectangle and every measured line bound; no machine path is recorded.
+- Required the sole `IHDR` payload to be exactly 13 bytes and the sole `IEND` payload to be empty, preventing valid-CRC hidden terminal data from reaching Pillow.
 
 ## Remaining Scope
 
