@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+
+import gradio as gr
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -13,7 +16,15 @@ from debugmate.results.contracts import (
     ResultViewState,
 )
 from debugmate.results.verifier import VerifiedDownload
-from debugmate.ui.app import UiCallbacks, correction_draft_from_fields, mount_content_endpoint
+from debugmate.ui.app import (
+    UiCallbacks,
+    UiContentUrl,
+    _VerifiedAudio,
+    _VerifiedDownloadButton,
+    _VerifiedImage,
+    correction_draft_from_fields,
+    mount_content_endpoint,
+)
 
 
 def _state() -> ResultViewState:
@@ -106,16 +117,24 @@ class _Service:
         return self.state
 
 
+class _LoopbackRequest:
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+
 def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_bytes() -> None:
     service = _Service()
-    callbacks = UiCallbacks(service)
+    callbacks = UiCallbacks(service, content_origin="http://127.0.0.1:7868")
 
-    payload = callbacks.load_replay("module-not-found")
+    payload = callbacks.load_replay(
+        "module-not-found", request=_LoopbackRequest("http://127.0.0.1:7868/queue/join")
+    )
 
     assert service.replay_calls == ["module-not-found"]
     assert payload.state == service.state
     assert payload.report_markdown == "# DebugMate\n\nverified report"
     assert payload.card_url is not None
+    assert payload.card_url.url.startswith("http://127.0.0.1:7868/debugmate-content/")
     assert callbacks.resolve_content(payload.card_url).payload == b"verified-card"
     assert payload.audio_url is not None
     assert callbacks.resolve_content(payload.audio_url).payload == b"verified-audio"
@@ -129,10 +148,73 @@ def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_
 
     api = FastAPI()
     mount_content_endpoint(api, callbacks)
-    response = TestClient(api).get(payload.card_url)
+    response = TestClient(api).get(payload.card_url.url)
     assert response.status_code == 200
     assert response.content == b"verified-card"
     assert response.headers["content-type"].startswith("image/png")
+
+    hostile = callbacks.load_replay(
+        "module-not-found", request=_LoopbackRequest("http://attacker.invalid:7868/queue/join")
+    )
+    assert hostile.state.status.value == "failed"
+    assert hostile.card_url is None
+
+
+def test_process_api_serializes_verified_urls_without_a_server_path() -> None:
+    """Native components must preserve the capability URL instead of staging a file."""
+
+    card_url = UiContentUrl(
+        url="http://127.0.0.1:7860/debugmate-content/" + "a" * 32,
+        filename="diagnosis-card.png",
+        mime_type="image/png",
+    )
+    audio_url = UiContentUrl(
+        url="http://127.0.0.1:7860/debugmate-content/" + "b" * 32,
+        filename="recap.mp3",
+        mime_type="audio/mpeg",
+    )
+    bundle_url = UiContentUrl(
+        url="http://127.0.0.1:7860/debugmate-content/" + "c" * 32,
+        filename="debugmate-result.zip",
+        mime_type="application/zip",
+    )
+    with gr.Blocks() as app:
+        trigger = gr.Button("deliver")
+        card = _VerifiedImage(type="filepath", sources=None, buttons=[])
+        audio = _VerifiedAudio(type="filepath", sources=None, recording=False, buttons=[])
+        bundle = _VerifiedDownloadButton("download")
+        trigger.click(
+            lambda: (card_url, audio_url, bundle_url),
+            outputs=[card, audio, bundle],
+            api_name=False,
+        )
+
+    response = asyncio.run(app.process_api(block_fn=0, inputs=[], state=None))
+
+    assert [item["url"] for item in response["data"]] == [
+        card_url.url,
+        audio_url.url,
+        bundle_url.url,
+    ]
+    assert [item["path"] for item in response["data"]] == [
+        card_url.url,
+        audio_url.url,
+        bundle_url.url,
+    ]
+    assert [item["orig_name"] for item in response["data"]] == [
+        card_url.filename,
+        audio_url.filename,
+        bundle_url.filename,
+    ]
+    assert [item.get("mime_type") for item in response["data"]] == [
+        card_url.mime_type,
+        audio_url.mime_type,
+        bundle_url.mime_type,
+    ]
+    rendered = repr(response["data"])
+    assert "X:\\" not in rendered
+    assert "phase-1-foundation-platform-gate" not in rendered
+    assert "/gradio_api/file=" not in rendered
 
 
 def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(

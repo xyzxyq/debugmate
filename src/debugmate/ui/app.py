@@ -5,10 +5,12 @@ from __future__ import annotations
 import secrets
 import threading
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import gradio as gr
 from fastapi import HTTPException
 from fastapi.responses import Response
+from gradio.data_classes import FileData, ImageData
 
 from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.extraction import FieldId
@@ -67,6 +69,32 @@ _CASE_ID = "case_"
 _RUN_ID = "run_"
 _RESULT_ID = "result_"
 _CONTENT_PREFIX = "/debugmate-content/"
+_DEFAULT_CONTENT_ORIGIN = "http://127.0.0.1:7860"
+
+
+def _loopback_origin(value: object, *, origin_only: bool) -> str:
+    """Normalize a loopback HTTP origin without trusting arbitrary Host text."""
+
+    if not isinstance(value, str):
+        raise ResultServiceError("download_invalid")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise ResultServiceError("download_invalid") from None
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is None
+        or not 1024 <= port <= 65535
+        or parsed.query
+        or parsed.fragment
+        or (origin_only and parsed.path not in {"", "/"})
+    ):
+        raise ResultServiceError("download_invalid")
+    return f"http://127.0.0.1:{port}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,23 +108,67 @@ class UiContent:
     sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class UiContentUrl:
+    url: str
+    filename: str
+    mime_type: str
+
+
+class _VerifiedImage(gr.Image):
+    def postprocess(self, value):
+        if isinstance(value, UiContentUrl):
+            return ImageData(
+                path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
+            )
+        return super().postprocess(value)
+
+
+class _VerifiedAudio(gr.Audio):
+    def postprocess(self, value):
+        if isinstance(value, UiContentUrl):
+            return FileData(
+                path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
+            )
+        return super().postprocess(value)
+
+
+class _VerifiedDownloadButton(gr.DownloadButton):
+    def postprocess(self, value):
+        if isinstance(value, UiContentUrl):
+            return FileData(
+                path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
+            )
+        return super().postprocess(value)
+
+
 class _UiContentStore:
     """Bounded server-owned content registry with no caller-visible server path."""
 
-    def __init__(self) -> None:
+    def __init__(self, content_origin: str) -> None:
+        self._content_origin = _loopback_origin(content_origin, origin_only=True)
         self._lock = threading.RLock()
         self._values: dict[str, UiContent] = {}
 
+    @property
+    def content_origin(self) -> str:
+        return self._content_origin
+
     @staticmethod
-    def _token_from_url(value: object) -> str:
-        if not isinstance(value, str) or not value.startswith(_CONTENT_PREFIX):
+    def _token_from_url(value: object, *, content_origin: str) -> str:
+        raw = value.url if isinstance(value, UiContentUrl) else value
+        if not isinstance(raw, str):
             raise ResultServiceError("download_invalid")
-        token = value.removeprefix(_CONTENT_PREFIX)
+        if raw.startswith(content_origin):
+            raw = raw.removeprefix(content_origin)
+        if not raw.startswith(_CONTENT_PREFIX):
+            raise ResultServiceError("download_invalid")
+        token = raw.removeprefix(_CONTENT_PREFIX)
         if len(token) != 32 or any(character not in "0123456789abcdef" for character in token):
             raise ResultServiceError("download_invalid")
         return token
 
-    def issue(self, download, *, attachment: bool) -> str:
+    def issue(self, download, *, attachment: bool) -> UiContentUrl:
         filename = download.filename
         mime_type = download.mime_type
         if (
@@ -121,10 +193,14 @@ class _UiContentStore:
             self._values[token] = content
             while len(self._values) > 64:
                 self._values.pop(next(iter(self._values)))
-        return f"{_CONTENT_PREFIX}{token}"
+        return UiContentUrl(
+            url=f"{self._content_origin}{_CONTENT_PREFIX}{token}",
+            filename=filename,
+            mime_type=mime_type,
+        )
 
     def resolve(self, url: object) -> UiContent:
-        token = self._token_from_url(url)
+        token = self._token_from_url(url, content_origin=self._content_origin)
         with self._lock:
             content = self._values.get(token)
         if content is None or sha256_bytes(content.payload) != content.sha256:
@@ -139,9 +215,9 @@ class CallbackPayload:
     state: ResultViewState
     view: ComponentViewModel
     report_markdown: str | None
-    card_url: str | None
-    audio_url: str | None
-    download_url: str | None
+    card_url: UiContentUrl | None
+    audio_url: UiContentUrl | None
+    download_url: UiContentUrl | None
     field_values: tuple[str, str, str, str, str, str]
     redacted_input: str = ""
     category: str = "等待诊断"
@@ -154,9 +230,20 @@ class CallbackPayload:
 class UiCallbacks:
     """Thin adapter that resolves every displayed member through the service."""
 
-    def __init__(self, service: ResultApplicationService) -> None:
+    def __init__(
+        self, service: ResultApplicationService, *, content_origin: str = _DEFAULT_CONTENT_ORIGIN
+    ) -> None:
         self._service = service
-        self._content = _UiContentStore()
+        self._content = _UiContentStore(content_origin)
+
+    def _require_loopback_request(self, request: object | None) -> None:
+        """Require the queued event source to match the configured loopback server."""
+
+        if request is None:
+            return
+        observed = _loopback_origin(getattr(request, "url", None), origin_only=False)
+        if observed != self._content.content_origin:
+            raise ResultServiceError("download_invalid")
 
     @staticmethod
     def _failure(state: ResultViewState, code: str) -> ResultViewState:
@@ -311,7 +398,7 @@ class UiCallbacks:
                 field_values=_EMPTY_FIELD_VALUES,
             )
 
-    def load_replay(self, fixture_id: object) -> CallbackPayload:
+    def load_replay(self, fixture_id: object, *, request: object | None = None) -> CallbackPayload:
         if (
             not isinstance(fixture_id, str)
             or not fixture_id
@@ -320,53 +407,69 @@ class UiCallbacks:
         ):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
         try:
+            self._require_loopback_request(request)
             return self._render(self._service.load_replay(fixture_id))
         except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
-    def diagnose(self, approved_payload: object) -> CallbackPayload:
+    def diagnose(
+        self, approved_payload: object, *, request: object | None = None
+    ) -> CallbackPayload:
         try:
+            self._require_loopback_request(request)
             return self._render(self._service.diagnose_and_compose(approved_payload))
-        except (ResultServiceError, TypeError, ValueError):
+        except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
-    def diagnose_events(self, approved_payload: object):
+    def diagnose_events(self, approved_payload: object, *, request: object | None = None):
         """Yield strict UI payloads as the service completes actual result stages."""
 
         try:
+            self._require_loopback_request(request)
             for event in self._service.diagnose_and_compose_events(approved_payload):
                 if not isinstance(event, ServiceStageEvent):
                     raise ResultServiceError("result_bundle_invalid")
                 yield self._render(event.state)
-        except (ResultServiceError, TypeError, ValueError):
+        except Exception:
             yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
-    def refresh(self, case_id: object, result_id: object) -> CallbackPayload:
+    def refresh(
+        self, case_id: object, result_id: object, *, request: object | None = None
+    ) -> CallbackPayload:
         if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
         try:
+            self._require_loopback_request(request)
             return self._render(self._service.restore_result(case_id, result_id))
         except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
-    def retry(self, case_id: object, result_id: object) -> CallbackPayload:
+    def retry(self, case_id: object, result_id: object, *, request: object | None = None
+    ) -> CallbackPayload:
         if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
         try:
+            self._require_loopback_request(request)
             return self._render(self._service.retry_stage(case_id, result_id))
         except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
     def correct(
-        self, previous_run_id: object, draft: CorrectionDraft | str, *, confirmed: object
+        self,
+        previous_run_id: object,
+        draft: CorrectionDraft | str,
+        *,
+        confirmed: object,
+        request: object | None = None,
     ) -> CallbackPayload:
         if not self._strict_id(previous_run_id, _RUN_ID) or not isinstance(confirmed, bool):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
         try:
+            self._require_loopback_request(request)
             return self._render(
                 self._service.correct_and_compose(previous_run_id, draft, confirmed)
             )
-        except (ResultServiceError, TypeError, ValueError):
+        except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
 
@@ -485,11 +588,13 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
     )
 
 
-def build_app(service: ResultApplicationService) -> gr.Blocks:
+def build_app(
+    service: ResultApplicationService, *, content_origin: str = _DEFAULT_CONTENT_ORIGIN
+) -> gr.Blocks:
     """Build the compact workbench without an upload, path, or shell boundary."""
 
     with gr.Blocks(title="DebugMate 诊断工作台", analytics_enabled=False) as app:
-        callbacks = UiCallbacks(service)
+        callbacks = UiCallbacks(service, content_origin=content_origin)
         current_state = gr.State(_idle_view())
         approved_payload = gr.State(value=None)
         correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
@@ -554,7 +659,7 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                     with gr.Tab("文字报告"):
                         report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
                     with gr.Tab("诊断卡"):
-                        card = gr.Image(
+                        card = _VerifiedImage(
                             label="诊断卡",
                             type="filepath",
                             interactive=False,
@@ -562,7 +667,7 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                             buttons=[],
                         )
                     with gr.Tab("语音复盘"):
-                        audio = gr.Audio(
+                        audio = _VerifiedAudio(
                             label="语音复盘",
                             type="filepath",
                             interactive=False,
@@ -584,7 +689,9 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                             label="引用",
                         )
                         gr.File(label="已验证单个产物", interactive=False, visible=False)
-                        download = gr.DownloadButton("下载结果包", visible=False, interactive=False)
+                        download = _VerifiedDownloadButton(
+                            "下载结果包", visible=False, interactive=False
+                        )
         start_button = gr.Button("开始诊断", variant="primary", interactive=False)
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
 
@@ -644,11 +751,11 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                 gr.update(value=payload.recap_text),
             )
 
-        def load_replay(fixture_id: str | None):
-            return apply_payload(callbacks.load_replay(fixture_id))
+        def load_replay(fixture_id: str | None, request: gr.Request):
+            return apply_payload(callbacks.load_replay(fixture_id, request=request))
 
-        def diagnose_stream(approved: object):
-            for payload in callbacks.diagnose_events(approved):
+        def diagnose_stream(approved: object, request: gr.Request):
+            for payload in callbacks.diagnose_events(approved, request=request):
                 yield apply_payload(payload)
 
         def update_correction_draft(
@@ -693,12 +800,16 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                 gr.update(interactive=False),
             )
 
-        def create_new_run(previous_run_id: object, draft: object) -> tuple[object, ...]:
+        def create_new_run(
+            previous_run_id: object, draft: object, request: gr.Request
+        ) -> tuple[object, ...]:
             if not isinstance(draft, CorrectionDraft):
                 return apply_payload(
                     callbacks._render(callbacks._failure(_idle_view(), "result_bundle_invalid"))
                 )
-            return apply_payload(callbacks.correct(previous_run_id, draft, confirmed=True))
+            return apply_payload(
+                callbacks.correct(previous_run_id, draft, confirmed=True, request=request)
+            )
 
         replay_button.click(
             load_replay,

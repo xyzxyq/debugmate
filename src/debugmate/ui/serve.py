@@ -157,7 +157,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.host != "127.0.0.1":
         parser.error("host must be literal 127.0.0.1")
-    app = build_app(_local_service())
+    app = build_app(
+        _local_service(), content_origin=f"http://{args.host}:{args.port}"
+    )
     app.launch(
         server_name=args.host,
         server_port=args.port,
