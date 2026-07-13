@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import os
 import subprocess
@@ -12,12 +13,22 @@ import pytest
 
 from debugmate.hashing import sha256_bytes
 from debugmate.results import audio as audio_module
-from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
+from debugmate.results.audio import (
+    AudioHandoff,
+    AudioHandoffError,
+    TrustedCandidateRoot,
+    TtsFallbackChain,
+)
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import MediaProbe, MediaProbeError
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts import edge as edge_module
-from debugmate.results.tts.base import AudioPayload, RateProfile, TtsRequestIdentity
+from debugmate.results.tts.base import (
+    AudioPayload,
+    RateProfile,
+    TtsAdapterError,
+    TtsRequestIdentity,
+)
 from debugmate.results.tts.dify import DifyTtsAdapter
 from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
@@ -130,7 +141,7 @@ def test_chain_requires_a_trusted_candidate_root_capability(
 
     result = chain.synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
-    assert result.available is True
+    assert result.audio.available is True
     assert not (tmp_path / "caller-output" / "recap.mp3").exists()
 
 
@@ -163,9 +174,9 @@ def test_fallback_order_and_retry_are_fixed(
     ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
     assert calls == [("dify", "normal"), ("dify", "faster")]
-    assert result.available is True
-    assert result.backend == "dify"
-    assert [attempt.safe_error_code for attempt in result.attempts[:-1]] == [
+    assert result.audio.available is True
+    assert result.audio.backend == "dify"
+    assert [attempt.safe_error_code for attempt in result.audio.attempts[:-1]] == [
         "audio_duration_invalid"
     ]
 
@@ -184,9 +195,9 @@ def test_non_duration_failure_falls_through_without_retry(
     ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
     assert calls == [("dify", "normal"), ("edge_tts", "normal"), ("sapi", "normal")]
-    assert result.available is False
-    assert result.failure.code == "tts_failed"
-    assert str(tmp_path) not in result.model_dump_json()
+    assert result.audio.available is False
+    assert result.audio.failure.code == "tts_failed"
+    assert str(tmp_path) not in result.audio.model_dump_json()
 
 
 def test_payload_metadata_forgery_is_rejected_without_publication(
@@ -214,8 +225,8 @@ def test_payload_metadata_forgery_is_rejected_without_publication(
         )
     ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
 
-    assert result.available is False
-    assert result.attempts[0].safe_error_code == "tts_candidate_invalid"
+    assert result.audio.available is False
+    assert result.audio.attempts[0].safe_error_code == "tts_candidate_invalid"
     assert not list((tmp_path / "debugmate-private-candidates").rglob("recap.mp3"))
 
 
@@ -348,9 +359,9 @@ def test_edge_cancellation_swallower_is_force_killed_before_sapi_fallback(
 
     assert elapsed < 1.0
     assert calls == [("dify", "normal"), ("sapi", "normal")]
-    assert result.available is True
-    assert result.backend == "sapi"
-    assert result.attempts[1].safe_error_code == "tts_backend_failed"
+    assert result.audio.available is True
+    assert result.audio.backend == "sapi"
+    assert result.audio.attempts[1].safe_error_code == "tts_backend_failed"
 
 
 def test_sapi_has_no_input_or_output_file_argv_and_ignores_nested_junction(
@@ -432,6 +443,150 @@ def test_chain_rejects_constructed_seven_unit_recap_before_any_adapter_call(tmp_
         chain.synthesize(forged, _identity(), _candidate_root(tmp_path))
 
     assert calls == []
+
+
+def test_sapi_timeout_is_normalised_without_command_or_path_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A process exception may not retain the sensitive command it carried."""
+
+    adapter = SapiTtsAdapter(project_root=Path.cwd())
+    sensitive_command = str(tmp_path / "private" / "voice-input.txt")
+
+    def timeout(*_args: object, **_kwargs: object) -> tuple[int, bytes]:
+        raise subprocess.TimeoutExpired(cmd=sensitive_command, timeout=0.01, output=b"secret")
+
+    monkeypatch.setattr("debugmate.results.tts.sapi._run_bounded_process", timeout)
+
+    with pytest.raises(TtsAdapterError) as caught:
+        adapter.synthesize(_recap(), _identity(), RateProfile.NORMAL)
+
+    assert str(caught.value) == "tts_backend_failed"
+    assert caught.value.args == ("tts_backend_failed",)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert sensitive_command not in repr(caught.value)
+    assert "secret" not in repr(caught.value)
+
+
+@pytest.mark.parametrize("rate", ["-10%", "+10%"])
+def test_edge_worker_subprocess_parses_both_fixed_rate_argv_forms_without_network(
+    rate: str,
+) -> None:
+    """The normal negative rate must remain an option value, not an option switch."""
+
+    command = edge_module._edge_worker_command(rate)
+
+    assert f"--rate={rate}" in command
+    assert "--rate" not in command
+    completed = subprocess.run(
+        [*command, "--validate-arguments"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        shell=False,
+        timeout=15,
+    )
+    assert completed.returncode == 0
+    assert completed.stdout == b""
+    assert completed.stderr == b""
+
+
+def test_success_audio_exposes_one_time_identity_bound_handoff_for_plan_five(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plan 05 receives verified bytes, never a pre-publication raw pathname."""
+
+    calls: list[tuple[str, str]] = []
+    probe_calls: list[Path] = []
+
+    def matching_probe(path: Path, **_kwargs: object) -> MediaProbe:
+        probe_calls.append(path)
+        payload = path.read_bytes()
+        return MediaProbe(
+            duration_ms=45_000,
+            codec="mp3",
+            channels=1,
+            bytes=len(payload),
+            sha256=sha256_bytes(payload),
+        )
+
+    monkeypatch.setattr(audio_module, "probe_mp3", matching_probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", _canonicalize)
+    outcome = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["ok"], calls),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
+
+    assert outcome.audio.available is True
+    assert outcome.handoff is not None
+    assert not hasattr(outcome.handoff, "path")
+    assert not hasattr(outcome.handoff, "root")
+    assert "private-candidates" not in repr(outcome.handoff)
+    assert len(probe_calls) == 2
+
+    with pytest.raises(AudioHandoffError, match="^audio_handoff_invalid$") as copied_identity:
+        outcome.handoff.take_verified_bytes(outcome.audio.model_copy())
+    assert copied_identity.value.args == ("audio_handoff_invalid",)
+
+    public_copy = outcome.handoff.take_verified_bytes(outcome.audio)
+
+    assert public_copy.startswith(b"\xff\xfb")
+    assert len(probe_calls) == 3  # Fresh probe/hash validation happens at handoff read time.
+    with pytest.raises(AudioHandoffError, match="^audio_handoff_invalid$") as reused:
+        outcome.handoff.take_verified_bytes(outcome.audio)
+    assert reused.value.args == ("audio_handoff_invalid",)
+    assert reused.value.__cause__ is None
+    assert reused.value.__context__ is None
+
+    with pytest.raises(TypeError):
+        AudioHandoff()
+    with pytest.raises(TypeError):
+        copy.copy(outcome.handoff)
+
+
+def test_handoff_reprobe_failure_is_value_free_and_releases_private_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plan 05 cannot copy a stale or tampered candidate after synthesis completed."""
+
+    calls: list[tuple[str, str]] = []
+    probe_count = 0
+
+    def changing_probe(path: Path, **_kwargs: object) -> MediaProbe:
+        nonlocal probe_count
+        probe_count += 1
+        payload = path.read_bytes()
+        return MediaProbe(
+            duration_ms=45_000,
+            codec="mp3",
+            channels=1,
+            bytes=len(payload),
+            sha256=sha256_bytes(payload) if probe_count < 3 else "0" * 64,
+        )
+
+    monkeypatch.setattr(audio_module, "probe_mp3", changing_probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", _canonicalize)
+    root = tmp_path / "private-candidates"
+    outcome = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["ok"], calls),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    ).synthesize(_recap(), _identity(), TrustedCandidateRoot.for_testing(root))
+
+    assert outcome.handoff is not None
+    with pytest.raises(AudioHandoffError, match="^audio_handoff_invalid$") as caught:
+        outcome.handoff.take_verified_bytes(outcome.audio)
+
+    assert caught.value.args == ("audio_handoff_invalid",)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert not list(root.rglob("recap.mp3"))
 
 
 def _make_junction(link: Path, target: Path) -> None:

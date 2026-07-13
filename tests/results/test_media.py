@@ -458,3 +458,45 @@ def test_duration_window_has_no_mpeg_tolerance(
         probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000_000)
 
     _assert_code(error, "duration_out_of_range")
+
+
+@pytest.mark.parametrize(
+    ("duration_ms", "accepted"),
+    [
+        (30_000, True),
+        (45_000, True),
+        (60_000, True),
+        (29_999, False),
+        (60_001, False),
+    ],
+)
+def test_mocked_ffprobe_duration_contract_uses_exact_millisecond_boundaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    duration_ms: int,
+    accepted: bool,
+) -> None:
+    """Floating ffprobe JSON must honour the course window without MPEG tolerance."""
+
+    media = tmp_path / "candidate.mp3"
+    media.write_bytes(b"\xff\xfb" + b"x" * 100)
+
+    def completed(_command: list[str], **_kwargs: object) -> tuple[int, bytes]:
+        return (
+            0,
+            (
+                '{"format":{"duration":"'
+                f"{duration_ms / 1000:.3f}"
+                '"},"streams":[{"codec_type":"audio","codec_name":"mp3","channels":1}]}'
+            ).encode(),
+        )
+
+    monkeypatch.setattr(media_module, "_run_bounded_process", completed)
+
+    if accepted:
+        probe = probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000_000)
+        assert probe.duration_ms == duration_ms
+    else:
+        with pytest.raises(MediaProbeError) as error:
+            probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000_000)
+        _assert_code(error, "duration_out_of_range")

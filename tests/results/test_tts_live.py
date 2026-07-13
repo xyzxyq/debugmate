@@ -144,9 +144,9 @@ def test_real_sapi_payload_survives_the_leased_candidate_and_canonicalisation_ch
         TrustedCandidateRoot.for_testing(tmp_path / "private-candidates"),
     )
 
-    assert result.available is True
-    assert result.backend == "sapi"
-    assert 30_000 <= result.duration_ms <= 60_000
+    assert result.audio.available is True
+    assert result.audio.backend == "sapi"
+    assert 30_000 <= result.audio.duration_ms <= 60_000
 
 
 @pytest.mark.cloud
