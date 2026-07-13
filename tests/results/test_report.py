@@ -302,6 +302,28 @@ def test_callers_cannot_reseal_a_forged_projection_for_rendering(
         render_citations(caller_resealed)
 
 
+def test_copying_private_authority_and_rewriting_fingerprint_cannot_forge_capability(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    presentation = _presentation(completed_source_bundle, tmp_path)
+    forged = presentation.model_copy(
+        update={"limitations": (*presentation.limitations, "private-state-forgery")}
+    )
+    payload = forged.model_dump(mode="json", exclude={"projection_sha256"})
+    forged = forged.model_copy(
+        update={"projection_sha256": sha256_bytes(canonical_json_bytes(payload))}
+    )
+    forged.__pydantic_private__["_source_authority"] = presentation.__pydantic_private__[
+        "_source_authority"
+    ]
+    forged.__pydantic_private__["_source_fingerprint"] = forged.projection_sha256
+
+    with pytest.raises(ReportRenderError, match="report_render_failed"):
+        render_report(forged)
+    with pytest.raises(CitationRenderError, match="citation_render_failed"):
+        render_citations(forged)
+
+
 def test_supported_candidate_ids_require_a_complete_grounded_support_edge(
     completed_source_bundle, tmp_path: Path
 ) -> None:
