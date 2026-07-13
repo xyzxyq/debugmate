@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -271,7 +272,5 @@ def canonicalize_mp3(
         _fail("canonicalize_failed")
     finally:
         if temporary_path is not None:
-            try:
+            with suppress(OSError):
                 temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
