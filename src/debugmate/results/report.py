@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 from pydantic import Field
 
@@ -30,6 +31,25 @@ class CitationRenderError(ValueError):
 class RenderedReport(StrictFrozenModel):
     identity: ArtifactIdentity
     markdown: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CitationRow(StrictFrozenModel):
+    evidence_id: str = Field(pattern=r"^evidence_[0-9a-f]{32}$")
+    official_title: str
+    source_url: str
+    source_locator: str
+    chunk_id: str
+    source_id: str
+    knowledge_build_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    supported_candidate_ids: tuple[str, ...]
+    supported_fact_ids: tuple[str, ...]
+
+
+class RenderedCitations(StrictFrozenModel):
+    identity: ArtifactIdentity
+    rows: tuple[CitationRow, ...]
+    json_bytes: bytes
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -175,6 +195,95 @@ def _scan_rendered_report(presentation: PresentationModel, markdown: str) -> Non
     assert_export_safe(scan_value)
 
 
+def _verified_https(value: str) -> bool:
+    if (
+        not value.startswith("https://")
+        or "\\" in value
+        or any(ord(char) < 0x20 or char.isspace() for char in value)
+    ):
+        return False
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+    )
+
+
+def _citation_rows(presentation: PresentationModel) -> tuple[CitationRow, ...]:
+    fact_ids = [item.fact_id for item in presentation.observed_facts]
+    evidence_ids = [item.evidence_id for item in presentation.citations]
+    candidate_ids = [item.candidate_id for item in presentation.root_causes]
+    if (
+        len(fact_ids) != len(set(fact_ids))
+        or len(evidence_ids) != len(set(evidence_ids))
+        or len(candidate_ids) != len(set(candidate_ids))
+    ):
+        raise ValueError("duplicate projection identity")
+    facts = set(fact_ids)
+    evidence = set(evidence_ids)
+    for link in presentation.support_links:
+        if (
+            not link.fact_ids
+            or not link.evidence_ids
+            or len(link.fact_ids) != len(set(link.fact_ids))
+            or len(link.evidence_ids) != len(set(link.evidence_ids))
+            or not set(link.fact_ids) <= facts
+            or not set(link.evidence_ids) <= evidence
+        ):
+            raise ValueError("invalid support graph")
+    for candidate in presentation.root_causes:
+        if not set(candidate.fact_ids) <= facts or not set(candidate.evidence_ids) <= evidence:
+            raise ValueError("invalid candidate graph")
+        if candidate.claim_label == "有依据":
+            for evidence_id in candidate.evidence_ids:
+                if not any(
+                    evidence_id in link.evidence_ids
+                    and bool(set(candidate.fact_ids).intersection(link.fact_ids))
+                    for link in presentation.support_links
+                ):
+                    raise ValueError("grounded candidate has unsupported evidence")
+
+    rows: list[CitationRow] = []
+    for item in sorted(presentation.citations, key=lambda value: value.evidence_id):
+        if not _verified_https(item.source_url):
+            raise ValueError("citation URL is not verified HTTPS")
+        supported_facts = sorted(
+            {
+                fact_id
+                for link in presentation.support_links
+                if item.evidence_id in link.evidence_ids
+                for fact_id in link.fact_ids
+            }
+        )
+        supported_candidates = sorted(
+            candidate.candidate_id
+            for candidate in presentation.root_causes
+            if item.evidence_id in candidate.evidence_ids
+        )
+        rows.append(
+            CitationRow(
+                evidence_id=item.evidence_id,
+                official_title=item.source_id,
+                source_url=item.source_url,
+                source_locator=item.source_locator,
+                chunk_id=item.chunk_id,
+                source_id=item.source_id,
+                knowledge_build_id=item.knowledge_build_id,
+                supported_candidate_ids=tuple(supported_candidates),
+                supported_fact_ids=tuple(supported_facts),
+            )
+        )
+    result = tuple(rows)
+    assert_export_safe([item.model_dump(mode="json") for item in result])
+    return result
+
+
 def render_report(presentation: PresentationModel) -> RenderedReport:
     """Render the fixed Chinese report using no provider, filesystem or LLM input."""
 
@@ -184,6 +293,7 @@ def render_report(presentation: PresentationModel) -> RenderedReport:
         strict = PresentationModel.model_validate_json(
             canonical_json_bytes(presentation.model_dump(mode="json")), strict=True
         )
+        _citation_rows(strict)
         markdown = "\n".join(_report_lines(strict)) + "\n"
         _scan_rendered_report(strict, markdown)
         return RenderedReport(
@@ -196,6 +306,27 @@ def render_report(presentation: PresentationModel) -> RenderedReport:
     raise failure from None
 
 
-def render_citations(presentation: PresentationModel) -> object:
-    del presentation
-    raise CitationRenderError()
+def render_citations(presentation: PresentationModel) -> RenderedCitations:
+    """Export only verified evidence metadata in canonical stable-ID order."""
+
+    try:
+        if not isinstance(presentation, PresentationModel):
+            raise TypeError("presentation type")
+        strict = PresentationModel.model_validate_json(
+            canonical_json_bytes(presentation.model_dump(mode="json")), strict=True
+        )
+        rows = _citation_rows(strict)
+        payload = {
+            "identity": strict.identity.model_dump(mode="json"),
+            "rows": [item.model_dump(mode="json") for item in rows],
+        }
+        json_bytes = canonical_json_bytes(payload)
+        return RenderedCitations(
+            identity=strict.identity,
+            rows=rows,
+            json_bytes=json_bytes,
+            sha256=sha256_bytes(json_bytes),
+        )
+    except Exception:
+        failure = CitationRenderError()
+    raise failure from None
