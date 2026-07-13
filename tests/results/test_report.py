@@ -276,3 +276,21 @@ def test_renderers_reject_a_presentation_with_changed_identity_or_content(
             render_report(changed)
         with pytest.raises(CitationRenderError, match="citation_render_failed"):
             render_citations(changed)
+
+
+def test_callers_cannot_reseal_a_forged_projection_for_rendering(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    presentation = _presentation(completed_source_bundle, tmp_path)
+    forged = presentation.model_copy(
+        update={"limitations": (*presentation.limitations, "caller-forged")}
+    )
+    payload = forged.model_dump(mode="json", exclude={"projection_sha256"})
+    caller_resealed = forged.model_copy(
+        update={"projection_sha256": sha256_bytes(canonical_json_bytes(payload))}
+    )
+
+    with pytest.raises(ReportRenderError, match="report_render_failed"):
+        render_report(caller_resealed)
+    with pytest.raises(CitationRenderError, match="citation_render_failed"):
+        render_citations(caller_resealed)

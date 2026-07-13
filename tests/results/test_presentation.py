@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from debugmate.hashing import canonical_json_bytes
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.loader import load_verified_outcome
+from debugmate.results import presentation as presentation_module
 from debugmate.results.presentation import PresentationBuildError, build_presentation
 
 
@@ -130,3 +131,8 @@ def test_projection_cannot_be_reconstructed_without_its_canonical_seal(
     payload = presentation.model_dump(mode="json", exclude={"projection_sha256"})
     with pytest.raises(ValidationError, match="projection_sha256"):
         type(presentation).model_validate_json(canonical_json_bytes(payload), strict=True)
+
+
+def test_projection_module_exposes_no_public_resigning_or_revalidation_authority() -> None:
+    assert not hasattr(presentation_module.PresentationModel, "seal_for")
+    assert not hasattr(presentation_module, "revalidate_presentation")
