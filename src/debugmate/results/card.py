@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import struct
 import uuid
+import zlib
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +25,7 @@ from debugmate.results.presentation import PresentationModel, _validated_present
 CANVAS_WIDTH = 1600
 MAX_PNG_HEIGHT = 12_000
 MAX_PNG_PIXELS = CANVAS_WIDTH * MAX_PNG_HEIGHT
+MAX_PNG_BYTES = 16 * 1024 * 1024
 MAX_CARD_TEXT_CHARS = 48_000
 MAX_CARD_ITEMS = 256
 MARGIN = 88
@@ -77,6 +79,8 @@ class CardLayout(StrictFrozenModel):
     renderer_version: Literal["pillow-card-v1"] = CARD_RENDERER_VERSION
     font_name: str
     font_sha256: str
+    title: Literal["DebugMate 诊断卡"] = "DebugMate 诊断卡"
+    identity_bar: str
     canvas_width: int = CANVAS_WIDTH
     canvas_height: int = Field(strict=True, gt=0)
     section_order: tuple[str, ...]
@@ -181,10 +185,16 @@ def _sections(presentation: PresentationModel) -> tuple[tuple[str, str, tuple[st
         f"{item.fact_id} · {item.field_id}: {item.value}（置信度 {item.confidence:.2f}）"
         for item in presentation.observed_facts
     ) or ("暂无",)
-    causes = tuple(
-        f"{item.candidate_id} · {item.claim_label}: {item.cause}（置信度 {item.confidence:.2f}）"
+    cause_lines = tuple(
+        f"{item.candidate_id} · {item.claim_label}: {item.cause}"
+        f"（证据 {', '.join(item.evidence_ids) or '无'}；置信度 {item.confidence:.2f}）"
         for item in presentation.root_causes
-    ) or ("暂无",)
+    )
+    evidence_lines = tuple(
+        f"证据 {item.evidence_id} · {item.source_id}: {item.content_summary}"
+        for item in presentation.citations
+    )
+    causes = cause_lines + evidence_lines or ("暂无",)
     return (
         ("phenomenon", "现象与已观察事实", facts),
         ("causes", "根因候选与依据", causes),
@@ -209,7 +219,15 @@ def measure_card(presentation: PresentationModel, context: PreparedGenerationCon
     all_values = [value for _, _, values in definitions for value in values]
     if len(all_values) > MAX_CARD_ITEMS or sum(map(len, all_values)) > MAX_CARD_TEXT_CHARS:
         raise CardRenderFailure("png_layout_failed")
-    y = MARGIN + TITLE_SIZE + 48
+    identity_bar = (
+        f"案例 …{presentation.identity.case_id[-8:]}  ·  "
+        f"运行 {presentation.identity.source_run_id}  ·  "
+        f"版本 {presentation.identity.generation_version}"
+    )
+    identity_font = _font(font_record.path, BODY_SIZE)
+    identity_lines = _wrap(identity_bar, identity_font, CANVAS_WIDTH - 2 * MARGIN)
+    identity_height = len(identity_lines) * (_text_size(identity_font, "示例")[1] + LINE_GAP)
+    y = MARGIN + TITLE_SIZE + 34 + identity_height + 42
     sections: list[CardSection] = []
     for section_id, title, values in definitions:
         line_texts = tuple(line for value in values for line in _wrap(value, body, content_width))
@@ -248,47 +266,104 @@ def measure_card(presentation: PresentationModel, context: PreparedGenerationCon
         identity=presentation.identity,
         font_name=font_record.name,
         font_sha256=font_record.sha256,
+        identity_bar=identity_bar,
         canvas_height=canvas_height,
         section_order=tuple(item[0] for item in definitions),
         sections=tuple(sections),
     )
 
 
-def _png_chunks(payload: bytes) -> tuple[bytes, ...]:
+def _parse_png(
+    payload: bytes, *, allow_split_idat: bool = False
+) -> tuple[tuple[bytes, bytes], ...]:
     if not payload.startswith(_PNG_SIGNATURE):
         raise CardRenderFailure("png_verify_failed")
     offset = len(_PNG_SIGNATURE)
-    chunks: list[bytes] = []
+    chunks: list[tuple[bytes, bytes]] = []
     while offset < len(payload):
         if offset + 12 > len(payload):
             raise CardRenderFailure("png_verify_failed")
         length = struct.unpack(">I", payload[offset : offset + 4])[0]
         kind = payload[offset + 4 : offset + 8]
-        offset += 12 + length
-        if offset > len(payload):
+        data_end = offset + 8 + length
+        chunk_end = data_end + 4
+        if chunk_end > len(payload):
             raise CardRenderFailure("png_verify_failed")
-        chunks.append(kind)
+        data = payload[offset + 8 : data_end]
+        expected_crc = struct.unpack(">I", payload[data_end:chunk_end])[0]
+        if expected_crc != zlib.crc32(kind + data) & 0xFFFFFFFF:
+            raise CardRenderFailure("png_verify_failed")
+        chunks.append((kind, data))
+        offset = chunk_end
         if kind == b"IEND":
             break
-    if offset != len(payload) or not chunks or chunks[-1] != b"IEND":
+    kinds = [item[0] for item in chunks]
+    valid_order = (
+        len(kinds) >= 3
+        and kinds[0] == b"IHDR"
+        and kinds[-1] == b"IEND"
+        and all(kind == b"IDAT" for kind in kinds[1:-1])
+    )
+    if (
+        offset != len(payload)
+        or not valid_order
+        or kinds.count(b"IHDR") != 1
+        or kinds.count(b"IEND") != 1
+        or (not allow_split_idat and kinds.count(b"IDAT") != 1)
+    ):
         raise CardRenderFailure("png_verify_failed")
     return tuple(chunks)
+
+
+def _encode_png(chunks: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    output = bytearray(_PNG_SIGNATURE)
+    for kind, data in chunks:
+        output.extend(struct.pack(">I", len(data)))
+        output.extend(kind)
+        output.extend(data)
+        output.extend(struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    return bytes(output)
+
+
+def _canonicalize_png(payload: bytes) -> bytes:
+    chunks = _parse_png(payload, allow_split_idat=True)
+    ihdr = chunks[0]
+    compressed = b"".join(data for kind, data in chunks if kind == b"IDAT")
+    return _encode_png((ihdr, (b"IDAT", compressed), (b"IEND", b"")))
 
 
 def verify_card_png(path: Path, *, expected_size: tuple[int, int]) -> None:
     """Verify bytes and decoded pixels from the final disk path."""
 
     try:
+        stat_result = path.stat()
+        if stat_result.st_size <= 0 or stat_result.st_size > MAX_PNG_BYTES:
+            raise ValueError("compressed size")
         payload = path.read_bytes()
-        chunks = _png_chunks(payload)
-        if any(chunk not in _PNG_ALLOWED_CHUNKS for chunk in chunks):
-            raise ValueError("metadata")
+        chunks = _parse_png(payload)
+        if any(kind not in _PNG_ALLOWED_CHUNKS for kind, _ in chunks):
+            raise ValueError("chunk")
+        ihdr = chunks[0][1]
+        if len(ihdr) != 13:
+            raise ValueError("IHDR")
+        width, height, depth, color, compression, filtering, interlace = struct.unpack(
+            ">IIBBBBB", ihdr
+        )
+        if (
+            width != CANVAS_WIDTH
+            or height <= 0
+            or height > MAX_PNG_HEIGHT
+            or width * height > MAX_PNG_PIXELS
+            or expected_size != (width, height)
+            or (depth, color, compression, filtering, interlace) != (8, 2, 0, 0, 0)
+        ):
+            raise ValueError("resource or format")
         with Image.open(path) as image:
             if (
                 image.format != "PNG"
                 or image.mode != "RGB"
                 or getattr(image, "n_frames", 1) != 1
-                or image.size != expected_size
+                or image.size != (width, height)
                 or image.info != {}
             ):
                 raise ValueError("shape")
@@ -320,7 +395,11 @@ def render_card(
         body_font = _font(font_record.path, BODY_SIZE)
         image = Image.new("RGB", (layout.canvas_width, layout.canvas_height), "#F4F7FB")
         draw = ImageDraw.Draw(image)
-        draw.text((MARGIN, MARGIN), "DebugMate 诊断卡", font=title_font, fill="#13213C")
+        draw.text((MARGIN, MARGIN), layout.title, font=title_font, fill="#13213C")
+        identity_y = MARGIN + TITLE_SIZE + 24
+        for line in _wrap(layout.identity_bar, body_font, CANVAS_WIDTH - 2 * MARGIN):
+            draw.text((MARGIN, identity_y), line, font=body_font, fill="#53627A")
+            identity_y += _text_size(body_font, line)[1] + LINE_GAP
         for section in layout.sections:
             box = (section.x, section.y, section.x + section.width, section.y + section.height)
             draw.rounded_rectangle(box, radius=20, fill="#FFFFFF", outline="#CCD6E5", width=2)
@@ -338,6 +417,7 @@ def render_card(
             pixels = decoded.convert("RGB")
             pixels.load()
         pixels.save(temporary, format="PNG", optimize=False, compress_level=9)
+        temporary.write_bytes(_canonicalize_png(temporary.read_bytes()))
         verify_card_png(temporary, expected_size=(layout.canvas_width, layout.canvas_height))
         if target.exists():
             raise FileExistsError("card target already exists")

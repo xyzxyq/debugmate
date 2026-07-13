@@ -73,7 +73,10 @@ def test_font_and_layout_are_bound_and_deterministic(
         assert section.y + section.height <= first.canvas_height
         assert all(line.width <= section.content_width for line in section.lines)
     causes = next(item for item in first.sections if item.section_id == "causes")
-    assert all(evidence_id in "\n".join(line.text for line in causes.lines) for evidence_id in presentation.root_causes[0].evidence_ids)
+    assert all(
+        evidence_id in "\n".join(line.text for line in causes.lines)
+        for evidence_id in (item.evidence_id for item in presentation.citations)
+    )
 
 
 def test_font_change_and_profile_mismatch_fail_closed(
