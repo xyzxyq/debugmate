@@ -119,10 +119,35 @@ first in `178d70e` and closed in `b8b8d38`:
 See `04-04-FINAL-REMEDIATION-REPORT.md` for the final finding-to-control mapping
 and fresh evidence.
 
+## TOCTOU and bounded-process follow-up
+
+The final review's remaining executable-replacement, candidate-root swap and
+child-output findings were reproduced and closed in strict RED/GREEN commits:
+
+- `3c0e1b3` / `b09290c`: raw caller paths are no longer accepted by
+  `TtsFallbackChain`; it receives a factory-issued private candidate-root
+  capability and holds Windows non-delete directory leases during the actual
+  canonicalization interval. A genuine Junction-swap attempt proves no outside
+  file is ever created.
+- `1c4560f` / `da49fb7`: media executable metadata caching is removed; every
+  lookup hashes the current pinned file, with a second revalidation and
+  no-write/no-delete file-handle lease immediately before `Popen`. Child output
+  is concurrently pipe-drained and killed at the bounded per-stream limit,
+  rather than being written to an unbounded temporary file.
+- `1551fc5` / `4cb5b70`: direct construction of the capability is sealed;
+  production uses the fixed application-owned candidate space and tests use an
+  explicit injection factory.
+
+The fresh post-change TTS marker still returned `1 passed, 2 explicit external
+skips`. See `04-04-TOCTOU-REMEDIATION-REPORT.md` for exact attack evidence,
+Plan 05 publication implications and the explicitly bounded Windows residual
+limits.
+
 ## Verification
 
 - `tests/results/test_recap.py`: 6 passed.
-- `tests/results/test_media.py`: 18 passed with real FFmpeg fixtures.
-- `tests/results/test_tts_chain.py`: 5 passed.
+- `tests/results/test_media.py`: 24 passed with real FFmpeg fixtures and
+  replacement/output-flood regressions.
+- `tests/results/test_tts_chain.py`: 21 passed, including a real Junction race.
 - `pytest -m tts tests/results/test_tts_live.py`: 1 passed, 2 explicit external skips.
 - External marker selection: 2 skipped, 1 deselected.
