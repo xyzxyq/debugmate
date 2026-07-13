@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from debugmate.hashing import sha256_bytes
 from debugmate.results.audio import TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import MediaProbe, MediaProbeError
@@ -119,9 +120,7 @@ def test_chain_rejects_external_or_identity_mismatched_candidate(
                 backend=self.backend,
                 rate_profile=rate_profile,
                 path=outside,
-                request_identity=request_identity.model_copy(
-                    update={"recap_sha256": "9" * 64}
-                ),
+                request_identity=request_identity.model_copy(update={"recap_sha256": "9" * 64}),
             )
 
     calls: list[tuple[str, str]] = []
@@ -141,7 +140,7 @@ def test_chain_rejects_external_or_identity_mismatched_candidate(
 def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
     adapter = FakeAdapter("dify", ["ok", "ok"], calls)
-    probes = iter((MediaProbeError("duration_out_of_range"), _probe))
+    probes = iter((MediaProbeError("duration_out_of_range"), _probe, _probe))
 
     def varying_probe(path, **kwargs):
         value = next(probes)
@@ -244,7 +243,10 @@ def test_all_adapters_reject_constructed_secret_and_mismatched_identity(
     wrong_identity = _identity().model_copy(update={"recap_sha256": "f" * 64})
     settings = DebugMateSettings.from_env({"DIFY_API_KEY": "fictional-test-key"})
     adapters = (
-        DifyTtsAdapter(settings, client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500)))),
+        DifyTtsAdapter(
+            settings,
+            client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500))),
+        ),
         EdgeTtsAdapter(),
         SapiTtsAdapter(project_root=Path.cwd()),
     )
@@ -253,7 +255,11 @@ def test_all_adapters_reject_constructed_secret_and_mismatched_identity(
 
     for index, adapter in enumerate(adapters):
         with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
-            adapter.synthesize(unsafe, tmp_path / f"unsafe-{index}.mp3", _identity(), RateProfile.NORMAL)
+            adapter.synthesize(
+                unsafe, tmp_path / f"unsafe-{index}.mp3", _identity(), RateProfile.NORMAL
+            )
         assert secret not in str(caught.value)
         with pytest.raises(RuntimeError, match="^tts_backend_failed$"):
-            adapter.synthesize(_recap(), tmp_path / f"identity-{index}.mp3", wrong_identity, RateProfile.NORMAL)
+            adapter.synthesize(
+                _recap(), tmp_path / f"identity-{index}.mp3", wrong_identity, RateProfile.NORMAL
+            )
