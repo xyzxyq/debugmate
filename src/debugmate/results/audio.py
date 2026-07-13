@@ -9,9 +9,10 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from debugmate.hashing import sha256_bytes
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.contracts import ArtifactIdentity, AudioAttempt, AudioResult, SafeFailure
-from debugmate.results.media import MediaProbeError, canonicalize_mp3_bytes, probe_mp3
+from debugmate.results.media import MediaProbe, MediaProbeError, canonicalize_mp3_bytes, probe_mp3
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import AudioPayload, RateProfile, TtsAdapter, TtsRequestIdentity
 from debugmate.results.tts.validation import validate_tts_request
@@ -19,6 +20,152 @@ from debugmate.results.tts.validation import validate_tts_request
 # Deliberately narrow indirection points for deterministic tests.  Both have a
 # bytes-only contract; no caller path can re-enter the adapter boundary.
 canonicalize_mp3 = canonicalize_mp3_bytes
+
+
+class AudioHandoffError(ValueError):
+    """Fixed, value-free refusal from the private audio-to-publisher boundary."""
+
+    def __init__(self) -> None:
+        super().__init__("audio_handoff_invalid")
+
+
+_AUDIO_HANDOFF_CAPABILITY = object()
+
+
+@dataclass(frozen=True, slots=True)
+class TtsSynthesisOutcome:
+    """The public JSON-safe audio record plus one private successful handoff.
+
+    ``audio`` remains the unmodified :class:`AudioResult` contract.  The
+    capability is intentionally not serialisable and is present only for one
+    successful synthesis.  Plan 05 can consume it once to copy freshly
+    revalidated canonical bytes into its separate transaction.
+    """
+
+    audio: AudioResult
+    handoff: AudioHandoff | None
+
+    def __post_init__(self) -> None:
+        if self.audio.available != (self.handoff is not None):
+            raise ValueError("tts_outcome_invalid")
+
+
+class AudioHandoff:
+    """Opaque, one-shot authority to copy one retained canonical MP3.
+
+    No raw directory or file path is exposed.  A caller must pass the exact
+    ``AudioResult`` object returned by the same outcome; equal copied or forged
+    models are deliberately rejected.  The private file, run and root leases
+    stay held until this one read is complete.
+    """
+
+    __slots__ = (
+        "_audio",
+        "_candidate",
+        "_lease",
+        "_max_bytes",
+        "_probe_timeout",
+        "_released",
+    )
+
+    def __init__(
+        self,
+        *,
+        _capability: object,
+        audio: AudioResult,
+        candidate: _MaterializedAudio,
+        lease: _CandidateRootLease,
+        probe_timeout: float,
+        max_bytes: int,
+    ) -> None:
+        if _capability is not _AUDIO_HANDOFF_CAPABILITY:
+            raise TypeError("AudioHandoff requires an approved factory")
+        self._audio = audio
+        self._candidate = candidate
+        self._lease = lease
+        self._max_bytes = max_bytes
+        self._probe_timeout = probe_timeout
+        self._released = False
+
+    @classmethod
+    def _issue(
+        cls,
+        audio: AudioResult,
+        candidate: _MaterializedAudio,
+        lease: _CandidateRootLease,
+        *,
+        probe_timeout: float,
+        max_bytes: int,
+    ) -> AudioHandoff:
+        return cls(
+            _capability=_AUDIO_HANDOFF_CAPABILITY,
+            audio=audio,
+            candidate=candidate,
+            lease=lease,
+            probe_timeout=probe_timeout,
+            max_bytes=max_bytes,
+        )
+
+    def __repr__(self) -> str:
+        return "<AudioHandoff active>" if not self._released else "<AudioHandoff released>"
+
+    def __copy__(self) -> AudioHandoff:
+        raise TypeError("AudioHandoff is not copyable")
+
+    def __deepcopy__(self, _memo: object) -> AudioHandoff:
+        raise TypeError("AudioHandoff is not copyable")
+
+    def __del__(self) -> None:  # pragma: no cover - last-resort private-handle hygiene
+        try:
+            self.close()
+        except Exception:
+            # Finalizers must never surface a private cleanup value during
+            # interpreter shutdown; normal callers use the deterministic read.
+            return
+
+    def take_verified_bytes(self, audio: AudioResult) -> bytes:
+        """Return one freshly re-probed/hash-checked copy and release the lease."""
+
+        if self._released or audio is not self._audio:
+            raise AudioHandoffError
+        payload: bytes | None = None
+        try:
+            candidate = self._candidate
+            candidate.file.assert_same_path_identity(candidate.root)
+            probe = probe_mp3(
+                candidate.file.path,
+                timeout_seconds=self._probe_timeout,
+                max_bytes=self._max_bytes,
+            )
+            candidate.file.assert_same_path_identity(candidate.root)
+            if (
+                probe.duration_ms != audio.duration_ms
+                or probe.sha256 != audio.sha256
+                or probe.bytes <= 0
+            ):
+                raise _TargetInvalid
+            payload = candidate.file.read_all(self._max_bytes)
+            candidate.file.assert_same_path_identity(candidate.root)
+            if len(payload) != probe.bytes or sha256_bytes(payload) != probe.sha256:
+                raise _TargetInvalid
+        except Exception:
+            payload = None
+        finally:
+            self.close()
+        if payload is None:
+            raise AudioHandoffError
+        return payload
+
+    def close(self) -> None:
+        """Release every private resource without revealing cleanup values."""
+
+        if getattr(self, "_released", True):
+            return
+        self._released = True
+        candidate = self._candidate
+        candidate.file.close()
+        _safe_unlink(candidate.file.path, candidate.root)
+        self._lease.close()
 
 
 class TtsFallbackChain:
@@ -57,7 +204,7 @@ class TtsFallbackChain:
         recap: SafeRecapText,
         request: TtsRequestIdentity,
         candidate_root: TrustedCandidateRoot,
-    ) -> AudioResult:
+    ) -> TtsSynthesisOutcome:
         if not isinstance(candidate_root, TrustedCandidateRoot):
             raise TypeError("candidate_root must be a TrustedCandidateRoot")
         try:
@@ -70,12 +217,20 @@ class TtsFallbackChain:
             assert_export_safe(recap.text)
         except Exception:
             raise ValueError("tts_input_invalid") from None
-        with candidate_root.allocate_leased(request) as target_root:
-            return self._synthesize_in_leased_root(recap, request, target_root)
+        lease = candidate_root.allocate_leased(request)
+        try:
+            outcome = self._synthesize_in_leased_root(recap, request, lease)
+        except Exception:
+            lease.close()
+            raise
+        if outcome.handoff is None:
+            lease.close()
+        return outcome
 
     def _synthesize_in_leased_root(
-        self, recap: SafeRecapText, request: TtsRequestIdentity, target_root: Path
-    ) -> AudioResult:
+        self, recap: SafeRecapText, request: TtsRequestIdentity, lease: _CandidateRootLease
+    ) -> TtsSynthesisOutcome:
+        target_root = lease.path
         final_path = target_root / "recap.mp3"
         attempts: list[AudioAttempt] = []
         try:
@@ -88,7 +243,7 @@ class TtsFallbackChain:
                         _require_valid_payload(
                             payload, adapter.backend, rate, request, self._max_bytes
                         )
-                        final_probe = _materialize_verified_audio(
+                        candidate = _materialize_verified_audio(
                             payload.audio_bytes,
                             candidate_path=target_root
                             / f"candidate-{backend_index}-{rate.value}.mp3",
@@ -141,27 +296,40 @@ class TtsFallbackChain:
                             backend=adapter.backend,
                             rate_profile=rate.value,
                             succeeded=True,
-                            duration_ms=final_probe.duration_ms,
-                            sha256=final_probe.sha256,
+                            duration_ms=candidate.probe.duration_ms,
+                            sha256=candidate.probe.sha256,
                         )
                     )
-                    return AudioResult(
+                    audio = AudioResult(
                         identity=self._identity(request),
                         available=True,
                         backend=adapter.backend,
                         fallback_used=backend_index > 0,
                         attempts=tuple(attempts),
-                        duration_ms=final_probe.duration_ms,
-                        sha256=final_probe.sha256,
+                        duration_ms=candidate.probe.duration_ms,
+                        sha256=candidate.probe.sha256,
+                    )
+                    return TtsSynthesisOutcome(
+                        audio=audio,
+                        handoff=AudioHandoff._issue(
+                            audio,
+                            candidate,
+                            lease,
+                            probe_timeout=self._probe_timeout,
+                            max_bytes=self._max_bytes,
+                        ),
                     )
         except _TargetInvalid:
             raise ValueError("tts_target_invalid") from None
-        return AudioResult(
-            identity=self._identity(request),
-            available=False,
-            fallback_used=len({attempt.backend for attempt in attempts}) > 1,
-            attempts=tuple(attempts),
-            failure=SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts"),
+        return TtsSynthesisOutcome(
+            audio=AudioResult(
+                identity=self._identity(request),
+                available=False,
+                fallback_used=len({attempt.backend for attempt in attempts}) > 1,
+                attempts=tuple(attempts),
+                failure=SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts"),
+            ),
+            handoff=None,
         )
 
 
@@ -273,6 +441,9 @@ class _CandidateRootLease:
         return self.path
 
     def __exit__(self, *_arguments: object) -> None:
+        self.close()
+
+    def close(self) -> None:
         self.run_lease.close()
         self.root_lease.close()
 
@@ -380,6 +551,15 @@ class _LeasedCandidateFile:
         self.close()
 
 
+@dataclass
+class _MaterializedAudio:
+    """Private final file retained under its open descriptor until publication."""
+
+    file: _LeasedCandidateFile
+    root: Path
+    probe: MediaProbe
+
+
 def _allocate_new_leased_file(path: Path, root: Path) -> _LeasedCandidateFile:
     """Allocate a non-reparse regular file with `CREATE_NEW`, never overwrite."""
 
@@ -438,6 +618,7 @@ def _materialize_verified_audio(
     itself receives the candidate bytes on stdin and returns bytes on stdout.
     """
 
+    final: _LeasedCandidateFile | None = None
     final_created = False
     try:
         with _allocate_new_leased_file(candidate_path, root) as candidate:
@@ -450,18 +631,20 @@ def _materialize_verified_audio(
                 timeout_seconds=timeout_seconds,
                 max_bytes=max_bytes,
             )
-            with _allocate_new_leased_file(final_path, root) as final:
-                final.write(canonical_bytes)
-                final.assert_same_path_identity(root)
-                final_probe = probe_mp3(
-                    final_path, timeout_seconds=timeout_seconds, max_bytes=max_bytes
-                )
-                final.assert_same_path_identity(root)
-                final_created = True
-        return final_probe
+            final = _allocate_new_leased_file(final_path, root)
+            final.write(canonical_bytes)
+            final.assert_same_path_identity(root)
+            final_probe = probe_mp3(
+                final_path, timeout_seconds=timeout_seconds, max_bytes=max_bytes
+            )
+            final.assert_same_path_identity(root)
+            final_created = True
+        return _MaterializedAudio(file=final, root=root, probe=final_probe)
     finally:
         _safe_unlink(candidate_path, root)
         if not final_created:
+            if final is not None:
+                final.close()
             _safe_unlink(final_path, root)
 
 

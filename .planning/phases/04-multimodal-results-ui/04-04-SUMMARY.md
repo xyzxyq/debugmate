@@ -180,3 +180,37 @@ truthfully open without credentials or an explicit network opt-in.
 - `tests/results/test_tts_chain.py`: 21 passed, including a real Junction race.
 - `pytest -m tts tests/results/test_tts_live.py`: 1 passed, 2 explicit external skips.
 - External marker selection: 2 skipped, 1 deselected.
+
+## Final secure-review repair and Plan 05 integration seam
+
+The final secure review required a real capability boundary for the still-private
+canonical MP3. `TtsFallbackChain` now returns `TtsSynthesisOutcome`: the
+unchanged, JSON-safe `AudioResult` lives at `outcome.audio`, while a successful
+outcome alone includes a non-copyable, factory-issued `AudioHandoff`. The
+publisher integration seam is deliberately narrow:
+
+```python
+audio_bytes = outcome.handoff.take_verified_bytes(outcome.audio)
+```
+
+This operation is one-time and requires the exact `AudioResult` object, not an
+equal copied or forged model. It keeps the private descriptor and root/run
+leases held, re-probes and re-hashes the canonical MP3 immediately before the
+read, then deletes/releases the private candidate. It never offers a source or
+destination pathname; stale/tampered/reused requests expose only the fixed
+`audio_handoff_invalid` failure.
+
+The same final pair also closes direct SAPI process exception leakage and the
+edge negative-argument ambiguity. A mocked `TimeoutExpired` with a sensitive
+absolute command becomes a context-free `tts_backend_failed`; edge uses
+`--rate=-10%` and the real isolated worker parses both approved rates without a
+network call. Exact mocked ffprobe checks cover `30_000`, `45_000`, `60_000`
+acceptance and `29_999`, `60_001` rejection.
+
+Fresh verification after this repair:
+
+- focused `test_tts_chain.py` + `test_media.py`: `49 passed`;
+- real local marker: `3 passed, 2 skipped` (Dify/edge external gates remain
+  explicitly open);
+- full offline suite: `630 passed, 27 deselected`;
+- `ruff check src/debugmate/results tests/results`: passed.

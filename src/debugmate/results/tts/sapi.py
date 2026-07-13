@@ -7,7 +7,6 @@ import stat
 from pathlib import Path
 
 from debugmate.results.media import (
-    ProcessOutputLimitExceeded,
     _run_bounded_process,
     trusted_media_tools,
 )
@@ -73,6 +72,7 @@ class SapiTtsAdapter:
         recap_bytes = text.text.encode("utf-8")
         if len(recap_bytes) > self._MAX_RECAP_BYTES:
             raise TtsAdapterError() from None
+        failure: TtsAdapterError | None = None
         try:
             powershell_returncode, wav_bytes = _run_bounded_process(
                 [
@@ -128,8 +128,13 @@ class SapiTtsAdapter:
             )
             if ffmpeg_returncode != 0 or not mp3_bytes:
                 raise RuntimeError
-        except (OSError, RuntimeError, ValueError, ProcessOutputLimitExceeded):
-            raise TtsAdapterError() from None
+        except Exception:
+            # A TimeoutExpired instance can retain a full command and absolute
+            # path.  Leave the ``except`` block before raising the replacement
+            # so even exception context is value-free.
+            failure = TtsAdapterError()
+        if failure is not None:
+            raise failure
         return AudioPayload(
             backend=self.backend,
             rate_profile=rate_profile,

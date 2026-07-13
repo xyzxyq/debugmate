@@ -38,10 +38,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--voice", required=True)
     parser.add_argument("--rate", required=True)
+    parser.add_argument("--validate-arguments", action="store_true")
     try:
         arguments = parser.parse_args()
         if arguments.voice not in _VOICES or arguments.rate not in _RATES:
             return 2
+        # This local, no-network probe makes the exact child argv contract
+        # executable.  Production never passes the flag.
+        if arguments.validate_arguments:
+            return 0
         raw = sys.stdin.buffer.read(_MAX_RECAP_BYTES + 1)
         if len(raw) > _MAX_RECAP_BYTES:
             return 2

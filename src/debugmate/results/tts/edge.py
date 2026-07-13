@@ -70,6 +70,5 @@ def _edge_worker_command(rate: str) -> list[str]:
         "debugmate.results.tts.edge_worker",
         "--voice",
         EdgeTtsAdapter.voice,
-        "--rate",
-        rate,
+        f"--rate={rate}",
     ]

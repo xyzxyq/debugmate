@@ -38,6 +38,36 @@ lease, write it once, run `ffprobe` while the handle is still held, and retain
 the final private candidate for the publisher.  A planted hardlink/Junction or
 an unexpected existing name fails closed and is never overwritten.
 
+### Final secure-review handoff control
+
+The earlier prose requirement is now an executable API rather than a convention:
+`TtsFallbackChain.synthesize()` returns `TtsSynthesisOutcome`. Its `audio` field
+is the unchanged JSON-serialisable `AudioResult`; only a successful outcome also
+carries an opaque `AudioHandoff`. The handoff has no public path/root field,
+cannot be directly constructed or copied, and accepts only the exact in-memory
+`AudioResult` object from that same outcome. Thus an equal `model_copy()` or a
+forged record cannot obtain bytes.
+
+Plan 05 calls `handoff.take_verified_bytes(outcome.audio)` exactly once. The
+handoff keeps the private final-file descriptor plus root/run leases alive,
+rechecks pathname identity, runs `ffprobe` again, compares duration/hash/byte
+facts to `AudioResult`, reads that same descriptor, verifies its SHA-256, then
+unlinks the private candidate and releases every lease. It returns bytes only;
+it cannot be redirected to a result directory and exposes no raw path. A stale,
+changed, copied or reused capability returns only `audio_handoff_invalid` with
+no command/path cause or context.
+
+Two adjacent final-boundary repairs are covered by permanent regressions:
+
+- `SapiTtsAdapter` converts a direct `subprocess.TimeoutExpired` (including its
+  sensitive command) to an isolated `tts_backend_failed` whose args, cause and
+  context contain no process value.
+- The edge worker receives `--rate=-10%` / `--rate=+10%`; a real isolated
+  `python -I -m ... --validate-arguments` subprocess proves both approved rates
+  parse without contacting the network.
+- Mocked `ffprobe` JSON asserts the exact inclusive `30_000`, `45_000` and
+  `60_000` millisecond values pass, while `29_999` and `60_001` fail.
+
 ## Backend-specific boundaries
 
 - **Dify:** streams a size-capped `audio/mpeg`/`audio/mp3` response into an
@@ -72,6 +102,12 @@ fixtures.
 - The real Windows SAPI marker passes through SAPI -> WAV stdout -> FFmpeg
   stdin/stdout -> MP3 -> `ffprobe`; Dify and edge remain explicit external
   open gates when credentials/network opt-in are absent.
+
+After the final handoff repair, the local `tts` marker was run again and returned
+`3 passed, 2 skipped`: direct SAPI, the Junction safety check and the complete
+leased-chain route all passed. Dify remains **OPEN / skipped** without
+`DIFY_API_KEY`; edge remains **OPEN / skipped** without explicit
+`DEBUGMATE_ALLOW_NETWORK_TTS=1` approval.
 
 ## Plan 05 handoff
 
