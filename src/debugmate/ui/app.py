@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import secrets
-import tempfile
-from dataclasses import dataclass
-from pathlib import Path
+import threading
+from dataclasses import dataclass, field
 
 import gradio as gr
+from fastapi import HTTPException
+from fastapi.responses import Response
 
 from debugmate.diagnosis.extraction import FieldId
+from debugmate.hashing import sha256_bytes
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -58,6 +60,70 @@ _EMPTY_FIELD_VALUES = ("", "", "", "", "", "")
 _CASE_ID = "case_"
 _RUN_ID = "run_"
 _RESULT_ID = "result_"
+_CONTENT_PREFIX = "/debugmate-content/"
+
+
+@dataclass(frozen=True, slots=True)
+class UiContent:
+    """In-memory verified bytes issued to a native component through a token URL."""
+
+    payload: bytes = field(repr=False)
+    filename: str
+    mime_type: str
+    attachment: bool
+    sha256: str
+
+
+class _UiContentStore:
+    """Bounded server-owned content registry with no caller-visible server path."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._values: dict[str, UiContent] = {}
+
+    @staticmethod
+    def _token_from_url(value: object) -> str:
+        if not isinstance(value, str) or not value.startswith(_CONTENT_PREFIX):
+            raise ResultServiceError("download_invalid")
+        token = value.removeprefix(_CONTENT_PREFIX)
+        if len(token) != 32 or any(character not in "0123456789abcdef" for character in token):
+            raise ResultServiceError("download_invalid")
+        return token
+
+    def issue(self, download, *, attachment: bool) -> str:
+        filename = download.filename
+        mime_type = download.mime_type
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or "/" in filename
+            or "\\" in filename
+            or ":" in filename
+            or "\x00" in filename
+        ):
+            raise ResultServiceError("download_invalid")
+        payload = download.read_bytes()
+        content = UiContent(
+            payload=payload,
+            filename=filename,
+            mime_type=mime_type,
+            attachment=attachment,
+            sha256=sha256_bytes(payload),
+        )
+        token = secrets.token_hex(16)
+        with self._lock:
+            self._values[token] = content
+            while len(self._values) > 64:
+                self._values.pop(next(iter(self._values)))
+        return f"{_CONTENT_PREFIX}{token}"
+
+    def resolve(self, url: object) -> UiContent:
+        token = self._token_from_url(url)
+        with self._lock:
+            content = self._values.get(token)
+        if content is None or sha256_bytes(content.payload) != content.sha256:
+            raise ResultServiceError("download_invalid")
+        return content
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,23 +133,18 @@ class CallbackPayload:
     state: ResultViewState
     view: ComponentViewModel
     report_markdown: str | None
-    card_path: str | None
-    audio_path: str | None
-    download_path: str | None
+    card_url: str | None
+    audio_url: str | None
+    download_url: str | None
     field_values: tuple[str, str, str, str, str, str]
 
 
 class UiCallbacks:
     """Thin adapter that resolves every displayed member through the service."""
 
-    def __init__(self, service: ResultApplicationService, *, cache_root: Path) -> None:
+    def __init__(self, service: ResultApplicationService) -> None:
         self._service = service
-        self._cache_root = Path(cache_root)
-        if not self._cache_root.is_absolute():
-            raise ValueError("UI cache root must be absolute")
-        self._cache_root.mkdir(parents=True, exist_ok=True)
-        if not self._cache_root.is_dir() or self._cache_root.is_symlink():
-            raise ValueError("UI cache root is unavailable")
+        self._content = _UiContentStore()
 
     @staticmethod
     def _failure(state: ResultViewState, code: str) -> ResultViewState:
@@ -110,20 +171,10 @@ class UiCallbacks:
             and all(character in "0123456789abcdef" for character in value[len(prefix) :])
         )
 
-    def _cache_download(self, download) -> str:
-        filename = download.filename
-        if (
-            not isinstance(filename, str)
-            or not filename
-            or Path(filename).name != filename
-            or any(marker in filename for marker in ("/", "\\", ":", "\x00"))
-        ):
-            raise ResultServiceError("download_invalid")
-        payload = download.read_bytes()
-        target = self._cache_root / f"{secrets.token_hex(16)}-{filename}"
-        with target.open("xb") as handle:
-            handle.write(payload)
-        return str(target)
+    def resolve_content(self, url: object) -> UiContent:
+        """Route-only content handoff; it never accepts or returns a file path."""
+
+        return self._content.resolve(url)
 
     def _member(self, state: ResultViewState, member_id: str):
         if state.identity is None or state.result_id is None:
@@ -156,44 +207,38 @@ class UiCallbacks:
                 state=state,
                 view=render_view_state(state),
                 report_markdown=None,
-                card_path=None,
-                audio_path=None,
-                download_path=None,
+                card_url=None,
+                audio_url=None,
+                download_url=None,
                 field_values=_EMPTY_FIELD_VALUES,
             )
-        created: list[Path] = []
         try:
             report = self._member(state, "report").read_bytes().decode("utf-8")
-            card_path = None
+            card_url = None
             if state.availability.card:
-                card_path = self._cache_download(self._member(state, "card"))
-                created.append(Path(card_path))
-            audio_path = None
+                card_url = self._content.issue(self._member(state, "card"), attachment=False)
+            audio_url = None
             if state.availability.audio:
-                audio_path = self._cache_download(self._member(state, "audio"))
-                created.append(Path(audio_path))
-            download_path = self._cache_download(self._member(state, "bundle"))
-            created.append(Path(download_path))
+                audio_url = self._content.issue(self._member(state, "audio"), attachment=False)
+            download_url = self._content.issue(self._member(state, "bundle"), attachment=True)
             return CallbackPayload(
                 state=state,
                 view=render_view_state(state),
                 report_markdown=report,
-                card_path=card_path,
-                audio_path=audio_path,
-                download_path=download_path,
+                card_url=card_url,
+                audio_url=audio_url,
+                download_url=download_url,
                 field_values=self._correction_fields(state),
             )
         except (ResultServiceError, UnicodeError, OSError, ValueError):
-            for path in created:
-                path.unlink(missing_ok=True)
             failed = self._failure(state, "download_invalid")
             return CallbackPayload(
                 state=failed,
                 view=render_view_state(failed),
                 report_markdown=None,
-                card_path=None,
-                audio_path=None,
-                download_path=None,
+                card_url=None,
+                audio_url=None,
+                download_url=None,
                 field_values=_EMPTY_FIELD_VALUES,
             )
 
@@ -243,6 +288,21 @@ class UiCallbacks:
             )
         except (ResultServiceError, TypeError, ValueError):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
+
+def mount_content_endpoint(application, callbacks: UiCallbacks) -> None:
+    """Serve a token's re-hashed in-memory bytes; no component path is exposed."""
+
+    @application.get(f"{_CONTENT_PREFIX}{{token}}", include_in_schema=False)
+    def content(token: str) -> Response:
+        try:
+            value = callbacks.resolve_content(f"{_CONTENT_PREFIX}{token}")
+        except ResultServiceError:
+            raise HTTPException(status_code=404, detail="content unavailable") from None
+        headers = {}
+        if value.attachment:
+            headers["Content-Disposition"] = f'attachment; filename="{value.filename}"'
+        return Response(content=value.payload, media_type=value.mime_type, headers=headers)
 
 
 def _idle_view() -> ResultViewState:
@@ -330,13 +390,13 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
         view.result_metadata,
         failure,
         gr.update(value=payload.report_markdown or "尚未生成诊断结果"),
-        gr.update(value=payload.card_path, visible=payload.card_path is not None),
-        gr.update(value=payload.audio_path, visible=payload.audio_path is not None),
+        gr.update(value=payload.card_url, visible=payload.card_url is not None),
+        gr.update(value=payload.audio_url, visible=payload.audio_url is not None),
         gr.update(
-            value=payload.download_path,
+            value=payload.download_url,
             label=view.download_label or "下载结果包",
-            visible=payload.download_path is not None,
-            interactive=payload.download_path is not None,
+            visible=payload.download_url is not None,
+            interactive=payload.download_url is not None,
         ),
         # A correction becomes actionable only after a local, explicit draft
         # exists; terminal state alone must never submit a rerun.
@@ -349,10 +409,7 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
     """Build the compact workbench without an upload, path, or shell boundary."""
 
     with gr.Blocks(title="DebugMate 诊断工作台", analytics_enabled=False) as app:
-        callbacks = UiCallbacks(
-            service,
-            cache_root=Path(tempfile.gettempdir()) / "debugmate-ui-cache",
-        )
+        callbacks = UiCallbacks(service)
         current_state = gr.State(_idle_view())
         approved_payload = gr.State(value=None)
         correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
@@ -604,4 +661,5 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
     # the app for structural inspection; ``serve`` supplies the same string
     # to launch without adding external assets or JavaScript.
     app.css = WORKBENCH_CSS
+    mount_content_endpoint(app.app, callbacks)
     return app.queue(default_concurrency_limit=1)
