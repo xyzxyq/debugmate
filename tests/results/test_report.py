@@ -180,13 +180,16 @@ def test_citation_export_is_canonical_verified_and_identity_bound(
     )
     row = first.rows[0]
     source = presentation.citations[0]
-    assert row.official_title == source.source_id
+    assert row.source_label == source.source_id
+    assert not hasattr(row, "official_title")
     assert row.source_url == source.source_url
     assert row.source_locator == source.source_locator
     assert row.chunk_id == source.chunk_id
     assert row.source_id == source.source_id
     assert row.knowledge_build_id == source.knowledge_build_id
     assert source.content_summary.encode("utf-8") not in first.json_bytes
+    assert b'"source_label"' in first.json_bytes
+    assert b'"official_title"' not in first.json_bytes
 
 
 @pytest.mark.parametrize(
