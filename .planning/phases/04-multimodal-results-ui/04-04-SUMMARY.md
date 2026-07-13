@@ -25,6 +25,7 @@ returns a typed `tts_failed` partial result without a placeholder MP3.
 - `8cd3c25` RED: ordered fallback contract.
 - `5850dea` RED: real local SAPI media gate.
 - `e67e348` GREEN: adapters, process boundary, fallback and live gates.
+- `115ac24` hardening: cap Dify bytes while streaming, before persistence.
 
 ## Security and degradation truth
 
@@ -75,4 +76,3 @@ paths remain independent from network availability.
 - `tests/results/test_tts_chain.py`: 5 passed.
 - `pytest -m tts tests/results/test_tts_live.py`: 1 passed, 2 explicit external skips.
 - External marker selection: 2 skipped, 1 deselected.
-
