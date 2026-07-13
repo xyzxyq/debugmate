@@ -100,13 +100,18 @@ def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_
     assert service.replay_calls == ["module-not-found"]
     assert payload.state == service.state
     assert payload.report_markdown == "# DebugMate\n\nverified report"
-    assert payload.card_path is not None and Path(payload.card_path).read_bytes() == b"verified-card"
-    assert payload.audio_path is not None and Path(payload.audio_path).read_bytes() == b"verified-audio"
-    assert payload.download_path is not None and Path(payload.download_path).read_bytes() == b"verified-zip"
+    assert payload.card_path is not None
+    assert Path(payload.card_path).read_bytes() == b"verified-card"
+    assert payload.audio_path is not None
+    assert Path(payload.audio_path).read_bytes() == b"verified-audio"
+    assert payload.download_path is not None
+    assert Path(payload.download_path).read_bytes() == b"verified-zip"
     assert "回放" in payload.view.result_metadata
 
 
-def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(tmp_path: Path) -> None:
+def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(
+    tmp_path: Path,
+) -> None:
     service = _Service()
     callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
     service.reject_member = True
@@ -116,18 +121,27 @@ def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(tm
     assert payload.state.status.value == "failed"
     assert payload.state.failure.code == "download_invalid"
     assert payload.report_markdown is None
-    assert payload.card_path is None and payload.audio_path is None and payload.download_path is None
+    assert payload.card_path is None
+    assert payload.audio_path is None
+    assert payload.download_path is None
     assert "C:" not in repr(payload)
 
 
-def test_correction_callback_accepts_only_strict_run_id_and_draft_and_never_a_path(tmp_path: Path) -> None:
+def test_correction_callback_accepts_only_strict_run_id_and_draft_and_never_a_path(
+    tmp_path: Path,
+) -> None:
+    from debugmate.diagnosis.extraction import FieldId
     from debugmate.results.service import CorrectionDraft
 
     service = _Service()
     callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
     payload = callbacks.correct(
         service.state.identity.source_run_id,
-        CorrectionDraft(field_id="exception_type", replacement="ImportError", reason="确认"),
+        CorrectionDraft(
+            field_id=FieldId.EXCEPTION_TYPE,
+            replacement="ImportError",
+            reason="确认",
+        ),
         confirmed=False,
     )
 
