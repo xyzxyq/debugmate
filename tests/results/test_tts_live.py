@@ -17,15 +17,17 @@ from debugmate.settings import DebugMateSettings
 
 
 def _safe_recap() -> SafeRecapText:
-    text = (
-        "现象：程序启动时反复出现 ModuleNotFoundError，导致人工智能实验无法继续运行。"
-        "主要原因与不确定性：当前 Python 环境很可能缺少 numpy，但仍需确认解释器和安装环境是否一致。"
-        "首次检查：先确认正在使用的 Python 解释器，再检查 numpy 是否安装在同一个虚拟环境中。"
-        "首次修复：在已确认的虚拟环境中补齐项目锁定的依赖，不要改动无关环境。"
-        "验证：重新启动解释器并执行最小导入测试，然后再次运行原始实验入口。"
-        "剩余限制：若仍然失败，需要继续核对环境变量、依赖版本和项目启动方式。"
+    units = (
+        "现象：程序启动时反复出现 ModuleNotFoundError，导致人工智能实验无法继续运行。",
+        "主要原因与不确定性：当前 Python 环境很可能缺少 numpy，"
+        "但仍需确认解释器和安装环境是否一致。",
+        "首次检查：先确认正在使用的 Python 解释器，再检查 numpy 是否安装在同一个虚拟环境中。",
+        "首次修复：在已确认的虚拟环境中补齐项目锁定的依赖，不要改动无关环境。",
+        "验证：重新启动解释器并执行最小导入测试，然后再次运行原始实验入口。",
+        "剩余限制：若仍然失败，需要继续核对环境变量、依赖版本和项目启动方式。",
     )
-    return SafeRecapText.model_construct(
+    text = "\n".join(units)
+    return SafeRecapText(
         identity=ArtifactIdentity(
             case_id="case_" + "1" * 32,
             source_run_id="run_" + "2" * 32,
@@ -35,7 +37,7 @@ def _safe_recap() -> SafeRecapText:
         ),
         text=text,
         sha256=sha256_bytes(text.encode("utf-8")),
-        units=("phenomenon", "cause", "check", "fix", "verify", "limitation"),
+        units=units,
         word_budget_version="recap_budget_v1",
     )
 
@@ -48,6 +50,32 @@ def _identity(recap: SafeRecapText) -> TtsRequestIdentity:
         generation_version="gen_" + "4" * 32,
         recap_sha256=recap.sha256,
     )
+
+
+def _assert_live_candidate(candidate, *, backend: str, request: TtsRequestIdentity) -> None:
+    probe = probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000)
+    assert candidate.backend == backend
+    assert candidate.rate_profile is RateProfile.NORMAL
+    assert candidate.request_identity == request
+    assert candidate.path.is_file()
+    assert candidate.path.stat().st_size == probe.bytes
+    assert probe.codec == "mp3"
+    assert probe.channels == 1
+    assert probe.sha256 != "0" * 64
+    evidence = candidate.model_dump_json()
+    assert _safe_recap().text not in evidence
+    assert "DIFY_API_KEY" not in evidence
+
+
+def _assert_value_free_rejection(adapter, recap: SafeRecapText, tmp_path: Path) -> None:
+    secret = "token=debugmate-fictional-secret-0123456789"
+    unsafe = recap.model_copy(
+        update={"text": secret, "sha256": sha256_bytes(secret.encode("utf-8"))}
+    )
+    with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
+        adapter.synthesize(unsafe, tmp_path / "unsafe.mp3", _identity(recap), RateProfile.NORMAL)
+    assert secret not in str(caught.value)
+    assert not (tmp_path / "unsafe.mp3").exists()
 
 
 @pytest.mark.tts
@@ -71,10 +99,11 @@ def test_live_dify_tts_gate(tmp_path: Path) -> None:
     if not settings.cloud_configured:
         pytest.skip("DIFY_API_KEY is absent; external gate remains open")
     recap = _safe_recap()
-    candidate = DifyTtsAdapter(settings).synthesize(
-        recap, tmp_path / "dify.mp3", _identity(recap), RateProfile.NORMAL
-    )
-    assert probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000).channels == 1
+    request = _identity(recap)
+    adapter = DifyTtsAdapter(settings)
+    candidate = adapter.synthesize(recap, tmp_path / "dify.mp3", request, RateProfile.NORMAL)
+    _assert_live_candidate(candidate, backend="dify", request=request)
+    _assert_value_free_rejection(adapter, recap, tmp_path)
 
 
 @pytest.mark.network
@@ -83,7 +112,9 @@ def test_live_edge_tts_gate(tmp_path: Path) -> None:
     if os.environ.get("DEBUGMATE_ALLOW_NETWORK_TTS") != "1":
         pytest.skip("network TTS not explicitly approved; external gate remains open")
     recap = _safe_recap()
-    candidate = EdgeTtsAdapter().synthesize(
-        recap, tmp_path / "edge.mp3", _identity(recap), RateProfile.NORMAL
-    )
-    assert probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000).channels == 1
+    request = _identity(recap)
+    adapter = EdgeTtsAdapter()
+    candidate = adapter.synthesize(recap, tmp_path / "edge.mp3", request, RateProfile.NORMAL)
+    _assert_live_candidate(candidate, backend="edge_tts", request=request)
+    assert candidate.voice == "zh-CN-XiaoxiaoNeural"
+    _assert_value_free_rejection(adapter, recap, tmp_path)

@@ -22,43 +22,91 @@ def _scan_process_capabilities(
     direct_calls = {
         "CreateProcess",
         "Invoke-Expression",
-        "Popen",
         "Start-Process",
         "cmd",
         "powershell",
         "pwsh",
     }
+    allowed_subprocess_calls = {path: {"Popen"} for path in audited_process_modules}
+
+    def _shell_is_literal_false(call: ast.Call) -> bool:
+        return any(
+            keyword.arg == "shell"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is False
+            for keyword in call.keywords
+        )
+
+    def _is_audited_subprocess_call(path: Path, call: ast.Call, name: str) -> bool:
+        if (
+            name not in allowed_subprocess_calls.get(path, set())
+            or not _shell_is_literal_false(call)
+        ):
+            return False
+        if name != "Popen":
+            return False
+        keyword_names = {keyword.arg for keyword in call.keywords}
+        return (
+            bool(call.args)
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "command"
+            and {"stdin", "stdout", "stderr"} <= keyword_names
+        )
+
+    def _is_os_process_name(name: str) -> bool:
+        return name in {"system", "popen", "startfile"} or name.startswith(("spawn", "exec"))
 
     for path, source in sorted(sources.items(), key=lambda item: str(item[0])):
-        process_boundary_is_separately_audited = path in audited_process_modules
         tree = ast.parse(source, filename=str(path))
+        os_aliases = {"os"}
+        direct_os_processes: set[str] = set()
+        direct_subprocess_calls: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                forbidden_imports.extend(
-                    f"{path}:{alias.name}"
-                    for alias in node.names
-                    if alias.name == "subprocess" and not process_boundary_is_separately_audited
-                )
-            elif (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "subprocess"
-                and not process_boundary_is_separately_audited
-            ):
-                forbidden_imports.append(f"{path}:{node.module}")
-            elif isinstance(node, ast.Call):
+                for alias in node.names:
+                    if alias.name == "os":
+                        os_aliases.add(alias.asname or "os")
+                    elif alias.name == "subprocess" and (
+                        path not in audited_process_modules or alias.asname is not None
+                    ):
+                        forbidden_imports.append(f"{path}:{alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                if node.module == "subprocess":
+                    forbidden_imports.append(f"{path}:subprocess")
+                    direct_subprocess_calls.update(
+                        alias.asname or alias.name for alias in node.names
+                    )
+                elif node.module == "os":
+                    for alias in node.names:
+                        imported = alias.name
+                        local_name = alias.asname or imported
+                        if _is_os_process_name(imported):
+                            forbidden_imports.append(f"{path}:os.{imported}")
+                            direct_os_processes.add(local_name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
                 function = node.func
-                if isinstance(function, ast.Name) and function.id in direct_calls:
+                if isinstance(function, ast.Name) and (
+                    function.id in direct_calls
+                    or function.id in direct_os_processes
+                    or function.id in direct_subprocess_calls
+                ):
                     forbidden_calls.append(f"{path}:{function.id}")
                 elif isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
                     owner = function.value.id
-                    if owner == "os" and function.attr == "system":
-                        forbidden_calls.append(f"{path}:os.system")
-                    if (
+                    if owner in os_aliases and _is_os_process_name(function.attr):
+                        forbidden_calls.append(f"{path}:os.{function.attr}")
+                    elif (
                         owner == "subprocess"
                         and function.attr in subprocess_calls
-                        and not process_boundary_is_separately_audited
+                        and not _is_audited_subprocess_call(path, node, function.attr)
                     ):
-                        forbidden_calls.append(f"{path}:subprocess.{function.attr}")
+                        suffix = (
+                            "[shell_not_false]"
+                            if function.attr in allowed_subprocess_calls.get(path, set())
+                            else ""
+                        )
+                        forbidden_calls.append(f"{path}:subprocess.{function.attr}{suffix}")
 
     return tuple(sorted(forbidden_imports)), tuple(sorted(forbidden_calls))
 
@@ -144,7 +192,6 @@ def test_one_unsafe_command_rejects_the_entire_diagnosis() -> None:
 def test_command_handling_sources_have_no_shell_execution_capability() -> None:
     audited_media_process_modules = {
         ROOT / "src" / "debugmate" / "results" / "media.py",
-        ROOT / "src" / "debugmate" / "results" / "tts" / "sapi.py",
     }
     sources = {
         path: path.read_text(encoding="utf-8")
@@ -179,8 +226,72 @@ def test_process_capability_audit_detects_non_allowlisted_calls_and_os_system(
     assert findings == (
         (f"{ordinary}:subprocess",),
         (
+            f"{allowed}:subprocess.run",
             f"{ordinary}:os.system",
             f"{ordinary}:subprocess.Popen",
             f"{ordinary}:subprocess.run",
+        ),
+    )
+
+
+def test_process_allowlist_is_call_precise_and_requires_literal_shell_false(
+    tmp_path: Path,
+) -> None:
+    boundary = tmp_path / "boundary.py"
+    findings = _scan_process_capabilities(
+        {
+            boundary: (
+                "import subprocess\n"
+                "command = ['fixed']\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, "
+                "stderr=err, shell=False)\n"
+                "subprocess.Popen(['missing-shell'])\n"
+                "subprocess.Popen(['unsafe'], shell=True)\n"
+                "subprocess.run(['not-the-audited-call'], shell=False)\n"
+            )
+        },
+        audited_process_modules={boundary},
+    )
+
+    assert findings == (
+        (),
+        (
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+            f"{boundary}:subprocess.run",
+        ),
+    )
+
+
+def test_process_audit_detects_direct_os_imports_and_process_families(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "os_processes.py"
+    findings = _scan_process_capabilities(
+        {
+            source: (
+                "from os import system, spawnv, execl, startfile\n"
+                "system('x')\nspawnv(0, 'x', [])\nexecl('x')\nstartfile('x')\n"
+                "import os\nos.spawnve(0, 'x', [], {})\nos.execv('x', [])\nos.startfile('x')\n"
+            )
+        },
+        audited_process_modules=set(),
+    )
+
+    assert findings == (
+        (
+            f"{source}:os.execl",
+            f"{source}:os.spawnv",
+            f"{source}:os.startfile",
+            f"{source}:os.system",
+        ),
+        (
+            f"{source}:execl",
+            f"{source}:os.execv",
+            f"{source}:os.spawnve",
+            f"{source}:os.startfile",
+            f"{source}:spawnv",
+            f"{source}:startfile",
+            f"{source}:system",
         ),
     )

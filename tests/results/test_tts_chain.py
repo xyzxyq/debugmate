@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from debugmate.hashing import sha256_bytes
+from debugmate.results import audio as audio_module
 from debugmate.results.audio import TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import MediaProbe, MediaProbeError
@@ -79,9 +80,15 @@ def _probe(path: Path, **_kwargs) -> MediaProbe:
     )
 
 
+def _canonicalize(source: Path, target: Path, **_kwargs: object) -> MediaProbe:
+    target.write_bytes(source.read_bytes())
+    return _probe(target)
+
+
 def test_fallback_order_and_success_short_circuit(tmp_path: Path, monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
     chain = TtsFallbackChain(
         (
             FakeAdapter("dify", ["transport"], calls),
@@ -156,6 +163,7 @@ def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkey
         return value(path, **kwargs)
 
     monkeypatch.setattr("debugmate.results.audio.probe_mp3", varying_probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
     result = TtsFallbackChain(
         (
             adapter,
@@ -166,6 +174,34 @@ def test_duration_failure_retries_once_then_falls_through(tmp_path: Path, monkey
     assert calls == [("dify", "normal"), ("dify", "faster")]
     assert result.available is True
     assert len(result.attempts) == 2
+
+
+def test_chain_canonicalizes_a_verified_candidate_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[Path, Path]] = []
+    adapter_calls: list[tuple[str, str]] = []
+
+    def canonicalize(source: Path, target: Path, **kwargs: object) -> MediaProbe:
+        assert kwargs == {"timeout_seconds": 15.0, "max_bytes": 8_000_000}
+        calls.append((source, target))
+        target.write_bytes(b"\xff\xfbcanonical")
+        return _probe(target)
+
+    monkeypatch.setattr(audio_module, "probe_mp3", _probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", canonicalize, raising=False)
+    result = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], adapter_calls),
+            FakeAdapter("edge_tts", ["ok"], adapter_calls),
+            FakeAdapter("sapi", ["ok"], adapter_calls),
+        )
+    ).synthesize(_recap(), _identity(), tmp_path)
+
+    assert result.available is True
+    assert len(calls) == 1
+    assert calls[0][0].name == "candidate-0-normal.mp3"
+    assert calls[0][1] == tmp_path / "recap.mp3"
 
 
 def test_non_duration_failure_never_retries_and_all_failed_is_partial(
@@ -214,30 +250,55 @@ def test_dify_rejects_wrong_content_type_and_oversize_without_persisting(tmp_pat
         assert not target.exists()
 
 
-def test_sapi_uses_file_boundary_and_never_places_recap_in_argv(
+def test_sapi_uses_bounded_file_boundary_and_never_places_recap_in_argv(
     tmp_path: Path, monkeypatch
 ) -> None:
-    calls: list[tuple[list[str], bool]] = []
+    calls: list[list[str]] = []
 
-    def fake_run(argv, **kwargs):
-        calls.append((list(argv), kwargs["shell"]))
+    def bounded_run(argv: list[str], **kwargs: object) -> tuple[int, bytes]:
+        assert kwargs["timeout_seconds"] == 90.0
+        assert kwargs["max_output_bytes"] == 64 * 1024
+        calls.append(list(argv))
         if "-OutputWaveFile" in argv:
             Path(argv[argv.index("-OutputWaveFile") + 1]).write_bytes(b"RIFF")
         else:
             Path(argv[-1]).write_bytes(b"\xff\xfbfixture")
+        return 0, b""
 
-    monkeypatch.setattr("debugmate.results.tts.sapi.subprocess.run", fake_run)
+    class LegacySubprocess:
+        def run(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("legacy subprocess.run must not be used")
+
+    monkeypatch.setattr(
+        "debugmate.results.tts.sapi.subprocess", LegacySubprocess(), raising=False
+    )
+    monkeypatch.setattr(
+        "debugmate.results.tts.sapi._run_bounded_process", bounded_run, raising=False
+    )
     target = tmp_path / "candidate.mp3"
     SapiTtsAdapter(project_root=Path.cwd()).synthesize(
         _recap(), target, _identity(), RateProfile.NORMAL
     )
-    flattened = [item for argv, _ in calls for item in argv]
+    flattened = [item for argv in calls for item in argv]
     assert "-Command" not in flattened
     assert _recap().text not in flattened
-    assert all(shell is False for _, shell in calls)
-    assert calls[0][0][3] == "-File"
+    assert len(calls) == 2
+    assert calls[0][3] == "-File"
     assert target.exists()
     assert not list(tmp_path.rglob("*.wav"))
+
+
+def test_sapi_rejects_untrusted_executable_or_script_roots_without_echoing_values(
+    tmp_path: Path,
+) -> None:
+    for overrides in (
+        {"project_root": tmp_path},
+        {"powershell": "cmd.exe"},
+        {"ffmpeg": "cmd.exe"},
+    ):
+        with pytest.raises(ValueError, match="^tts_sapi_config_invalid$") as caught:
+            SapiTtsAdapter(**overrides)
+        assert str(tmp_path) not in str(caught.value)
 
 
 def test_all_adapters_reject_constructed_secret_and_mismatched_identity(
@@ -257,9 +318,6 @@ def test_all_adapters_reject_constructed_secret_and_mismatched_identity(
         EdgeTtsAdapter(),
         SapiTtsAdapter(project_root=Path.cwd()),
     )
-    monkeypatch.setattr("debugmate.results.tts.edge.asyncio.run", lambda _: None)
-    monkeypatch.setattr("debugmate.results.tts.sapi.subprocess.run", lambda *_a, **_kw: None)
-
     for index, adapter in enumerate(adapters):
         with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
             adapter.synthesize(

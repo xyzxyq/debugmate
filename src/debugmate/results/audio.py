@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import stat
 import tempfile
 from pathlib import Path
@@ -14,7 +13,7 @@ from debugmate.results.contracts import (
     AudioResult,
     SafeFailure,
 )
-from debugmate.results.media import MediaProbeError, probe_mp3
+from debugmate.results.media import MediaProbeError, canonicalize_mp3, probe_mp3
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import RateProfile, TtsAdapter, TtsRequestIdentity
 
@@ -84,7 +83,7 @@ class TtsFallbackChain:
                             request=request,
                         ):
                             raise _CandidateInvalid
-                        probe = probe_mp3(
+                        probe_mp3(
                             candidate.path,
                             timeout_seconds=self._probe_timeout,
                             max_bytes=self._max_bytes,
@@ -127,13 +126,18 @@ class TtsFallbackChain:
                         )
                         candidate_path.unlink(missing_ok=True)
                         break
-                    shutil.copyfile(candidate.path, final_path)
-                    published_probe = probe_mp3(
+                    published_probe = canonicalize_mp3(
+                        candidate.path,
                         final_path,
                         timeout_seconds=self._probe_timeout,
                         max_bytes=self._max_bytes,
                     )
-                    if published_probe != probe:
+                    final_probe = probe_mp3(
+                        final_path,
+                        timeout_seconds=self._probe_timeout,
+                        max_bytes=self._max_bytes,
+                    )
+                    if final_probe != published_probe:
                         final_path.unlink(missing_ok=True)
                         raise ValueError("tts_publish_changed") from None
                     attempts.append(
@@ -141,8 +145,8 @@ class TtsFallbackChain:
                             backend=adapter.backend,
                             rate_profile=rate.value,
                             succeeded=True,
-                            duration_ms=probe.duration_ms,
-                            sha256=probe.sha256,
+                            duration_ms=final_probe.duration_ms,
+                            sha256=final_probe.sha256,
                         )
                     )
                     return AudioResult(
@@ -151,8 +155,8 @@ class TtsFallbackChain:
                         backend=adapter.backend,
                         fallback_used=backend_index > 0,
                         attempts=tuple(attempts),
-                        duration_ms=probe.duration_ms,
-                        sha256=probe.sha256,
+                        duration_ms=final_probe.duration_ms,
+                        sha256=final_probe.sha256,
                     )
         return AudioResult(
             identity=self._identity(request),
