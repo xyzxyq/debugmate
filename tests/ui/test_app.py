@@ -153,5 +153,11 @@ def test_serve_rejects_non_loopback_and_exposes_only_local_config_endpoint(tmp_p
             process.kill()
             process.wait(timeout=10)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        assert probe.connect_ex(("127.0.0.1", port)) != 0
+    closed_deadline = time.monotonic() + 5
+    while time.monotonic() < closed_deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            if probe.connect_ex(("127.0.0.1", port)) != 0:
+                break
+        time.sleep(0.1)
+    else:
+        pytest.fail("loopback port remained open after child cleanup")
