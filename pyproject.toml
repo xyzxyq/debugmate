@@ -10,11 +10,14 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "beautifulsoup4==4.15.0",
+  "edge-tts==7.2.8",
+  "gradio==6.20.0",
   "httpx==0.28.1",
   "onnxruntime==1.27.0",
   "Pillow==12.3.0",
   "pydantic==2.13.4",
   "python-dotenv==1.2.2",
+  "playwright==1.61.0",
   "rapidocr==3.9.1",
 ]
 
@@ -30,11 +33,14 @@ dev = [
 where = ["src"]
 
 [tool.pytest.ini_options]
-addopts = '-ra -m "not cloud and not ocr"'
+addopts = '-ra -m "not cloud and not ocr and not network and not browser and not tts"'
 testpaths = ["tests"]
 markers = [
   "cloud: tests that require real cloud credentials or network access",
   "ocr: tests that initialize the real local OCR engine and may download models",
+  "network: tests that make live network requests without requiring cloud credentials",
+  "browser: tests that launch the explicit Microsoft Edge browser channel",
+  "tts: tests that invoke a real local or remote text-to-speech backend",
 ]
 
 [tool.ruff]
