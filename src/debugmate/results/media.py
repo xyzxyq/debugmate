@@ -8,7 +8,8 @@ import os
 import stat
 import subprocess
 import tempfile
-from contextlib import suppress
+import threading
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,16 +52,6 @@ class TrustedMediaTools:
 
     ffmpeg: Path
     ffprobe: Path
-
-
-@dataclass(frozen=True)
-class _VerifiedExecutable:
-    path: Path
-    size: int
-    mtime_ns: int
-
-
-_VERIFIED_EXECUTABLES: dict[str, _VerifiedExecutable] = {}
 
 
 def _windows_local_app_data() -> Path:
@@ -118,7 +109,7 @@ def _has_safe_ancestors(path: Path) -> bool:
 
 
 def _verified_media_executable(name: str) -> Path:
-    """Resolve only the pinned WinGet 8.1 binary and recheck replacements."""
+    """Resolve only the pinned WinGet 8.1 binary and hash it on every call."""
 
     expected = _EXPECTED_MEDIA_HASHES[name]
     candidate = _windows_local_app_data() / _WINGET_FFMPEG_BIN / name
@@ -129,26 +120,14 @@ def _verified_media_executable(name: str) -> Path:
     ):
         raise MediaProbeError("media_tool_unavailable") from None
     try:
-        info = candidate.stat(follow_symlinks=False)
+        if sha256_file(candidate) != expected:
+            raise MediaProbeError("media_tool_unavailable") from None
     except OSError:
         raise MediaProbeError("media_tool_unavailable") from None
-    cached = _VERIFIED_EXECUTABLES.get(name)
-    if cached is None or (cached.path, cached.size, cached.mtime_ns) != (
-        candidate,
-        info.st_size,
-        info.st_mtime_ns,
-    ):
-        try:
-            if sha256_file(candidate) != expected:
-                raise MediaProbeError("media_tool_unavailable") from None
-        except OSError:
-            raise MediaProbeError("media_tool_unavailable") from None
-        # Close the common replacement race before the process command is built.
-        if not _is_regular_nonreparse(candidate) or not _has_safe_ancestors(candidate):
-            raise MediaProbeError("media_tool_unavailable") from None
-        _VERIFIED_EXECUTABLES[name] = _VerifiedExecutable(
-            path=candidate, size=info.st_size, mtime_ns=info.st_mtime_ns
-        )
+    # The hash is meaningful only while the exact regular, non-reparse file and
+    # its ancestry still match the fixed resolver contract.
+    if not _is_regular_nonreparse(candidate) or not _has_safe_ancestors(candidate):
+        raise MediaProbeError("media_tool_unavailable") from None
     return candidate
 
 
@@ -179,28 +158,168 @@ def _has_tags(value: Any) -> bool:
     return isinstance(value, dict) and bool(value)
 
 
+class ProcessOutputLimitExceeded(RuntimeError):
+    """A fixed internal signal: child stdout or stderr crossed its hard cap."""
+
+
+@dataclass
+class _ExecutableLease:
+    """A Windows file handle that prevents replacement while a tool starts."""
+
+    handle: int | None
+
+    def close(self) -> None:
+        if self.handle is None:
+            return
+        handle, self.handle = self.handle, None
+        if os.name == "nt":
+            try:
+                import ctypes
+
+                ctypes.windll.kernel32.CloseHandle(handle)
+            except (AttributeError, OSError):
+                pass
+
+
+@contextmanager
+def _lease_verified_media_executable(name: str) -> Any:
+    """Re-hash and hold one fixed executable from validation through ``Popen``.
+
+    The no-write/no-delete share mode closes the practical Windows replacement
+    race between hashing the path and starting the child.  Python's ``Popen``
+    still receives a path, so a hostile kernel-level actor is outside this
+    process boundary; the remediation report records that residual limit.
+    """
+
+    path = _verified_media_executable(name)
+    lease = _ExecutableLease(handle=None)
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            create_file = ctypes.windll.kernel32.CreateFileW
+            create_file.argtypes = (
+                ctypes.c_wchar_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+            )
+            create_file.restype = ctypes.c_void_p
+            handle = create_file(
+                str(path),
+                0x80000000,  # GENERIC_READ
+                0x00000001,  # FILE_SHARE_READ only; deny replacement/write
+                None,
+                3,  # OPEN_EXISTING
+                0,
+                None,
+            )
+            invalid_handle = ctypes.c_void_p(-1).value
+            if handle in (None, invalid_handle):
+                raise OSError
+            lease = _ExecutableLease(handle=int(handle))
+            # The handle's sharing mode now pins the bytes by name.  Recheck the
+            # full resolver contract immediately before this path reaches Popen.
+            if _verified_media_executable(name) != path:
+                raise MediaProbeError("media_tool_unavailable")
+        except (AttributeError, OSError, ValueError):
+            lease.close()
+            raise MediaProbeError("media_tool_unavailable") from None
+    try:
+        yield path
+    finally:
+        lease.close()
+
+
+def _trusted_media_tool_name(command: list[str]) -> str | None:
+    """Return a fixed media executable name or reject a lookalike command."""
+
+    if not command:
+        raise ValueError("empty process command")
+    path = Path(command[0])
+    name = path.name.casefold()
+    if name not in _EXPECTED_MEDIA_HASHES:
+        return None
+    expected = _verified_media_executable(name)
+    if path != expected:
+        raise MediaProbeError("media_tool_unavailable")
+    return name
+
+
 def _run_bounded_process(
     command: list[str], *, timeout_seconds: float, max_output_bytes: int
 ) -> tuple[int, bytes]:
-    """Run fixed argv while keeping child output out of Python heap until capped."""
+    """Run fixed argv with concurrent pipe draining and a hard per-stream cap."""
 
-    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+    tool_name = _trusted_media_tool_name(command)
+    output_chunks: list[bytes] = []
+    exceeded = threading.Event()
+    reader_errors: list[BaseException] = []
+    reader_lock = threading.Lock()
+
+    def drain(stream: Any, *, capture: bool) -> None:
+        consumed = 0
+        try:
+            while True:
+                # At most one byte beyond the cap is ever read from either pipe;
+                # no unbounded child output is written to disk or Python memory.
+                remaining = max_output_bytes - consumed
+                chunk = stream.read1(min(64 * 1024, max(1, remaining + 1)))
+                if not chunk:
+                    return
+                consumed += len(chunk)
+                if consumed > max_output_bytes:
+                    exceeded.set()
+                    if process.poll() is None:
+                        process.kill()
+                    return
+                if capture:
+                    output_chunks.append(chunk)
+        except BaseException as exc:  # pragma: no cover - defensive process boundary
+            with reader_lock:
+                reader_errors.append(exc)
+
+    with _lease_verified_media_executable(tool_name) if tool_name else _null_context():
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             shell=False,
         )
+        assert process.stdout is not None and process.stderr is not None
+        stdout_reader = threading.Thread(
+            target=drain, args=(process.stdout,), kwargs={"capture": True}
+        )
+        stderr_reader = threading.Thread(
+            target=drain, args=(process.stderr,), kwargs={"capture": False}
+        )
+        stdout_reader.start()
+        stderr_reader.start()
         try:
-            process.communicate(timeout=timeout_seconds)
+            process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.communicate()
+            process.wait()
             raise
-        stdout.seek(0)
-        output = stdout.read(max_output_bytes + 1)
-        return process.returncode, output
+        finally:
+            if exceeded.is_set() and process.poll() is None:
+                process.kill()
+        stdout_reader.join()
+        stderr_reader.join()
+    if reader_errors:
+        raise OSError("bounded process stream failure") from None
+    if exceeded.is_set():
+        raise ProcessOutputLimitExceeded
+    return process.returncode, b"".join(output_chunks)
+
+
+@contextmanager
+def _null_context() -> Any:
+    yield
 
 
 def probe_mp3(
@@ -262,6 +381,8 @@ def probe_mp3(
         )
     except subprocess.TimeoutExpired:
         _fail("probe_timeout")
+    except ProcessOutputLimitExceeded:
+        _fail("probe_invalid")
     except (OSError, UnicodeError, ValueError):
         _fail("probe_failed")
     if returncode != 0:
@@ -398,6 +519,8 @@ def canonicalize_mp3(
         return probe
     except subprocess.TimeoutExpired:
         _fail("canonicalize_timeout")
+    except ProcessOutputLimitExceeded:
+        _fail("canonicalize_failed")
     except MediaProbeError:
         raise
     except (OSError, ValueError):
