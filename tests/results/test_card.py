@@ -89,6 +89,37 @@ def test_png_verifier_rejects_metadata_and_animation_like_chunks(tmp_path: Path)
     Image.new("RGB", (1600, 10), "white").save(bad, pnginfo=metadata)
     with pytest.raises(CardRenderFailure, match="png_verify_failed"):
         verify_card_png(bad, expected_size=(1600, 10))
+
+
+def test_png_verifier_rejects_real_apng(tmp_path: Path) -> None:
+    bad = tmp_path / "animated.png"
+    frames = [Image.new("RGB", (1600, 10), color) for color in ("white", "black")]
+    frames[0].save(bad, save_all=True, append_images=frames[1:], duration=10, loop=0)
+    with pytest.raises(CardRenderFailure, match="png_verify_failed"):
+        verify_card_png(bad, expected_size=(1600, 10))
+
+
+def test_final_disk_verify_failure_removes_success_looking_target(
+    completed_source_bundle, tmp_path: Path, monkeypatch
+) -> None:
+    presentation, context = _card_inputs(completed_source_bundle, tmp_path)
+    target = tmp_path / "card.png"
+    from debugmate.results import card
+
+    original = card.verify_card_png
+    calls = 0
+
+    def fail_second(path: Path, *, expected_size: tuple[int, int]) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise CardRenderFailure("png_verify_failed")
+        original(path, expected_size=expected_size)
+
+    monkeypatch.setattr(card, "verify_card_png", fail_second)
+    with pytest.raises(CardRenderFailure, match="png_verify_failed"):
+        render_card(presentation, context, target=target)
+    assert not target.exists()
     payload = bad.read_bytes().replace(b"tEXt", b"acTL", 1)
     bad.write_bytes(payload)
     with pytest.raises(CardRenderFailure, match="png_verify_failed"):
