@@ -81,6 +81,13 @@ class CorrectionDraft(StrictFrozenModel):
     reason: str = Field(min_length=1, max_length=1_000, repr=False)
 
 
+class CorrectionFields(StrictFrozenModel):
+    """Read-only ordered values for the six explicit correction controls."""
+
+    source_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    values: tuple[str, str, str, str, str, str]
+
+
 @dataclass(frozen=True, slots=True)
 class ServiceStageEvent:
     """Queue-safe progress payload carrying only a strict view state."""
@@ -425,6 +432,28 @@ class ResultApplicationService:
             return load_verified_outcome(outcome, evidence_root=self._evidence_root)
         except ResultLoadError as error:
             raise ResultServiceError(error.code) from None
+
+    def correction_fields(self, previous_run_id: str) -> CorrectionFields:
+        """Expose six verified, redacted fact values without a path boundary."""
+
+        if _RUN_ID.fullmatch(previous_run_id) is None:
+            raise ResultServiceError("correction_invalid")
+        try:
+            outcome = self._outcome_store.read(previous_run_id)
+            source = self._source_for_stored_outcome(
+                outcome, self._run_results.get(previous_run_id)
+            )
+            if source.source_run_id != previous_run_id:
+                raise ValueError("identity")
+            values = {fact.field_id: fact.value for fact in source.outcome.facts.facts}
+            return CorrectionFields(
+                source_run_id=previous_run_id,
+                values=tuple(values.get(field_id, "") for field_id in FieldId),
+            )
+        except ResultServiceError:
+            raise
+        except (ResultLoadError, ValueError, TypeError):
+            raise ResultServiceError("correction_invalid") from None
 
     def restore_result(self, case_id: str, result_id: str) -> ResultViewState:
         """Freshly verify a public result and its complete source before display."""

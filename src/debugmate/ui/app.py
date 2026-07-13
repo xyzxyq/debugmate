@@ -9,6 +9,7 @@ from pathlib import Path
 
 import gradio as gr
 
+from debugmate.diagnosis.extraction import FieldId
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -52,6 +53,8 @@ _FIELD_LABELS = (
     "设备",
     "路径",
 )
+_FIELD_IDS = tuple(FieldId)
+_EMPTY_FIELD_VALUES = ("", "", "", "", "", "")
 _CASE_ID = "case_"
 _RUN_ID = "run_"
 _RESULT_ID = "result_"
@@ -67,6 +70,7 @@ class CallbackPayload:
     card_path: str | None
     audio_path: str | None
     download_path: str | None
+    field_values: tuple[str, str, str, str, str, str]
 
 
 class UiCallbacks:
@@ -128,6 +132,24 @@ class UiCallbacks:
             state.identity.case_id, state.result_id, member_id
         )
 
+    def _correction_fields(
+        self, state: ResultViewState
+    ) -> tuple[str, str, str, str, str, str]:
+        """Read six values only from the verified server-side run record."""
+
+        if state.identity is None or state.status not in {
+            ResultStatus.COMPLETED,
+            ResultStatus.PARTIAL,
+        }:
+            return _EMPTY_FIELD_VALUES
+        try:
+            fields = self._service.correction_fields(state.identity.source_run_id)
+            if fields.source_run_id != state.identity.source_run_id:
+                raise ResultServiceError("correction_invalid")
+            return fields.values
+        except (AttributeError, ResultServiceError, TypeError, ValueError):
+            return _EMPTY_FIELD_VALUES
+
     def _render(self, state: ResultViewState) -> CallbackPayload:
         if state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}:
             return CallbackPayload(
@@ -137,6 +159,7 @@ class UiCallbacks:
                 card_path=None,
                 audio_path=None,
                 download_path=None,
+                field_values=_EMPTY_FIELD_VALUES,
             )
         created: list[Path] = []
         try:
@@ -158,6 +181,7 @@ class UiCallbacks:
                 card_path=card_path,
                 audio_path=audio_path,
                 download_path=download_path,
+                field_values=self._correction_fields(state),
             )
         except (ResultServiceError, UnicodeError, OSError, ValueError):
             for path in created:
@@ -170,6 +194,7 @@ class UiCallbacks:
                 card_path=None,
                 audio_path=None,
                 download_path=None,
+                field_values=_EMPTY_FIELD_VALUES,
             )
 
     def load_replay(self, fixture_id: object) -> CallbackPayload:
@@ -228,6 +253,52 @@ def _idle_view() -> ResultViewState:
     )
 
 
+def correction_draft_from_fields(
+    original: object, current: object, previous_run_id: object
+) -> tuple[CorrectionDraft | None, str]:
+    """Make a local single-field draft; this helper never calls the service."""
+
+    if (
+        not isinstance(original, (tuple, list))
+        or not isinstance(current, (tuple, list))
+        or len(original) != len(_FIELD_IDS)
+        or len(current) != len(_FIELD_IDS)
+        or not isinstance(previous_run_id, str)
+        or not UiCallbacks._strict_id(previous_run_id, _RUN_ID)
+        or not all(isinstance(value, str) for value in (*original, *current))
+    ):
+        return None, "请先修改至少一个抽取字段。"
+    changed = [
+        (index, before, after)
+        for index, (before, after) in enumerate(zip(original, current, strict=True))
+        if before != after
+    ]
+    if not changed:
+        return None, "请先修改至少一个抽取字段。"
+    count = len(changed)
+    summary_lines = [f"有 {count} 项未确认修改。"]
+    summary_lines.extend(
+        f"{_FIELD_LABELS[index]}：{before} → {after}"
+        for index, before, after in changed
+    )
+    if count != 1:
+        summary_lines.append("请一次确认一项修改，避免混合多个字段的证据变更。")
+        return None, "\n".join(summary_lines)
+    index, _before, replacement = changed[0]
+    if not replacement.strip():
+        summary_lines.append("修改后的字段不能为空。")
+        return None, "\n".join(summary_lines)
+    try:
+        draft = CorrectionDraft(
+            field_id=_FIELD_IDS[index],
+            replacement=replacement,
+            reason="用户确认的已脱敏字段修正。",
+        )
+    except (TypeError, ValueError):
+        return None, "请先修改至少一个抽取字段。"
+    return draft, "\n".join(summary_lines)
+
+
 def _status_text(view: ComponentViewModel) -> str:
     rows = [f"### {view.status_badge}", view.mode_badge]
     if view.result_metadata:
@@ -267,7 +338,9 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
             visible=payload.download_path is not None,
             interactive=payload.download_path is not None,
         ),
-        gr.update(interactive=view.actions_enabled),
+        # A correction becomes actionable only after a local, explicit draft
+        # exists; terminal state alone must never submit a rerun.
+        gr.update(interactive=False),
         payload.state,
     )
 
@@ -282,6 +355,9 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
         )
         current_state = gr.State(_idle_view())
         approved_payload = gr.State(value=None)
+        correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
+        correction_run = gr.State(value=None)
+        correction_draft = gr.State(value=None)
         with gr.Group(elem_classes="status-bar"):
             gr.Markdown("# DebugMate 诊断工作台")
             status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
@@ -304,12 +380,22 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                 fields = [
                     gr.Textbox(label=label, interactive=True, value="") for label in _FIELD_LABELS
                 ]
-                pending = gr.Markdown("请先修改至少一个抽取字段。")
+                pending = gr.Textbox(
+                    label="修改草稿",
+                    interactive=False,
+                    lines=4,
+                    value="请先修改至少一个抽取字段。",
+                )
                 correction_button = gr.Button("确认修改并重新诊断", interactive=False)
-                with gr.Accordion("确认创建新运行", open=False):
+                with gr.Accordion("确认创建新运行", open=False) as confirmation_panel:
                     gr.Markdown("确认后将创建新的运行和结果；当前证据与结果不会被覆盖。")
-                    gr.Button("创建新运行", variant="primary", interactive=False)
-                    gr.Button("返回检查")
+                    confirmation_summary = gr.Textbox(
+                        label="待确认修改",
+                        interactive=False,
+                        lines=5,
+                    )
+                    create_button = gr.Button("创建新运行", variant="primary", interactive=False)
+                    return_button = gr.Button("返回检查")
                 gr.Markdown("页面仅展示已验证的脱敏输入与结果。")
 
             with gr.Column(elem_classes="region"):
@@ -360,23 +446,104 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
         start_button = gr.Button("开始诊断", variant="primary", interactive=False)
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
 
+        result_outputs = [
+            status,
+            result_metadata,
+            failure,
+            report,
+            card,
+            audio,
+            download,
+            correction_button,
+            current_state,
+            *fields,
+            correction_original,
+            correction_run,
+            correction_draft,
+            pending,
+            confirmation_summary,
+            confirmation_panel,
+            create_button,
+        ]
+
+        def apply_payload(payload: CallbackPayload) -> tuple[object, ...]:
+            """Reset local correction controls whenever verified result changes."""
+
+            source_run_id = (
+                payload.state.identity.source_run_id
+                if payload.state.identity is not None
+                and payload.state.status in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+                else None
+            )
+            values = payload.field_values if source_run_id is not None else _EMPTY_FIELD_VALUES
+            return (
+                *_component_updates(payload),
+                *(gr.update(value=value) for value in values),
+                values,
+                source_run_id,
+                None,
+                gr.update(value="请先修改至少一个抽取字段。"),
+                gr.update(value=""),
+                gr.update(open=False),
+                gr.update(interactive=False),
+            )
+
         def load_replay(fixture_id: str | None):
-            return _component_updates(callbacks.load_replay(fixture_id))
+            return apply_payload(callbacks.load_replay(fixture_id))
+
+        def update_correction_draft(
+            original: object, previous_run_id: object, *values: object
+        ) -> tuple[object, ...]:
+            draft, summary = correction_draft_from_fields(
+                original, values, previous_run_id
+            )
+            return (
+                draft,
+                gr.update(value=summary),
+                gr.update(interactive=draft is not None),
+                gr.update(open=False),
+                gr.update(value=""),
+                gr.update(interactive=False),
+            )
+
+        def open_correction_confirmation(
+            draft: object, summary: object
+        ) -> tuple[object, ...]:
+            if not isinstance(draft, CorrectionDraft) or not isinstance(summary, str):
+                return (
+                    gr.update(open=False),
+                    gr.update(value=""),
+                    gr.update(interactive=False),
+                )
+            return (
+                gr.update(open=True),
+                gr.update(
+                    value=(
+                        f"{summary}\n\n"
+                        "确认后将创建新的运行和结果；当前证据与结果不会被覆盖。"
+                    )
+                ),
+                gr.update(interactive=True),
+            )
+
+        def return_to_check() -> tuple[object, ...]:
+            return (
+                gr.update(open=False),
+                gr.update(value=""),
+                gr.update(interactive=False),
+            )
+
+        def create_new_run(previous_run_id: object, draft: object) -> tuple[object, ...]:
+            if not isinstance(draft, CorrectionDraft):
+                return apply_payload(
+                    callbacks._render(callbacks._failure(_idle_view(), "result_bundle_invalid"))
+                )
+            return apply_payload(callbacks.correct(previous_run_id, draft, confirmed=True))
 
         replay_button.click(
             load_replay,
             inputs=[replay],
-            outputs=[
-                status,
-                result_metadata,
-                failure,
-                report,
-                card,
-                audio,
-                download,
-                correction_button,
-                current_state,
-            ],
+            outputs=result_outputs,
             api_name=False,
             queue=True,
             trigger_mode="once",
@@ -386,26 +553,53 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
         # The only live boundary is an application-owned approved payload State;
         # no component supplies a DiagnosisRunOutcome, path, command or shell.
         start_button.click(
-            lambda approved: _component_updates(callbacks.diagnose(approved)),
+            lambda approved: apply_payload(callbacks.diagnose(approved)),
             inputs=[approved_payload],
-            outputs=[
-                status,
-                result_metadata,
-                failure,
-                report,
-                card,
-                audio,
-                download,
-                correction_button,
-                current_state,
-            ],
+            outputs=result_outputs,
             api_name=False,
             queue=True,
             trigger_mode="once",
             concurrency_limit=1,
             concurrency_id="debugmate-case",
         )
-        del fields, pending
+        for field in fields:
+            field.input(
+                update_correction_draft,
+                inputs=[correction_original, correction_run, *fields],
+                outputs=[
+                    correction_draft,
+                    pending,
+                    correction_button,
+                    confirmation_panel,
+                    confirmation_summary,
+                    create_button,
+                ],
+                api_name=False,
+                queue=False,
+            )
+        correction_button.click(
+            open_correction_confirmation,
+            inputs=[correction_draft, pending],
+            outputs=[confirmation_panel, confirmation_summary, create_button],
+            api_name=False,
+            queue=False,
+        )
+        return_button.click(
+            return_to_check,
+            outputs=[confirmation_panel, confirmation_summary, create_button],
+            api_name=False,
+            queue=False,
+        )
+        create_button.click(
+            create_new_run,
+            inputs=[correction_run, correction_draft],
+            outputs=result_outputs,
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+        )
     # Gradio 6 moved CSS from the constructor to ``launch``.  Retain it on
     # the app for structural inspection; ``serve`` supplies the same string
     # to launch without adding external assets or JavaScript.
