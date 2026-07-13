@@ -13,6 +13,7 @@ from debugmate.results.contracts import ArtifactIdentity, StrictFrozenModel
 from debugmate.results.presentation import (
     PresentationCommand,
     PresentationModel,
+    revalidate_presentation,
 )
 
 
@@ -290,9 +291,7 @@ def render_report(presentation: PresentationModel) -> RenderedReport:
     try:
         if not isinstance(presentation, PresentationModel):
             raise TypeError("presentation type")
-        strict = PresentationModel.model_validate_json(
-            canonical_json_bytes(presentation.model_dump(mode="json")), strict=True
-        )
+        strict = revalidate_presentation(presentation)
         _citation_rows(strict)
         markdown = "\n".join(_report_lines(strict)) + "\n"
         _scan_rendered_report(strict, markdown)
@@ -312,9 +311,7 @@ def render_citations(presentation: PresentationModel) -> RenderedCitations:
     try:
         if not isinstance(presentation, PresentationModel):
             raise TypeError("presentation type")
-        strict = PresentationModel.model_validate_json(
-            canonical_json_bytes(presentation.model_dump(mode="json")), strict=True
-        )
+        strict = revalidate_presentation(presentation)
         rows = _citation_rows(strict)
         payload = {
             "identity": strict.identity.model_dump(mode="json"),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, model_validator
 
 from debugmate.contracts import ClaimKind, CommandPlatform, ErrorCategory, SourceKind
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
@@ -14,6 +14,8 @@ from debugmate.results.contracts import (
     StrictFrozenModel,
 )
 from debugmate.results.loader import LoadedDiagnosisSource
+
+_PRESENTATION_TOKEN = object()
 
 
 class PresentationBuildError(ValueError):
@@ -75,6 +77,7 @@ class PresentationCommand(StrictFrozenModel):
 class PresentationModel(StrictFrozenModel):
     """Complete semantic input for report, card and recap generation."""
 
+    projection_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     identity: ArtifactIdentity
     report_contract_version: str
     card_contract_version: str
@@ -93,6 +96,20 @@ class PresentationModel(StrictFrozenModel):
     verification_steps: tuple[PresentationCommand, ...]
     limitations: tuple[str, ...]
     recap_text: str
+
+    @staticmethod
+    def seal_for(payload: dict[str, object]) -> str:
+        return sha256_bytes(canonical_json_bytes(payload))
+
+    @model_validator(mode="after")
+    def canonical_projection_seal(self, info: ValidationInfo) -> PresentationModel:
+        context = info.context if isinstance(info.context, dict) else {}
+        if context.get("presentation_token") is not _PRESENTATION_TOKEN:
+            raise ValueError("presentation must be built by build_presentation")
+        payload = self.model_dump(mode="json", exclude={"projection_sha256"})
+        if self.projection_sha256 != self.seal_for(payload):
+            raise ValueError("presentation projection seal mismatch")
+        return self
 
 
 def _strict_source(value: object) -> LoadedDiagnosisSource:
@@ -121,6 +138,18 @@ def _strict_context(value: object) -> PreparedGenerationContext:
         raise TypeError("context type")
     return PreparedGenerationContext.model_validate_json(
         canonical_json_bytes(value.model_dump(mode="json")), strict=True
+    )
+
+
+def revalidate_presentation(value: object) -> PresentationModel:
+    """Revalidate one existing projection with the module-private build authority."""
+
+    if not isinstance(value, PresentationModel):
+        raise TypeError("presentation type")
+    return PresentationModel.model_validate_json(
+        canonical_json_bytes(value.model_dump(mode="json")),
+        strict=True,
+        context={"presentation_token": _PRESENTATION_TOKEN},
     )
 
 
@@ -192,7 +221,7 @@ def build_presentation(
                 diagnosis.root_cause_candidates, key=lambda item: item.candidate_id
             )
         )
-        return PresentationModel(
+        payload: dict[str, object] = dict(
             identity=identity,
             report_contract_version=profile.report_contract_version,
             card_contract_version=profile.card_contract_version,
@@ -213,6 +242,19 @@ def build_presentation(
             ),
             limitations=tuple(diagnosis.limitations),
             recap_text=diagnosis.recap_text,
+        )
+        normalized = PresentationModel.model_construct(
+            **payload, projection_sha256="0" * 64
+        ).model_dump(mode="json", exclude={"projection_sha256"})
+        return PresentationModel.model_validate_json(
+            canonical_json_bytes(
+                {
+                    **normalized,
+                    "projection_sha256": PresentationModel.seal_for(normalized),
+                }
+            ),
+            strict=True,
+            context={"presentation_token": _PRESENTATION_TOKEN},
         )
     except Exception:
         failure = PresentationBuildError()
