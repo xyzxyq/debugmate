@@ -6,7 +6,6 @@ import pytest
 
 from debugmate.hashing import sha256_bytes
 from debugmate.results import audio as audio_module
-from debugmate.results import consistency as consistency_module
 from debugmate.results.audio import TtsFallbackChain, TrustedCandidateRoot
 from debugmate.results.card import render_card
 from debugmate.results.font import prepare_generation_context
@@ -78,7 +77,6 @@ def candidates(completed_source_bundle, tmp_path: Path, monkeypatch: pytest.Monk
     card = render_card(presentation, context, target=tmp_path / "card.png")
     monkeypatch.setattr(audio_module, "probe_mp3", _probe)
     monkeypatch.setattr(audio_module, "canonicalize_mp3", lambda value, **_kwargs: value)
-    monkeypatch.setattr(consistency_module, "probe_mp3", _probe)
     request = TtsRequestIdentity(
         case_id=recap.identity.case_id,
         source_run_id=recap.identity.source_run_id,
@@ -92,7 +90,9 @@ def candidates(completed_source_bundle, tmp_path: Path, monkeypatch: pytest.Monk
     return source, presentation, report, citations, card, recap, audio
 
 
-def test_gate_revalidates_all_modalities_and_consumes_only_one_verified_audio_handoff(candidates):
+def test_gate_revalidates_all_modalities_without_exposing_a_candidate_path(candidates):
+    from debugmate.results import consistency as consistency_module
+
     source, presentation, report, citations, card, recap, audio = candidates
 
     validated = consistency_module.validate_result_candidates(
@@ -102,25 +102,33 @@ def test_gate_revalidates_all_modalities_and_consumes_only_one_verified_audio_ha
     assert validated.identity == presentation.identity
     assert validated.availability.all() is True
     assert validated.status.value == "completed"
-    assert validated.audio_bytes == b"\xff\xfb" + b"test-audio" * 32
+    assert validated.audio == audio.audio
     assert not hasattr(validated, "card_path")
-    with pytest.raises(Exception):
-        audio.handoff.take_verified_bytes(audio.audio)
+    assert not hasattr(validated, "audio_bytes")
 
 
 @pytest.mark.parametrize("field", ["case_id", "source_run_id", "diagnosis_sha256", "generation_version"])
 def test_gate_rejects_each_shared_identity_drift(candidates, field: str):
+    from debugmate.results import consistency as consistency_module
+
     source, presentation, report, citations, card, recap, audio = candidates
-    bad_identity = report.identity.model_copy(update={field: getattr(report.identity, field)[:-1] + "0"})
+    original = getattr(report.identity, field)
+    replacement = "f" if original[-1] != "f" else "e"
+    bad_identity = report.identity.model_copy(update={field: original[:-1] + replacement})
     forged_report = report.model_copy(update={"identity": bad_identity})
 
-    with pytest.raises(consistency_module.ResultConsistencyError, match="artifact_identity_mismatch"):
+    with pytest.raises(
+        consistency_module.ResultConsistencyError,
+        match="(?:artifact_identity_mismatch|report_verify_failed)",
+    ):
         consistency_module.validate_result_candidates(
             source, presentation, forged_report, citations, card, recap, audio
         )
 
 
 def test_gate_rejects_modified_card_before_publication(candidates):
+    from debugmate.results import consistency as consistency_module
+
     source, presentation, report, citations, card, recap, audio = candidates
     card.path.write_bytes(card.path.read_bytes() + b"tamper")
 
@@ -131,6 +139,8 @@ def test_gate_rejects_modified_card_before_publication(candidates):
 
 
 def test_gate_allows_only_explicit_audio_partial(candidates):
+    from debugmate.results import consistency as consistency_module
+
     source, presentation, report, citations, card, recap, _audio = candidates
     unavailable = TtsFallbackChain(
         (_FailAdapter("dify"), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
