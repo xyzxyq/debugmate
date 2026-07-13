@@ -106,7 +106,7 @@ def test_report_escapes_untrusted_markdown_structure(
     changed = presentation.model_copy(update={"limitations": (payload,)})
     markdown = render_report(changed).markdown
     assert payload not in markdown
-    assert markdown.count("## ") == 9
+    assert len([line for line in markdown.splitlines() if line.startswith("## ")]) == 9
     assert "<script>" not in markdown
     assert "javascript:" not in markdown
     assert "![image]" not in markdown
