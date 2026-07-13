@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from debugmate.hashing import sha256_bytes
+from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import probe_mp3
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import RateProfile, TtsRequestIdentity
@@ -25,11 +26,17 @@ def _safe_recap() -> SafeRecapText:
         "剩余限制：若仍然失败，需要继续核对环境变量、依赖版本和项目启动方式。"
     )
     return SafeRecapText.model_construct(
-        identity=None,
+        identity=ArtifactIdentity(
+            case_id="case_" + "1" * 32,
+            source_run_id="run_" + "2" * 32,
+            diagnosis_sha256="3" * 64,
+            schema_version="1.1.0",
+            generation_version="gen_" + "4" * 32,
+        ),
         text=text,
         sha256=sha256_bytes(text.encode("utf-8")),
         units=("phenomenon", "cause", "check", "fix", "verify", "limitation"),
-        word_budget_version="recap-v1",
+        word_budget_version="recap_budget_v1",
     )
 
 
@@ -64,7 +71,9 @@ def test_live_dify_tts_gate(tmp_path: Path) -> None:
     if not settings.cloud_configured:
         pytest.skip("DIFY_API_KEY is absent; external gate remains open")
     recap = _safe_recap()
-    candidate = DifyTtsAdapter(settings).synthesize(recap, tmp_path / "dify.mp3", _identity(recap), RateProfile.NORMAL)
+    candidate = DifyTtsAdapter(settings).synthesize(
+        recap, tmp_path / "dify.mp3", _identity(recap), RateProfile.NORMAL
+    )
     assert probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000).channels == 1
 
 
@@ -74,5 +83,7 @@ def test_live_edge_tts_gate(tmp_path: Path) -> None:
     if os.environ.get("DEBUGMATE_ALLOW_NETWORK_TTS") != "1":
         pytest.skip("network TTS not explicitly approved; external gate remains open")
     recap = _safe_recap()
-    candidate = EdgeTtsAdapter().synthesize(recap, tmp_path / "edge.mp3", _identity(recap), RateProfile.NORMAL)
+    candidate = EdgeTtsAdapter().synthesize(
+        recap, tmp_path / "edge.mp3", _identity(recap), RateProfile.NORMAL
+    )
     assert probe_mp3(candidate.path, timeout_seconds=15, max_bytes=8_000_000).channels == 1
