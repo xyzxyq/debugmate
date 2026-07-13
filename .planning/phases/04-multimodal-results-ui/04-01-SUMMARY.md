@@ -36,7 +36,7 @@ patterns-established:
   - "No renderer receives an outcome until strict outcome validation, current verify_bundle and exact manifest/diagnosis cross-identity checks pass."
   - "Public source failures expose only fixed code/stage values and a value-free message."
 requirements-progressed: [MULTI-04, UX-04]
-duration: 16m
+duration: 34m
 completed: 2026-07-13
 ---
 
@@ -46,10 +46,10 @@ completed: 2026-07-13
 
 ## Performance
 
-- **Duration:** 16m
+- **Duration:** 34m
 - **Started:** 2026-07-13T09:30:00+08:00
-- **Completed:** 2026-07-13T09:46:00+08:00
-- **Tasks:** 3 TDD tasks plus one adversarial reparse hardening cycle
+- **Completed:** 2026-07-13T10:04:06+08:00
+- **Tasks:** 3 TDD tasks plus two adversarial review/hardening cycles
 - **Files changed:** 21 including this summary
 
 ## Accomplishments
@@ -69,6 +69,7 @@ completed: 2026-07-13
 3. **GREEN strict identities and prepared generation context** — `e9c9ad7` (`feat`)
 4. **RED/GREEN verified loader and outcome store** — `a625057` (`feat`)
 5. **Adversarial reparse-ancestor RED/GREEN** — `90c960d` (`fix`)
+6. **Review remediation: safe errors, verified fonts, exact manifests and immutable collections** — `55564cf` (`fix`)
 
 ## Decisions Made
 
@@ -95,14 +96,23 @@ completed: 2026-07-13
 - **Fix:** Added a failing nested-link test and full ancestor traversal used by source and store boundaries.
 - **Verification:** `test_outcome_store_rejects_a_reparse_ancestor` failed before the fix and passes afterward; all 16 loader/store tests pass.
 
+**3. [Code review - Critical/Important] Public error chains, font declarations, manifest relationships and nested collections required stronger contracts**
+
+- **Found during:** Independent Plan 04-01 code review
+- **Issue:** Boundary exceptions retained raw `__cause__`/`__context__`; a caller could combine a forged font hash with a linked root; manifest availability was not yet an exact projection of artifact/audio records; tuple/node-state immutability was incomplete.
+- **RED command:** `.\.venv\Scripts\python.exe -m pytest -q tests\results\test_contracts.py tests\results\test_loader.py -k "public_boundary or font or manifest or immutable or byte_stable"`
+- **Observed RED:** `7 failed, 7 passed, 25 deselected`. Failures were the forged/missing font contract, linked root/ancestor acceptance, completed/partial manifest and tuple-attempt contracts, plus loader/store raw exception chains.
+- **Fix:** Raised value-free public errors outside active exception handlers with `from None`; checked all font root/path ancestors before resolution and recomputed bytes; required exact modal artifact/audio relationships; converted artifacts, attempts, stages and node-state entries to deterministic frozen tuples.
+- **GREEN evidence:** The same command returned `14 passed, 25 deselected`; expanded focused coverage subsequently returned `42 passed`.
+
 ---
 
-**Total deviations:** 2 auto-fixed (1 blocking compatibility issue, 1 safety hardening). **Impact:** No scope was reduced; both fixes preserve stricter Phase 3 identity and confinement guarantees.
+**Total deviations:** 3 auto-fixed/review-remediated issues. **Impact:** No scope was reduced; the final implementation strengthens Phase 3 identity, privacy, confinement, consistency and immutability guarantees.
 
 ## Verification
 
-- Focused result contracts + loader/store: `31 passed`
-- Complete default offline suite: `499 passed, 22 deselected`
+- Focused result contracts + loader/store: `42 passed`
+- Complete default offline suite: `510 passed, 22 deselected`
 - Full repository Ruff: passed
 - `pip check`: no broken requirements
 - Exact dependency import/version smoke: passed
@@ -130,7 +140,7 @@ None for offline continuation. No API key, paid service or global runtime modifi
 
 ## Self-Check: PASSED
 
-- All three tasks followed RED → observed expected failure → minimal GREEN → refactor/verification.
+- All three tasks and both hardening cycles followed RED → observed expected failure → minimal GREEN → refactor/verification; review RED output is recorded above.
 - Every task/hardening unit has a selective atomic commit; `.superpowers` was never staged.
 - Required source, generated replay, test and summary artifacts exist.
 - Full offline regression, Ruff, dependency health, deterministic fixture and Edge smoke have fresh evidence.
