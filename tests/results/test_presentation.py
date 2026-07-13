@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import gc
+import weakref
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -136,3 +139,25 @@ def test_projection_cannot_be_reconstructed_without_its_canonical_seal(
 def test_projection_module_exposes_no_public_resigning_or_revalidation_authority() -> None:
     assert not hasattr(presentation_module.PresentationModel, "seal_for")
     assert not hasattr(presentation_module, "revalidate_presentation")
+
+
+def test_registered_build_instance_is_thread_safe_and_not_kept_alive(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    from debugmate.results.report import render_report
+
+    presentation = build_presentation(
+        _loaded(completed_source_bundle), _context(tmp_path)
+    )
+    reference = weakref.ref(presentation)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        hashes = tuple(
+            executor.map(
+                lambda _, value=presentation: render_report(value).sha256, range(32)
+            )
+        )
+    assert len(set(hashes)) == 1
+
+    del presentation
+    gc.collect()
+    assert reference() is None
