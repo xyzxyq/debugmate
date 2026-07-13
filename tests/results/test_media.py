@@ -7,7 +7,6 @@ import pytest
 
 from debugmate.results.media import MediaProbeError, probe_mp3
 
-
 FFMPEG = "ffmpeg"
 
 
@@ -36,7 +35,9 @@ def _tag_free_mp3(path: Path, duration: float) -> Path:
         path,
         "-map_metadata",
         "-1",
-        "-write_id3v2",
+        "-metadata",
+        "encoder=",
+        "-id3v2_version",
         "0",
         "-write_xing",
         "0",
@@ -46,7 +47,9 @@ def _tag_free_mp3(path: Path, duration: float) -> Path:
         "libmp3lame",
         "-b:a",
         "32k",
-        duration=duration,
+        # Account for one deterministic MP3 frame of muxer padding so ffprobe
+        # observes the requested boundary duration rather than the input cutoff.
+        duration=duration - 0.084,
     )
 
 
