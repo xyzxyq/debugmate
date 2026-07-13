@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 import httpx
@@ -65,7 +66,12 @@ class DifyTtsAdapter:
             raise TtsAdapterError() from None
         if not payload:
             raise TtsAdapterError() from None
-        target.write_bytes(payload)
+        try:
+            target.write_bytes(payload)
+        except OSError:
+            with suppress(OSError):
+                target.unlink(missing_ok=True)
+            raise TtsAdapterError() from None
         return AudioCandidate(
             backend=self.backend,
             rate_profile=rate_profile,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 from debugmate.results.media import FFMPEG_EXECUTABLE, _run_bounded_process
@@ -47,11 +48,17 @@ class SapiTtsAdapter:
             powershell_path = system_directory / "WindowsPowerShell" / "v1.0" / "powershell.exe"
             if not _is_regular_file(powershell_path):
                 raise ValueError
-        except (KeyError, OSError, ValueError):
+            ffmpeg_path = Path(FFMPEG_EXECUTABLE)
+            if not ffmpeg_path.is_absolute():
+                raise ValueError
+            ffmpeg_path = ffmpeg_path.resolve(strict=True)
+            if not _is_regular_file(ffmpeg_path) or ffmpeg_path.name.casefold() != "ffmpeg.exe":
+                raise ValueError
+        except (AttributeError, KeyError, OSError, ValueError):
             raise ValueError("tts_sapi_config_invalid") from None
         self._script = script
         self._powershell = str(powershell_path)
-        self._ffmpeg = FFMPEG_EXECUTABLE
+        self._ffmpeg = str(ffmpeg_path)
         self._timeout = timeout_seconds
 
     def synthesize(
@@ -62,8 +69,8 @@ class SapiTtsAdapter:
         rate_profile: RateProfile,
     ) -> AudioCandidate:
         text, request_identity = validate_tts_request(text, request_identity)
-        target.parent.mkdir(parents=True, exist_ok=True)
         try:
+            target.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(prefix="sapi-", dir=target.parent) as temp_name:
                 temp = Path(temp_name)
                 input_file, wave_file = temp / "recap.txt", temp / "recap.wav"
@@ -126,7 +133,8 @@ class SapiTtsAdapter:
                 ):
                     raise RuntimeError("ffmpeg_process_failed")
         except Exception:
-            target.unlink(missing_ok=True)
+            with suppress(OSError):
+                target.unlink(missing_ok=True)
             raise TtsAdapterError() from None
         return AudioCandidate(
             backend=self.backend,
@@ -144,13 +152,22 @@ def _is_regular_file(path: Path) -> bool:
         return False
 
 
+def _is_link_or_reparse(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    try:
+        return bool(getattr(path.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400)
+    except OSError:
+        return True
+
+
 def _is_trusted_repository_file(path: Path, root: Path) -> bool:
     try:
         candidate = path.resolve(strict=True)
         candidate.relative_to(root)
         current = path
         while True:
-            if current.is_symlink() or not _is_regular_file(current) and current == path:
+            if _is_link_or_reparse(current):
                 return False
             if current == root:
                 return _is_regular_file(candidate)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 
 import edge_tts
@@ -37,7 +38,8 @@ class EdgeTtsAdapter:
                 )
             )
         except Exception:
-            target.unlink(missing_ok=True)
+            with suppress(OSError):
+                target.unlink(missing_ok=True)
             raise TtsAdapterError() from None
         return AudioCandidate(
             backend=self.backend,

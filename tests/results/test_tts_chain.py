@@ -204,6 +204,66 @@ def test_chain_canonicalizes_a_verified_candidate_before_publication(
     assert calls[0][1] == tmp_path / "recap.mp3"
 
 
+def test_canonicalization_failure_falls_through_to_the_next_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str]] = []
+    canonicalization_calls = 0
+
+    def canonicalize(source: Path, target: Path, **_kwargs: object) -> MediaProbe:
+        nonlocal canonicalization_calls
+        canonicalization_calls += 1
+        if canonicalization_calls == 1:
+            raise MediaProbeError("canonicalize_failed")
+        target.write_bytes(source.read_bytes())
+        return _probe(target)
+
+    monkeypatch.setattr(audio_module, "probe_mp3", _probe)
+    monkeypatch.setattr(audio_module, "canonicalize_mp3", canonicalize)
+    result = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["ok"], calls),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    ).synthesize(_recap(), _identity(), tmp_path)
+
+    assert calls == [("dify", "normal"), ("edge_tts", "normal")]
+    assert result.available is True
+    assert result.backend == "edge_tts"
+    assert result.attempts[0].safe_error_code == "audio_invalid"
+
+
+def test_directory_candidate_is_a_value_free_invalid_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class DirectoryAdapter(FakeAdapter):
+        def synthesize(self, text, target, request_identity, rate_profile):
+            self._calls.append((self.backend, rate_profile.value))
+            target.mkdir()
+            return AudioCandidate(
+                backend=self.backend,
+                rate_profile=rate_profile,
+                path=target,
+                request_identity=request_identity,
+            )
+
+    monkeypatch.setattr(audio_module, "probe_mp3", _probe)
+    result = TtsFallbackChain(
+        (
+            DirectoryAdapter("dify", [], calls),
+            FakeAdapter("edge_tts", ["timeout"], calls),
+            FakeAdapter("sapi", ["process"], calls),
+        )
+    ).synthesize(_recap(), _identity(), tmp_path)
+
+    assert result.available is False
+    assert result.attempts[0].safe_error_code == "tts_candidate_invalid"
+    assert str(tmp_path) not in result.model_dump_json()
+
+
 def test_non_duration_failure_never_retries_and_all_failed_is_partial(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -248,6 +308,58 @@ def test_dify_rejects_wrong_content_type_and_oversize_without_persisting(tmp_pat
         else:  # pragma: no cover - guards a security contract
             raise AssertionError("unsafe Dify response was accepted")
         assert not target.exists()
+
+
+def test_dify_target_write_failure_is_value_free(tmp_path: Path) -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200, headers={"content-type": "audio/mpeg"}, content=b"\xff\xfbaudio"
+            )
+        )
+    )
+    adapter = DifyTtsAdapter(
+        DebugMateSettings.from_env({"DIFY_API_KEY": "fictional-test-key"}), client=client
+    )
+    blocked_target = tmp_path / "private-directory"
+    blocked_target.mkdir()
+
+    with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
+        adapter.synthesize(_recap(), blocked_target, _identity(), RateProfile.NORMAL)
+
+    assert str(blocked_target) not in str(caught.value)
+
+
+def test_sapi_target_setup_failure_is_value_free(tmp_path: Path) -> None:
+    blocked_parent = tmp_path / "private-file"
+    blocked_parent.write_bytes(b"x")
+
+    with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
+        SapiTtsAdapter(project_root=Path.cwd()).synthesize(
+            _recap(), blocked_parent / "candidate.mp3", _identity(), RateProfile.NORMAL
+        )
+
+    assert str(blocked_parent) not in str(caught.value)
+
+
+def test_edge_cleanup_failure_does_not_leak_a_directory_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FailingCommunicate:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def save(self, _target: str) -> None:
+            raise OSError("private edge failure")
+
+    monkeypatch.setattr("debugmate.results.tts.edge.edge_tts.Communicate", FailingCommunicate)
+    blocked_target = tmp_path / "private-directory"
+    blocked_target.mkdir()
+
+    with pytest.raises(RuntimeError, match="^tts_backend_failed$") as caught:
+        EdgeTtsAdapter().synthesize(_recap(), blocked_target, _identity(), RateProfile.NORMAL)
+
+    assert str(blocked_target) not in str(caught.value)
 
 
 def test_sapi_uses_bounded_file_boundary_and_never_places_recap_in_argv(
@@ -299,6 +411,15 @@ def test_sapi_rejects_untrusted_executable_or_script_roots_without_echoing_value
         with pytest.raises(ValueError, match="^tts_sapi_config_invalid$") as caught:
             SapiTtsAdapter(**overrides)
         assert str(tmp_path) not in str(caught.value)
+
+
+def test_sapi_rejects_a_non_regular_resolved_ffmpeg_binary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("debugmate.results.tts.sapi.FFMPEG_EXECUTABLE", "cmd.exe")
+
+    with pytest.raises(ValueError, match="^tts_sapi_config_invalid$"):
+        SapiTtsAdapter(project_root=Path.cwd())
 
 
 def test_all_adapters_reject_constructed_secret_and_mismatched_identity(

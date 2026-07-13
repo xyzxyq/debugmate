@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 from debugmate.privacy.output_scan import assert_export_safe
@@ -88,6 +89,19 @@ class TtsFallbackChain:
                             timeout_seconds=self._probe_timeout,
                             max_bytes=self._max_bytes,
                         )
+                        published_probe = canonicalize_mp3(
+                            candidate.path,
+                            final_path,
+                            timeout_seconds=self._probe_timeout,
+                            max_bytes=self._max_bytes,
+                        )
+                        final_probe = probe_mp3(
+                            final_path,
+                            timeout_seconds=self._probe_timeout,
+                            max_bytes=self._max_bytes,
+                        )
+                        if final_probe != published_probe:
+                            raise _CandidateInvalid
                     except _CandidateInvalid:
                         attempts.append(
                             AudioAttempt(
@@ -97,7 +111,8 @@ class TtsFallbackChain:
                                 safe_error_code="tts_candidate_invalid",
                             )
                         )
-                        candidate_path.unlink(missing_ok=True)
+                        _safe_unlink(candidate_path)
+                        _safe_unlink(final_path)
                         break
                     except MediaProbeError as exc:
                         code = getattr(exc, "code", str(exc))
@@ -111,7 +126,8 @@ class TtsFallbackChain:
                                 else "audio_invalid",
                             )
                         )
-                        candidate_path.unlink(missing_ok=True)
+                        _safe_unlink(candidate_path)
+                        _safe_unlink(final_path)
                         if code == "duration_out_of_range" and rate is RateProfile.NORMAL:
                             continue
                         break
@@ -124,22 +140,9 @@ class TtsFallbackChain:
                                 safe_error_code="tts_backend_failed",
                             )
                         )
-                        candidate_path.unlink(missing_ok=True)
+                        _safe_unlink(candidate_path)
+                        _safe_unlink(final_path)
                         break
-                    published_probe = canonicalize_mp3(
-                        candidate.path,
-                        final_path,
-                        timeout_seconds=self._probe_timeout,
-                        max_bytes=self._max_bytes,
-                    )
-                    final_probe = probe_mp3(
-                        final_path,
-                        timeout_seconds=self._probe_timeout,
-                        max_bytes=self._max_bytes,
-                    )
-                    if final_probe != published_probe:
-                        final_path.unlink(missing_ok=True)
-                        raise ValueError("tts_publish_changed") from None
                     attempts.append(
                         AudioAttempt(
                             backend=adapter.backend,
@@ -183,6 +186,11 @@ def _is_link_or_reparse(path: Path) -> bool:
         )
     except OSError:
         return True
+
+
+def _safe_unlink(path: Path) -> None:
+    with suppress(OSError):
+        path.unlink(missing_ok=True)
 
 
 def _candidate_matches(
