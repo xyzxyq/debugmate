@@ -119,3 +119,14 @@ def test_projection_rejects_source_whose_diagnosis_no_longer_matches_outcome(
     )
     with pytest.raises(PresentationBuildError, match="presentation_build_failed"):
         build_presentation(forged, _context(tmp_path))
+
+
+def test_projection_cannot_be_reconstructed_without_its_canonical_seal(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    presentation = build_presentation(
+        _loaded(completed_source_bundle), _context(tmp_path)
+    )
+    payload = presentation.model_dump(mode="json", exclude={"projection_sha256"})
+    with pytest.raises(ValidationError, match="projection_sha256"):
+        type(presentation).model_validate_json(canonical_json_bytes(payload), strict=True)

@@ -236,3 +236,24 @@ def test_citation_export_rejects_invented_or_unsafe_metadata(
     with pytest.raises(CitationRenderError, match="^citation_render_failed$") as caught:
         render_citations(changed)
     assert "sk-test" not in str(caught.value)
+
+
+def test_renderers_reject_a_presentation_with_changed_identity_or_content(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    presentation = _presentation(completed_source_bundle, tmp_path)
+    changed_identity = presentation.model_copy(
+        update={
+            "identity": presentation.identity.model_copy(
+                update={"diagnosis_sha256": "f" * 64}
+            )
+        }
+    )
+    changed_content = presentation.model_copy(
+        update={"limitations": (*presentation.limitations, "invented limitation")}
+    )
+    for changed in (changed_identity, changed_content):
+        with pytest.raises(ReportRenderError, match="report_render_failed"):
+            render_report(changed)
+        with pytest.raises(CitationRenderError, match="citation_render_failed"):
+            render_citations(changed)
