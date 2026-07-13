@@ -30,7 +30,7 @@ patterns-established:
   - "Report, card and recap implementations consume the same sealed PresentationModel and ArtifactIdentity."
   - "Renderer failures cross the boundary only as report_render_failed or citation_render_failed with no exception chain."
 requirements-progressed: [MULTI-01, UX-01]
-duration: 34m
+duration: 52m
 completed: 2026-07-13
 ---
 
@@ -40,11 +40,11 @@ completed: 2026-07-13
 
 ## Performance
 
-- **Duration:** 34m
+- **Duration:** 52m including independent-review remediation
 - **Completed:** 2026-07-13T10:28:26+08:00
 - **Tasks:** 3 strict TDD tasks plus one adversarial identity-hardening cycle
-- **Focused tests:** 32 passed
-- **Full offline suite:** 542 passed, 22 deselected
+- **Focused tests:** 35 passed
+- **Full offline suite:** 545 passed, 22 deselected
 
 ## Accomplishments
 
@@ -66,15 +66,19 @@ completed: 2026-07-13
 6. **Citation GREEN** — `c44ce4f`: 9 citation tests passed.
 7. **Projection-forgery RED** — `337c6b1`: missing seal and changed identity/content both reproduced.
 8. **Projection-forgery GREEN** — `7dddc01`: 32 combined presentation/report tests passed.
+9. **Public re-signing RED/GREEN** — `bd9611b` / `853c045`: a caller could previously recompute the public seal and call public revalidation; both report and citation paths now require the private authenticity attached only by `build_presentation`.
+10. **Honest source-label RED/GREEN** — `bdacd99` / `2b55fb2`: the absent `official_title` field failed first; citations now export the verified `source_id` under `source_label` and claim no title.
+11. **Grounded support-edge RED/GREEN** — `b9cb91c` / `4e53826`: an inference with no support link previously appeared in `supported_candidate_ids`; only a grounded candidate joined through a complete fact/evidence support edge is now emitted.
 
 ## Verification Gates
 
-- `python -m pytest -q tests/results/test_presentation.py tests/results/test_report.py` — **32 passed**.
-- `python -m pytest -q` — **542 passed, 22 deselected**.
+- `python -m pytest -q tests/results/test_presentation.py tests/results/test_report.py` — **35 passed**.
+- `python -m pytest -q` — **545 passed, 22 deselected**.
 - `python -m ruff check .` — **passed**.
 - `python -m pip check` — **no broken requirements**.
 - `git diff --check HEAD~6..HEAD` — **passed**.
 - Renderer dependency grep for provider, network, subprocess and filesystem calls — **no matches**.
+- Production/plan grep for `seal_for`, `revalidate_presentation` and `official_title` — **no matches**; only negative assertions and adversarial test helpers retain those strings.
 
 ## Deviations from Plan
 
@@ -86,6 +90,24 @@ completed: 2026-07-13
 - **Risk:** report and citation artifacts could share each other's forged identity while no longer representing the original presenter output.
 - **Fix:** added `projection_sha256`, canonical whole-model verification and module-private construction/revalidation authority.
 - **Evidence:** both forged identity and forged content failed in RED, then both report and citation renderers rejected them after GREEN.
+
+### Independent Review Remediation
+
+**1. [Important] Public projection re-signing was still possible.**
+
+- **Verified issue:** `seal_for` plus `revalidate_presentation` allowed a caller to change a projection, recompute the seal and obtain renderer acceptance.
+- **Fix:** removed both public authorities. `build_presentation` now attaches a private source authority and original fingerprint; renderers only verify that chain and never issue authority to an arbitrary projection.
+- **Evidence:** a caller-resealed `model_copy` fails in both report and citation renderers, while an unchanged build result remains accepted.
+
+**2. [Important] `source_id` was mislabeled as an official title.**
+
+- **Verified issue:** Phase 3 `EvidenceAnchor` contains no verified title or version-range field.
+- **Fix:** renamed the exported field to `source_label`, preserving the exact verified `source_id`; updated the authoritative plan contract and tests. No lookup or invented title was added.
+
+**3. [Important] Inferred candidates were overstated as citation-supported.**
+
+- **Verified issue:** candidate support was derived from `candidate.evidence_ids` alone.
+- **Fix:** `supported_candidate_ids` now includes only grounded candidates with the cited evidence and an intersecting verified fact/evidence support link. The grounded graph is also validated in the reverse direction before export.
 
 ## Remaining Scope
 
