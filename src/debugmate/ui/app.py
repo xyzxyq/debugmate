@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+import secrets
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 
 import gradio as gr
 
@@ -11,8 +14,9 @@ from debugmate.results.contracts import (
     ResultMode,
     ResultStatus,
     ResultViewState,
+    SafeFailure,
 )
-from debugmate.results.service import ResultApplicationService
+from debugmate.results.service import CorrectionDraft, ResultApplicationService, ResultServiceError
 from debugmate.ui.presentation import ComponentViewModel, render_view_state
 
 WORKBENCH_CSS = "\n".join(
@@ -48,6 +52,172 @@ _FIELD_LABELS = (
     "设备",
     "路径",
 )
+_CASE_ID = "case_"
+_RUN_ID = "run_"
+_RESULT_ID = "result_"
+
+
+@dataclass(frozen=True, slots=True)
+class CallbackPayload:
+    """Strict UI state plus server-owned component outputs, never input paths."""
+
+    state: ResultViewState
+    view: ComponentViewModel
+    report_markdown: str | None
+    card_path: str | None
+    audio_path: str | None
+    download_path: str | None
+
+
+class UiCallbacks:
+    """Thin adapter that resolves every displayed member through the service."""
+
+    def __init__(self, service: ResultApplicationService, *, cache_root: Path) -> None:
+        self._service = service
+        self._cache_root = Path(cache_root)
+        if not self._cache_root.is_absolute():
+            raise ValueError("UI cache root must be absolute")
+        self._cache_root.mkdir(parents=True, exist_ok=True)
+        if not self._cache_root.is_dir() or self._cache_root.is_symlink():
+            raise ValueError("UI cache root is unavailable")
+
+    @staticmethod
+    def _failure(state: ResultViewState, code: str) -> ResultViewState:
+        safe_code = (
+            code
+            if code in {"download_invalid", "result_bundle_invalid"}
+            else "result_bundle_invalid"
+        )
+        return ResultViewState(
+            mode=state.mode,
+            status=ResultStatus.FAILED,
+            fixture_id=state.fixture_id,
+            fixture_name=state.fixture_name,
+            availability=ArtifactAvailability(),
+            failure=SafeFailure(code=safe_code, failed_stage="download", retry_scope="download"),
+        )
+
+    @staticmethod
+    def _strict_id(value: object, prefix: str) -> bool:
+        return (
+            isinstance(value, str)
+            and value.startswith(prefix)
+            and len(value) == len(prefix) + 32
+            and all(character in "0123456789abcdef" for character in value[len(prefix) :])
+        )
+
+    def _cache_download(self, download) -> str:
+        filename = download.filename
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or Path(filename).name != filename
+            or any(marker in filename for marker in ("/", "\\", ":", "\x00"))
+        ):
+            raise ResultServiceError("download_invalid")
+        payload = download.read_bytes()
+        target = self._cache_root / f"{secrets.token_hex(16)}-{filename}"
+        with target.open("xb") as handle:
+            handle.write(payload)
+        return str(target)
+
+    def _member(self, state: ResultViewState, member_id: str):
+        if state.identity is None or state.result_id is None:
+            raise ResultServiceError("download_invalid")
+        return self._service.resolve_download(
+            state.identity.case_id, state.result_id, member_id
+        )
+
+    def _render(self, state: ResultViewState) -> CallbackPayload:
+        if state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}:
+            return CallbackPayload(
+                state=state,
+                view=render_view_state(state),
+                report_markdown=None,
+                card_path=None,
+                audio_path=None,
+                download_path=None,
+            )
+        created: list[Path] = []
+        try:
+            report = self._member(state, "report").read_bytes().decode("utf-8")
+            card_path = None
+            if state.availability.card:
+                card_path = self._cache_download(self._member(state, "card"))
+                created.append(Path(card_path))
+            audio_path = None
+            if state.availability.audio:
+                audio_path = self._cache_download(self._member(state, "audio"))
+                created.append(Path(audio_path))
+            download_path = self._cache_download(self._member(state, "bundle"))
+            created.append(Path(download_path))
+            return CallbackPayload(
+                state=state,
+                view=render_view_state(state),
+                report_markdown=report,
+                card_path=card_path,
+                audio_path=audio_path,
+                download_path=download_path,
+            )
+        except (ResultServiceError, UnicodeError, OSError, ValueError):
+            for path in created:
+                path.unlink(missing_ok=True)
+            failed = self._failure(state, "download_invalid")
+            return CallbackPayload(
+                state=failed,
+                view=render_view_state(failed),
+                report_markdown=None,
+                card_path=None,
+                audio_path=None,
+                download_path=None,
+            )
+
+    def load_replay(self, fixture_id: object) -> CallbackPayload:
+        if (
+            not isinstance(fixture_id, str)
+            or not fixture_id
+            or "/" in fixture_id
+            or "\\" in fixture_id
+        ):
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+        try:
+            return self._render(self._service.load_replay(fixture_id))
+        except Exception:
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
+    def diagnose(self, approved_payload: object) -> CallbackPayload:
+        try:
+            return self._render(self._service.diagnose_and_compose(approved_payload))
+        except (ResultServiceError, TypeError, ValueError):
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
+    def refresh(self, case_id: object, result_id: object) -> CallbackPayload:
+        if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+        try:
+            return self._render(self._service.restore_result(case_id, result_id))
+        except Exception:
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
+    def retry(self, case_id: object, result_id: object) -> CallbackPayload:
+        if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+        try:
+            return self._render(self._service.retry_stage(case_id, result_id))
+        except Exception:
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
+    def correct(
+        self, previous_run_id: object, draft: CorrectionDraft | str, *, confirmed: object
+    ) -> CallbackPayload:
+        if not self._strict_id(previous_run_id, _RUN_ID) or not isinstance(confirmed, bool):
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+        try:
+            return self._render(
+                self._service.correct_and_compose(previous_run_id, draft, confirmed)
+            )
+        except (ResultServiceError, TypeError, ValueError):
+            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
 
 def _idle_view() -> ResultViewState:
@@ -71,10 +241,10 @@ def _status_text(view: ComponentViewModel) -> str:
     return "\n\n".join(rows)
 
 
-def _state_updates(state: ResultViewState) -> tuple[Any, ...]:
-    """Map only the strict view state; result bytes are resolved by callbacks later."""
+def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
+    """Convert one already verified callback payload into atomic native updates."""
 
-    view = render_view_state(state)
+    view = payload.view
     failure = ""
     if view.failure_detail_labels:
         failure = "\n\n".join(
@@ -88,12 +258,17 @@ def _state_updates(state: ResultViewState) -> tuple[Any, ...]:
         _status_text(view),
         view.result_metadata,
         failure,
+        gr.update(value=payload.report_markdown or "尚未生成诊断结果"),
+        gr.update(value=payload.card_path, visible=payload.card_path is not None),
+        gr.update(value=payload.audio_path, visible=payload.audio_path is not None),
         gr.update(
-            value=view.download_label or "下载结果包",
-            visible=view.download_label is not None,
+            value=payload.download_path,
+            label=view.download_label or "下载结果包",
+            visible=payload.download_path is not None,
+            interactive=payload.download_path is not None,
         ),
         gr.update(interactive=view.actions_enabled),
-        state,
+        payload.state,
     )
 
 
@@ -101,6 +276,10 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
     """Build the compact workbench without an upload, path, or shell boundary."""
 
     with gr.Blocks(title="DebugMate 诊断工作台", analytics_enabled=False) as app:
+        callbacks = UiCallbacks(
+            service,
+            cache_root=Path(tempfile.gettempdir()) / "debugmate-ui-cache",
+        )
         current_state = gr.State(_idle_view())
         approved_payload = gr.State(value=None)
         with gr.Group(elem_classes="status-bar"):
@@ -150,9 +329,9 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                 gr.Markdown("## 三模态结果")
                 with gr.Tabs():
                     with gr.Tab("文字报告"):
-                        gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
+                        report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
                     with gr.Tab("诊断卡"):
-                        gr.Image(
+                        card = gr.Image(
                             label="诊断卡",
                             type="filepath",
                             interactive=False,
@@ -160,7 +339,7 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                             buttons=[],
                         )
                     with gr.Tab("语音复盘"):
-                        gr.Audio(
+                        audio = gr.Audio(
                             label="语音复盘",
                             type="filepath",
                             interactive=False,
@@ -177,23 +356,27 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                             label="引用",
                         )
                         gr.File(label="已验证单个产物", interactive=False, visible=False)
-                        download = gr.DownloadButton(
-                            "下载结果包", visible=False, interactive=False
-                        )
+                        download = gr.DownloadButton("下载结果包", visible=False, interactive=False)
         start_button = gr.Button("开始诊断", variant="primary", interactive=False)
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
 
         def load_replay(fixture_id: str | None):
-            if not isinstance(fixture_id, str):
-                state = _idle_view()
-            else:
-                state = service.load_replay(fixture_id)
-            return _state_updates(state)
+            return _component_updates(callbacks.load_replay(fixture_id))
 
         replay_button.click(
             load_replay,
             inputs=[replay],
-            outputs=[status, result_metadata, failure, download, correction_button, current_state],
+            outputs=[
+                status,
+                result_metadata,
+                failure,
+                report,
+                card,
+                audio,
+                download,
+                correction_button,
+                current_state,
+            ],
             api_name=False,
             queue=True,
             trigger_mode="once",
@@ -203,9 +386,19 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
         # The only live boundary is an application-owned approved payload State;
         # no component supplies a DiagnosisRunOutcome, path, command or shell.
         start_button.click(
-            lambda approved: _state_updates(service.diagnose_and_compose(approved)),
+            lambda approved: _component_updates(callbacks.diagnose(approved)),
             inputs=[approved_payload],
-            outputs=[status, result_metadata, failure, download, correction_button, current_state],
+            outputs=[
+                status,
+                result_metadata,
+                failure,
+                report,
+                card,
+                audio,
+                download,
+                correction_button,
+                current_state,
+            ],
             api_name=False,
             queue=True,
             trigger_mode="once",
