@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import ClassVar
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from debugmate.hashing import sha256_bytes
 from debugmate.privacy.output_scan import assert_export_safe
@@ -23,6 +23,7 @@ class RecapComposeError(ValueError):
 class SafeRecapText(StrictFrozenModel):
     """Identity-bound text that is safe to hand to a speech adapter."""
 
+    model_config = ConfigDict(**StrictFrozenModel.model_config, hide_input_in_errors=True)
     MAX_UTF8_BYTES: ClassVar[int] = 2400
     identity: ArtifactIdentity
     text: str = Field(min_length=1)
@@ -32,6 +33,10 @@ class SafeRecapText(StrictFrozenModel):
 
     @model_validator(mode="after")
     def canonical_text_and_hash(self) -> SafeRecapText:
+        try:
+            assert_export_safe(self.text)
+        except Exception:
+            raise ValueError("recap text is unsafe") from None
         if self.text != "\n".join(self.units):
             raise ValueError("recap text does not match its semantic units")
         if len(self.text.encode("utf-8")) > self.MAX_UTF8_BYTES:

@@ -96,3 +96,21 @@ def test_recap_contract_cannot_be_forged(completed_source_bundle, tmp_path: Path
 
     with pytest.raises(ValidationError):
         SafeRecapText.model_validate(payload, strict=True)
+
+
+def test_recap_contract_rejects_direct_secret_without_echoing_it(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    recap = compose_recap(_presentation(completed_source_bundle, tmp_path))
+    secret = "token=debugmate-fictional-secret-0123456789"
+    units = (*recap.units[:-1], secret)
+    payload = recap.model_dump(mode="python") | {
+        "text": "\n".join(units),
+        "units": units,
+        "sha256": sha256_bytes("\n".join(units).encode("utf-8")),
+    }
+
+    with pytest.raises(ValidationError) as caught:
+        SafeRecapText.model_validate(payload, strict=True)
+
+    assert secret not in str(caught.value)
