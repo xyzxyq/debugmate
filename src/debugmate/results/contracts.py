@@ -342,8 +342,13 @@ class ResultViewState(StrictFrozenModel):
     fixture_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
     fixture_name: str | None = Field(default=None, min_length=1, max_length=128)
     identity: ArtifactIdentity | None = None
+    # Terminal UI state is deliberately self-contained.  A component mapper
+    # must never reopen a result directory to learn an ID, backend, or fallback
+    # reason after the verifier made its authorization decision.
+    result_id: str | None = Field(default=None, pattern=r"^result_[0-9a-f]{32}$")
     availability: ArtifactAvailability
     failure: SafeFailure | None = None
+    audio: AudioResult | None = None
     current_stage: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{1,31}$")
     completed_stages: tuple[str, ...] = ()
     inherited_stages: tuple[str, ...] = ()
@@ -351,19 +356,39 @@ class ResultViewState(StrictFrozenModel):
     @model_validator(mode="after")
     def honest_view_state(self) -> ResultViewState:
         _validate_mode(self.mode, self.fixture_id, self.fixture_name)
+        terminal = {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+        if self.status in terminal and (self.identity is None or self.result_id is None):
+            raise ValueError("terminal view requires a verified result identity")
         if self.status is ResultStatus.COMPLETED and (
-            self.identity is None or not self.availability.all() or self.failure is not None
+            not self.availability.all()
+            or self.failure is not None
+            or self.audio is None
+            or not self.audio.available
+            or self.audio.identity != self.identity
         ):
             raise ValueError("completed view requires verified complete identity")
         if self.status is ResultStatus.PARTIAL and (
-            self.identity is None
-            or not self.availability.any()
+            not self.availability.any()
             or self.availability.all()
             or self.failure is None
+            or self.audio is None
+            or self.audio.identity != self.identity
+            or (self.availability.audio != self.audio.available)
+            or (not self.availability.audio and self.audio.failure != self.failure)
         ):
             raise ValueError("partial view requires verified partial artifacts and failure")
-        if self.status is ResultStatus.FAILED and (self.failure is None or self.availability.any()):
+        if self.status is ResultStatus.FAILED and (
+            self.failure is None
+            or self.availability.any()
+            or self.identity is not None
+            or self.result_id is not None
+            or self.audio is not None
+        ):
             raise ValueError("failed view requires only a safe failure")
+        if self.status in {ResultStatus.IDLE, ResultStatus.RUNNING} and any(
+            value is not None for value in (self.identity, self.result_id, self.audio)
+        ):
+            raise ValueError("nonterminal view cannot expose unverified result metadata")
         if self.status is ResultStatus.RUNNING and not self.current_stage:
             raise ValueError("running view requires a current stage")
         return self
