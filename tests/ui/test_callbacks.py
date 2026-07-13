@@ -12,7 +12,7 @@ from debugmate.results.contracts import (
     ResultViewState,
 )
 from debugmate.results.verifier import VerifiedDownload
-from debugmate.ui.app import UiCallbacks
+from debugmate.ui.app import UiCallbacks, correction_draft_from_fields
 
 
 def _state() -> ResultViewState:
@@ -84,6 +84,22 @@ class _Service:
             identity=self.state.identity,
         )
 
+    def correction_fields(self, previous_run_id: str):
+        from debugmate.results.service import CorrectionFields
+
+        assert previous_run_id == self.state.identity.source_run_id
+        return CorrectionFields(
+            source_run_id=previous_run_id,
+            values=(
+                "ModuleNotFoundError",
+                "main.py:1",
+                "demo_pkg",
+                "1.0",
+                "cpu",
+                "<WORKSPACE>/main.py",
+            ),
+        )
+
     def correct_and_compose(self, previous_run_id, draft, confirmed):
         self.correction_calls.append((previous_run_id, draft, confirmed))
         return self.state
@@ -106,6 +122,7 @@ def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_
     assert Path(payload.audio_path).read_bytes() == b"verified-audio"
     assert payload.download_path is not None
     assert Path(payload.download_path).read_bytes() == b"verified-zip"
+    assert payload.field_values[0] == "ModuleNotFoundError"
     assert "回放" in payload.view.result_metadata
 
 
@@ -150,3 +167,33 @@ def test_correction_callback_accepts_only_strict_run_id_and_draft_and_never_a_pa
     bad = callbacks.refresh("C:/private/result", "result_" + "6" * 32)
     assert bad.state.status.value == "failed"
     assert "private" not in repr(bad)
+
+
+def test_field_edit_creates_only_a_local_old_to_new_draft_until_explicit_confirmation(
+    tmp_path: Path,
+) -> None:
+    from debugmate.diagnosis.extraction import FieldId
+
+    service = _Service()
+    callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
+    original = callbacks.load_replay("module-not-found").field_values
+    changed = list(original)
+    changed[0] = "ImportError"
+
+    draft, summary = correction_draft_from_fields(
+        original, tuple(changed), service.state.identity.source_run_id
+    )
+
+    assert draft is not None
+    assert draft.field_id is FieldId.EXCEPTION_TYPE
+    assert "有 1 项未确认修改" in summary
+    assert "ModuleNotFoundError → ImportError" in summary
+    assert service.correction_calls == []
+    no_op, helper = correction_draft_from_fields(
+        original, original, service.state.identity.source_run_id
+    )
+    assert no_op is None
+    assert helper == "请先修改至少一个抽取字段。"
+
+    callbacks.correct(service.state.identity.source_run_id, draft, confirmed=True)
+    assert service.correction_calls[-1][2] is True

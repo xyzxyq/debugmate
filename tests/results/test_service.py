@@ -144,6 +144,23 @@ def test_replay_invalid_fixture_and_ui_supplied_outcome_become_safe_failures(
     assert isinstance(outcome, DiagnosisRunOutcome)
 
 
+def test_correction_fields_are_read_only_ordered_values_from_a_verified_stored_run(
+    candidates, tmp_path: Path
+) -> None:
+    service = _service(tmp_path, candidates)
+    state = service.load_replay("module-not-found")
+    assert state.identity is not None
+
+    fields = service.correction_fields(state.identity.source_run_id)
+
+    assert fields.source_run_id == state.identity.source_run_id
+    assert fields.values[0] == "ModuleNotFoundError"
+    assert len(fields.values) == 6
+    with pytest.raises(Exception) as invalid:
+        service.correction_fields("run_" + "g" * 32)
+    assert "C:" not in repr(invalid.value)
+
+
 def test_restore_rereads_full_outcome_store_and_refuses_a_tampered_record(
     candidates, tmp_path: Path
 ) -> None:
