@@ -96,6 +96,54 @@ Both fixes were written from RED tests and the smoke was re-run successfully.
 - `python -m pip check` — passed.
 - `git diff --check` — passed.
 
+## Independent-review remediation (I1-I4)
+
+The independent review found four important gaps after the first delivery.  Each
+was reproduced first and repaired in a separate RED/GREEN sequence:
+
+- **I1 — persistent replay lineage:** `d3e11ee` / `b39a8fe`.  A restarted
+  service no longer depends on the in-memory `_run_results` cache to determine
+  correction provenance.  It locates only strict `result_*` records under the
+  factory-issued result root, verifies every candidate manifest, requires one
+  mode/fixture provenance tuple for the parent source run, and then restores
+  that source.  A replay-derived correction therefore remains replay-labelled
+  across restart and a second correction; an unverified or ambiguous parent
+  becomes a safe failure rather than live provenance.
+- **I2 — UI content TOCTOU:** `4346993`, `4ce7759` / `5354801`.  Native media
+  and download components no longer receive a mutable temporary-file path.
+  A `VerifiedDownload` is consumed once into bounded server memory with its
+  SHA-256, MIME type, filename and a 128-bit opaque token.  The Gradio app
+  serves `/debugmate-content/<token>` by rechecking the in-memory bytes before
+  each response; image/audio use the token URL and DownloadButton uses the same
+  URL with an attachment header.  There is no user path, cache directory or
+  reopen-after-authorization boundary.
+- **I3 — seven-stage UI progress:** `1d87030` / `37b2e32`.  Stage-aware result
+  composition emits actual `source`, `presentation`, `report`, `card`,
+  `audio`, `consistency`, `publish` completion events.  The service rejects
+  out-of-order emissions, streams strict `ServiceStageEvent` running state from
+  a worker, and the Gradio callback generator maps each event through the pure
+  view mapper before applying the atomic component update.
+- **I4 — complete verified UI payload:** `733e873`.  The result allowlist adds
+  only fixed `diagnosis` and `recap_text` members.  The callback parses the
+  freshly verified strict diagnosis into an explicit redacted-input summary,
+  category/confidence, fact/evidence rows and citation rows, and displays the
+  verified recap transcript.  Missing/invalid detail falls back to fixed empty
+  UI state without exposing a filesystem path or raw exception.
+
+Fresh review-remediation checks:
+
+- I1 focused restart correction plus existing replay correction: 2 passed.
+- I2 callbacks, including an ASGI TestClient GET of the opaque content URL:
+  4 passed.
+- I3 focused ordered seven-stage service event plus UI checks: 9 passed.
+- I4 UI/service callback and structural checks: 15 passed.
+- Final offline suite:
+  `python -m pytest -q -m "not cloud and not ocr and not network and not browser and not tts"`
+  — **701 passed, 27 deselected** in 98.10 seconds.  The run has one
+  Starlette TestClient/httpx deprecation warning; it is not a test failure or
+  a runtime/provider error.
+- `python -m ruff check .`, `python -m pip check`, and `git diff --check` — passed.
+
 ## External gate
 
 The fixed offline replay demonstration is complete without credentials.  Live
