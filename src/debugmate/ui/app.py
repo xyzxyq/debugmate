@@ -436,6 +436,26 @@ class UiCallbacks:
         except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
+    def load_replay_events(self, fixture_id: object, *, request: object | None = None):
+        """Yield replay progress only from the service's strict stage stream."""
+
+        if (
+            not isinstance(fixture_id, str)
+            or not fixture_id
+            or "/" in fixture_id
+            or "\\" in fixture_id
+        ):
+            yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return
+        try:
+            self._require_loopback_request(request)
+            for event in self._service.load_replay_events(fixture_id):
+                if not isinstance(event, ServiceStageEvent):
+                    raise ResultServiceError("result_bundle_invalid")
+                yield self._render(event.state)
+        except Exception:
+            yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
     def diagnose(
         self, approved_payload: object, *, request: object | None = None
     ) -> CallbackPayload:
@@ -775,8 +795,9 @@ def build_app(
                 gr.update(value=payload.recap_text),
             )
 
-        def load_replay(fixture_id: str | None, request: gr.Request):
-            return apply_payload(callbacks.load_replay(fixture_id, request=request))
+        def load_replay_stream(fixture_id: str | None, request: gr.Request):
+            for payload in callbacks.load_replay_events(fixture_id, request=request):
+                yield apply_payload(payload)
 
         def diagnose_stream(approved: object, request: gr.Request):
             for payload in callbacks.diagnose_events(approved, request=request):
@@ -836,7 +857,7 @@ def build_app(
             )
 
         replay_button.click(
-            load_replay,
+            load_replay_stream,
             inputs=[replay],
             outputs=result_outputs,
             api_name=False,

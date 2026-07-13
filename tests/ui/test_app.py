@@ -18,6 +18,8 @@ from debugmate.results.contracts import (
     ResultStatus,
     ResultViewState,
 )
+from debugmate.results.service import ServiceStageEvent
+from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui import serve as serve_module
 from debugmate.ui.app import build_app
 from debugmate.ui.serve import _local_service
@@ -64,6 +66,58 @@ class _Service:
         assert fixture_id == "module-not-found"
         return _completed_state()
 
+    def load_replay_events(self, fixture_id: str):
+        assert fixture_id == "module-not-found"
+        stages = (
+            "source",
+            "presentation",
+            "report",
+            "card",
+            "audio",
+            "consistency",
+            "publish",
+        )
+        for index, stage in enumerate(stages):
+            yield ServiceStageEvent(
+                state=ResultViewState(
+                    mode=ResultMode.REPLAY,
+                    status=ResultStatus.RUNNING,
+                    fixture_id="module-not-found",
+                    fixture_name="ModuleNotFoundError：缺少虚构依赖包",
+                    availability=ArtifactAvailability(),
+                    current_stage=stage,
+                    completed_stages=stages[:index],
+                )
+            )
+        yield ServiceStageEvent(
+            state=_completed_state().model_copy(
+                update={
+                    "mode": ResultMode.REPLAY,
+                    "fixture_id": "module-not-found",
+                    "fixture_name": "ModuleNotFoundError：缺少虚构依赖包",
+                }
+            )
+        )
+
+    def resolve_download(self, case_id: str, result_id: str, member_id: str) -> VerifiedDownload:
+        state = _completed_state()
+        assert state.identity is not None and state.result_id is not None
+        assert (case_id, result_id) == (state.identity.case_id, state.result_id)
+        contents = {
+            "report": (b"# DebugMate", "report.md", "text/markdown"),
+            "card": (b"verified-card", "card.png", "image/png"),
+            "audio": (b"verified-audio", "recap.mp3", "audio/mpeg"),
+            "bundle": (b"verified-zip", "debugmate-result.zip", "application/zip"),
+        }
+        payload, filename, mime_type = contents[member_id]
+        return VerifiedDownload._issue(
+            payload=payload,
+            member_id=member_id,
+            filename=filename,
+            mime_type=mime_type,
+            identity=state.identity,
+        )
+
 
 def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() -> None:
     app = build_app(_Service())
@@ -90,6 +144,31 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "overflow-x: hidden" not in app.css
+
+
+def test_replay_button_callback_streams_running_states_and_disables_repeat_action() -> None:
+    app = build_app(_Service())
+    callback = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
+    )
+
+    frames = list(callback("module-not-found", None))
+
+    assert [frame[8].current_stage for frame in frames[:-1]] == [
+        "source",
+        "presentation",
+        "report",
+        "card",
+        "audio",
+        "consistency",
+        "publish",
+    ]
+    assert [len(frame[8].completed_stages) for frame in frames[:-1]] == list(range(7))
+    assert all(frame[8].mode is ResultMode.REPLAY for frame in frames[:-1])
+    assert all(frame[22]["interactive"] is False for frame in frames[:-1])
+    assert frames[-1][8].status is ResultStatus.COMPLETED
 
 
 def test_local_service_configures_a_real_result_composer_for_replay(tmp_path: Path) -> None:

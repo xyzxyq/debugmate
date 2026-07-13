@@ -349,6 +349,39 @@ def test_live_service_events_follow_the_real_seven_stage_order(
     assert events[-1].state.status.value == "completed"
 
 
+def test_replay_service_events_follow_the_real_seven_stage_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _root, base_composer = _dynamic_composer(tmp_path, monkeypatch)
+
+    def staged_composer(source, *, mode, fixture_id, fixture_name, stage_callback):
+        for stage in ("presentation", "report", "card", "audio", "consistency", "publish"):
+            stage_callback(stage)
+        return base_composer(
+            source, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+        )
+
+    staged_composer.supports_stage_events = True
+    service = _service(tmp_path, composer=staged_composer)
+
+    events = list(service.load_replay_events("module-not-found"))
+
+    running = [event.state for event in events[:-1]]
+    assert [state.current_stage for state in running] == [
+        "source",
+        "presentation",
+        "report",
+        "card",
+        "audio",
+        "consistency",
+        "publish",
+    ]
+    assert [len(state.completed_stages) for state in running] == list(range(7))
+    assert all(state.mode.value == "replay" for state in running)
+    assert {state.fixture_id for state in running} == {"module-not-found"}
+    assert events[-1].state.status.value == "completed"
+
+
 def test_retry_reverifies_a_partial_bundle_then_creates_a_distinct_full_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

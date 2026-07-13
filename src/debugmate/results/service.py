@@ -399,6 +399,38 @@ class ResultApplicationService:
         except (TypeError, ValueError):
             yield ServiceStageEvent(state=self._failure("result_composition_failed"))
             return
+
+        yield from self._stage_events(
+            lambda stage_callback: self._diagnose_and_compose(
+                checked, stage_callback=stage_callback
+            ),
+            mode=ResultMode.LIVE,
+            fixture_id=None,
+            fixture_name=None,
+            worker_name="debugmate-result-compose",
+        )
+
+    def _stage_events(
+        self,
+        operation: Callable[[Callable[[str], None]], ResultViewState],
+        *,
+        mode: ResultMode,
+        fixture_id: str | None,
+        fixture_name: str | None,
+        worker_name: str,
+    ):
+        """Expose only an actual, ordered seven-stage composition to the UI."""
+
+        if self._composer is None or not getattr(self._composer, "supports_stage_events", False):
+            yield ServiceStageEvent(
+                state=self._failure(
+                    "result_composition_failed",
+                    mode=mode,
+                    fixture_id=fixture_id,
+                    fixture_name=fixture_name,
+                )
+            )
+            return
         channel: Queue[tuple[str, object]] = Queue()
         emitted: list[str] = []
 
@@ -410,10 +442,28 @@ class ResultApplicationService:
             channel.put(("stage", stage))
 
         def worker() -> None:
-            result = self._diagnose_and_compose(checked, stage_callback=stage_callback)
+            try:
+                result = operation(stage_callback)
+            except Exception:
+                result = self._failure(
+                    "result_composition_failed",
+                    mode=mode,
+                    fixture_id=fixture_id,
+                    fixture_name=fixture_name,
+                )
+            if (
+                result.status in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+                and tuple(emitted) != _RESULT_STAGES
+            ):
+                result = self._failure(
+                    "result_composition_failed",
+                    mode=mode,
+                    fixture_id=fixture_id,
+                    fixture_name=fixture_name,
+                )
             channel.put(("terminal", result))
 
-        thread = threading.Thread(target=worker, name="debugmate-result-compose", daemon=True)
+        thread = threading.Thread(target=worker, name=worker_name, daemon=True)
         thread.start()
         while True:
             kind, value = channel.get()
@@ -425,15 +475,19 @@ class ResultApplicationService:
             index = _RESULT_STAGES.index(stage)
             yield ServiceStageEvent(
                 state=ResultViewState(
-                    mode=ResultMode.LIVE,
+                    mode=mode,
                     status=ResultStatus.RUNNING,
+                    fixture_id=fixture_id,
+                    fixture_name=fixture_name,
                     availability=ArtifactAvailability(),
                     current_stage=stage,
                     completed_stages=_RESULT_STAGES[:index],
                 )
             )
 
-    def load_replay(self, fixture_id: str) -> ResultViewState:
+    def _load_replay(
+        self, fixture_id: str, *, stage_callback: Callable[[str], None] | None = None
+    ) -> ResultViewState:
         """Allowlist a fixture, reverify source, then publish a new replay result."""
 
         verified_fixture_id: str | None = None
@@ -444,11 +498,14 @@ class ResultApplicationService:
             verified_fixture_name = str(row["display_label"])
             with self._case_lock(source.case_id):
                 self._store_outcome(outcome)
+                if stage_callback is not None:
+                    stage_callback("source")
                 return self._compose(
                     source,
                     mode=ResultMode.REPLAY,
                     fixture_id=verified_fixture_id,
                     fixture_name=verified_fixture_name,
+                    stage_callback=stage_callback,
                 )
         except ResultServiceError as error:
             if verified_fixture_id is not None and verified_fixture_name is not None:
@@ -461,6 +518,31 @@ class ResultApplicationService:
             return self._failure(error.code)
         except Exception:
             return self._failure("replay_bundle_invalid")
+
+    def load_replay(self, fixture_id: str) -> ResultViewState:
+        """Synchronously compose one allowlisted replay fixture."""
+
+        return self._load_replay(fixture_id)
+
+    def load_replay_events(self, fixture_id: str):
+        """Stream the strictly verified replay composition through all seven stages."""
+
+        try:
+            row = self._fixture_row(fixture_id)
+            verified_fixture_id = str(row["fixture_id"])
+            verified_fixture_name = str(row["display_label"])
+        except ResultServiceError as error:
+            yield ServiceStageEvent(state=self._failure(error.code))
+            return
+        yield from self._stage_events(
+            lambda stage_callback: self._load_replay(
+                verified_fixture_id, stage_callback=stage_callback
+            ),
+            mode=ResultMode.REPLAY,
+            fixture_id=verified_fixture_id,
+            fixture_name=verified_fixture_name,
+            worker_name="debugmate-replay-compose",
+        )
 
     def _source_for_verified_result(
         self, manifest: ResultManifest
