@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -12,7 +13,7 @@ from debugmate.results.contracts import (
     ResultViewState,
 )
 from debugmate.results.verifier import VerifiedDownload
-from debugmate.ui.app import UiCallbacks, correction_draft_from_fields
+from debugmate.ui.app import UiCallbacks, correction_draft_from_fields, mount_content_endpoint
 
 
 def _state() -> ResultViewState:
@@ -105,11 +106,9 @@ class _Service:
         return self.state
 
 
-def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_bytes(
-    tmp_path: Path,
-) -> None:
+def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_bytes() -> None:
     service = _Service()
-    callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
+    callbacks = UiCallbacks(service)
 
     payload = callbacks.load_replay("module-not-found")
 
@@ -128,12 +127,18 @@ def test_replay_callback_uses_service_member_ids_and_materializes_only_verified_
     assert payload.field_values[0] == "ModuleNotFoundError"
     assert "回放" in payload.view.result_metadata
 
+    api = FastAPI()
+    mount_content_endpoint(api, callbacks)
+    response = TestClient(api).get(payload.card_url)
+    assert response.status_code == 200
+    assert response.content == b"verified-card"
+    assert response.headers["content-type"].startswith("image/png")
+
 
 def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(
-    tmp_path: Path,
 ) -> None:
     service = _Service()
-    callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
+    callbacks = UiCallbacks(service)
     service.reject_member = True
 
     payload = callbacks.load_replay("module-not-found")
@@ -141,20 +146,19 @@ def test_tampered_member_after_render_becomes_safe_failure_without_stale_path(
     assert payload.state.status.value == "failed"
     assert payload.state.failure.code == "download_invalid"
     assert payload.report_markdown is None
-    assert payload.card_path is None
-    assert payload.audio_path is None
-    assert payload.download_path is None
+    assert payload.card_url is None
+    assert payload.audio_url is None
+    assert payload.download_url is None
     assert "C:" not in repr(payload)
 
 
 def test_correction_callback_accepts_only_strict_run_id_and_draft_and_never_a_path(
-    tmp_path: Path,
 ) -> None:
     from debugmate.diagnosis.extraction import FieldId
     from debugmate.results.service import CorrectionDraft
 
     service = _Service()
-    callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
+    callbacks = UiCallbacks(service)
     payload = callbacks.correct(
         service.state.identity.source_run_id,
         CorrectionDraft(
@@ -173,12 +177,11 @@ def test_correction_callback_accepts_only_strict_run_id_and_draft_and_never_a_pa
 
 
 def test_field_edit_creates_only_a_local_old_to_new_draft_until_explicit_confirmation(
-    tmp_path: Path,
 ) -> None:
     from debugmate.diagnosis.extraction import FieldId
 
     service = _Service()
-    callbacks = UiCallbacks(service, cache_root=tmp_path / "ui-cache")
+    callbacks = UiCallbacks(service)
     original = callbacks.load_replay("module-not-found").field_values
     changed = list(original)
     changed[0] = "ImportError"
