@@ -379,13 +379,19 @@ class ResultApplicationService:
             if manifest.mode is ResultMode.REPLAY:
                 if manifest.fixture_id is None:
                     raise ValueError("fixture")
-                row, indexed, source = self._load_fixture_source(manifest.fixture_id)
-                if (
-                    row["display_label"] != manifest.fixture_name
-                    or canonical_json_bytes(indexed.model_dump(mode="json"))
-                    != canonical_json_bytes(outcome.model_dump(mode="json"))
-                ):
+                row, indexed, fixture_source = self._load_fixture_source(manifest.fixture_id)
+                if row["display_label"] != manifest.fixture_name:
                     raise ValueError("replay identity")
+                if indexed.run_id == outcome.run_id:
+                    indexed_bytes = canonical_json_bytes(indexed.model_dump(mode="json"))
+                    outcome_bytes = canonical_json_bytes(outcome.model_dump(mode="json"))
+                    if indexed_bytes != outcome_bytes:
+                        raise ValueError("replay identity")
+                    source = fixture_source
+                else:
+                    # A confirmed correction of a fixed replay remains a replay
+                    # in the UI, but its new immutable source lives in evidence.
+                    source = load_verified_outcome(outcome, evidence_root=self._evidence_root)
             else:
                 source = load_verified_outcome(outcome, evidence_root=self._evidence_root)
             if (
@@ -401,6 +407,24 @@ class ResultApplicationService:
             raise ResultServiceError(error.code) from None
         except Exception:
             raise ResultServiceError("source_bundle_invalid") from None
+
+    def _source_for_stored_outcome(
+        self, outcome: DiagnosisRunOutcome, state: ResultViewState | None
+    ) -> LoadedDiagnosisSource:
+        """Recover a source for correction without accepting a caller path."""
+
+        if state is not None and state.mode is ResultMode.REPLAY and state.fixture_id is not None:
+            _row, indexed, fixture_source = self._load_fixture_source(state.fixture_id)
+            if indexed.run_id == outcome.run_id:
+                if canonical_json_bytes(indexed.model_dump(mode="json")) != canonical_json_bytes(
+                    outcome.model_dump(mode="json")
+                ):
+                    raise ResultServiceError("source_bundle_invalid")
+                return fixture_source
+        try:
+            return load_verified_outcome(outcome, evidence_root=self._evidence_root)
+        except ResultLoadError as error:
+            raise ResultServiceError(error.code) from None
 
     def restore_result(self, case_id: str, result_id: str) -> ResultViewState:
         """Freshly verify a public result and its complete source before display."""
@@ -438,10 +462,20 @@ class ResultApplicationService:
             return self._failure("workflow_not_configured")
         try:
             previous = self._outcome_store.read(previous_run_id)
-            source = load_verified_outcome(previous, evidence_root=self._evidence_root)
+            source = self._source_for_stored_outcome(previous, existing)
             target = next(
                 item for item in previous.facts.facts if item.field_id is checked.field_id
             )
+            from debugmate.diagnosis.extraction import normalize_value
+
+            if normalize_value(checked.field_id, checked.replacement) == target.value:
+                return existing if existing is not None else self._failure("correction_invalid")
+            if existing is not None and existing.mode is ResultMode.REPLAY:
+                # The fixture remains the read-only replay source.  Phase 3's
+                # correction evidence contract also requires an immutable local
+                # parent bundle, so publish an identical verified source copy
+                # before creating the distinct corrected run.
+                publish_diagnosis_evidence(previous, self._evidence_root)
             overlay = CorrectionOverlay(
                 case_id=previous.case_id,
                 base_revision=previous.revision,
@@ -464,7 +498,10 @@ class ResultApplicationService:
             revised = load_verified_outcome(outcome, evidence_root=self._evidence_root)
             del source
             return self._compose(
-                revised, mode=ResultMode.LIVE, fixture_id=None, fixture_name=None
+                revised,
+                mode=existing.mode if existing is not None else ResultMode.LIVE,
+                fixture_id=existing.fixture_id if existing is not None else None,
+                fixture_name=existing.fixture_name if existing is not None else None,
             )
         except (ResultLoadError, ResultServiceError, StopIteration, ValueError, TypeError):
             return self._failure("correction_invalid")
