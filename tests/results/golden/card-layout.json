@@ -1,0 +1,5 @@
+{
+  "canvas_width": 1600,
+  "section_count": 5,
+  "section_order": ["phenomenon", "causes", "checks", "fixes", "verification"]
+}
