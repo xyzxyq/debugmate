@@ -13,6 +13,56 @@ from debugmate.contracts import CommandStep, DiagnosisRecord
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _scan_process_capabilities(
+    sources: dict[Path, str], *, audited_process_modules: set[Path]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    forbidden_imports: list[str] = []
+    forbidden_calls: list[str] = []
+    subprocess_calls = {"call", "check_call", "check_output", "Popen", "run"}
+    direct_calls = {
+        "CreateProcess",
+        "Invoke-Expression",
+        "Popen",
+        "Start-Process",
+        "cmd",
+        "powershell",
+        "pwsh",
+    }
+
+    for path, source in sorted(sources.items(), key=lambda item: str(item[0])):
+        process_boundary_is_separately_audited = path in audited_process_modules
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                forbidden_imports.extend(
+                    f"{path}:{alias.name}"
+                    for alias in node.names
+                    if alias.name == "subprocess" and not process_boundary_is_separately_audited
+                )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "subprocess"
+                and not process_boundary_is_separately_audited
+            ):
+                forbidden_imports.append(f"{path}:{node.module}")
+            elif isinstance(node, ast.Call):
+                function = node.func
+                if isinstance(function, ast.Name) and function.id in direct_calls:
+                    forbidden_calls.append(f"{path}:{function.id}")
+                elif isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+                    owner = function.value.id
+                    if owner == "os" and function.attr == "system":
+                        forbidden_calls.append(f"{path}:os.system")
+                    if (
+                        owner == "subprocess"
+                        and function.attr in subprocess_calls
+                        and not process_boundary_is_separately_audited
+                    ):
+                        forbidden_calls.append(f"{path}:subprocess.{function.attr}")
+
+    return tuple(sorted(forbidden_imports)), tuple(sorted(forbidden_calls))
+
+
 @pytest.mark.parametrize(
     ("platform", "command"),
     [
@@ -92,56 +142,20 @@ def test_one_unsafe_command_rejects_the_entire_diagnosis() -> None:
 
 
 def test_command_handling_sources_have_no_shell_execution_capability() -> None:
-    forbidden_imports: list[str] = []
-    forbidden_calls: list[str] = []
     audited_media_process_modules = {
         ROOT / "src" / "debugmate" / "results" / "media.py",
         ROOT / "src" / "debugmate" / "results" / "tts" / "sapi.py",
     }
-    subprocess_calls = {"call", "check_call", "check_output", "Popen", "run"}
-    direct_calls = {
-        "CreateProcess",
-        "Invoke-Expression",
-        "Popen",
-        "Start-Process",
-        "cmd",
-        "powershell",
-        "pwsh",
+    sources = {
+        path: path.read_text(encoding="utf-8")
+        for path in (ROOT / "src" / "debugmate").rglob("*.py")
     }
+    forbidden_imports, forbidden_calls = _scan_process_capabilities(
+        sources, audited_process_modules=audited_media_process_modules
+    )
 
-    for path in sorted((ROOT / "src" / "debugmate").rglob("*.py")):
-        process_boundary_is_separately_audited = path in audited_media_process_modules
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                forbidden_imports.extend(
-                    f"{path}:{alias.name}"
-                    for alias in node.names
-                    if alias.name == "subprocess" and not process_boundary_is_separately_audited
-                )
-            elif (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "subprocess"
-                and not process_boundary_is_separately_audited
-            ):
-                forbidden_imports.append(f"{path}:{node.module}")
-            elif isinstance(node, ast.Call):
-                function = node.func
-                if isinstance(function, ast.Name) and function.id in direct_calls:
-                    forbidden_calls.append(f"{path}:{function.id}")
-                elif isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
-                    owner = function.value.id
-                    if owner == "os" and function.attr == "system":
-                        forbidden_calls.append(f"{path}:os.system")
-                        if (
-                            owner == "subprocess"
-                            and function.attr in subprocess_calls
-                            and not process_boundary_is_separately_audited
-                        ):
-                            forbidden_calls.append(f"{path}:subprocess.{function.attr}")
-
-    assert forbidden_imports == []
-    assert forbidden_calls == []
+    assert forbidden_imports == ()
+    assert forbidden_calls == ()
 
 
 def test_process_capability_audit_detects_non_allowlisted_calls_and_os_system(
