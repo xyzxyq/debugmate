@@ -151,3 +151,40 @@ diagnosis remains intentionally unavailable until the separately planned Dify
 workflow/platform gate supplies a configured workflow and approved redacted
 input; no paid key, provider setup or cloud-success claim was introduced by
 this plan.
+
+## Independent-review hardening addendum II
+
+The second review pass tightened the executable Gradio boundary and filled the
+remaining replay/failure-state truth gaps.
+
+- **I2 -- framework-safe loopback capabilities:** `5d74713` establishes the
+  actual Gradio 6.20-compatible form.  The native Image, Audio and
+  DownloadButton serializers emit `FileData` with a loopback capability URL,
+  filename and MIME type.  Gradio requires the `path` field to be a string and
+  rewrites an absolute HTTP `url` into the identical `path`; this is therefore
+  an HTTP endpoint, never a filesystem path or cache file.  The configured
+  `http://127.0.0.1:<port>` is validated against the queued request origin, so
+  a different Host/port is rejected before media is issued.  The real
+  `Blocks.process_api` regression checks all three components for equal
+  loopback `url`/`path`, correct file metadata, and absence of a drive,
+  workspace, temporary-file or `/gradio_api/file=` value.  An ASGI GET still
+  proves the token serves re-hashed verified bytes.  `3bd817e` removes a
+  Gradio metaclass side effect that generated a local `.pyi` file merely by
+  importing custom component subclasses; native instances now receive only a
+  bound serializer.
+- **I3 -- replay event stream:** `e79d8d2` makes fixed replay use the same
+  strict worker/event state machine as live composition.  A successful replay
+  must emit `source`, `presentation`, `report`, `card`, `audio`,
+  `consistency`, `publish` in order; any successful terminal state without all
+  seven actual emissions becomes a safe failure.  Each running replay state
+  retains the verified fixture identity and exposes completed-stage counts
+  0--6.  The Gradio replay callback is a generator, and running frames disable
+  the repeated replay action.  The replay-correction restart regression remains
+  covered by the complete service/UI run.
+- **I4 -- complete safe failure panel:** `69af48f` turns the seven literal UI
+  labels into seven strict values: failure node, safe code, completed stages,
+  inherited stages, verified available artifacts, retry scope and recommended
+  action.  Every displayed value is selected from a fixed safe vocabulary.
+  The exact UI-SPEC messages for `replay_bundle_invalid` and
+  `source_bundle_invalid` are now used; no exception body, path or provider
+  text is substituted.
