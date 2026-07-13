@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from debugmate.results import media as media_module
 from debugmate.results.media import MediaProbeError, canonicalize_mp3, probe_mp3
 
 FFMPEG = "ffmpeg"
@@ -207,7 +208,7 @@ def test_maps_ffprobe_timeout_to_value_free_code(
     def timeout(*args: object, **kwargs: object) -> None:
         raise subprocess.TimeoutExpired(cmd="SECRET PATH", timeout=5, output="SECRET")
 
-    monkeypatch.setattr(subprocess, "run", timeout)
+    monkeypatch.setattr(media_module, "_run_bounded_process", timeout)
 
     with pytest.raises(MediaProbeError) as error:
         probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000)
@@ -253,7 +254,7 @@ def test_rejects_untrusted_ffprobe_shapes_with_fixed_codes(
     media = tmp_path / "candidate.mp3"
     media.write_bytes(b"\xff\xfb" + b"x" * 100)
 
-    def completed(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def completed(command: list[str], **kwargs: object) -> tuple[int, bytes]:
         assert command[1:] == [
             "-v",
             "error",
@@ -263,11 +264,10 @@ def test_rejects_untrusted_ffprobe_shapes_with_fixed_codes(
             "json",
             str(media),
         ]
-        assert kwargs["shell"] is False
-        assert kwargs["timeout"] == 5.0
-        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="SECRET STDERR")
+        assert kwargs["timeout_seconds"] == 5.0
+        return 0, stdout.encode("utf-8")
 
-    monkeypatch.setattr(subprocess, "run", completed)
+    monkeypatch.setattr(media_module, "_run_bounded_process", completed)
 
     with pytest.raises(MediaProbeError) as error:
         probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000)

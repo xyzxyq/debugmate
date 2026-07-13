@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,9 @@ from debugmate.hashing import sha256_file
 from debugmate.results.contracts import StrictFrozenModel
 
 FFPROBE_EXECUTABLE = shutil.which("ffprobe") or "ffprobe"
+FFMPEG_EXECUTABLE = shutil.which("ffmpeg") or "ffmpeg"
 _MAX_PROBE_OUTPUT_BYTES = 1024 * 1024
+_MAX_TRANSCODE_OUTPUT_BYTES = 64 * 1024
 _MIN_DURATION_SECONDS = 30.0
 _MAX_DURATION_SECONDS = 60.0
 _MP3_FRAME_TOLERANCE_SECONDS = 0.02
@@ -45,6 +49,30 @@ def _fail(code: str) -> None:
 
 def _has_tags(value: Any) -> bool:
     return isinstance(value, dict) and bool(value)
+
+
+def _run_bounded_process(
+    command: list[str], *, timeout_seconds: float, max_output_bytes: int
+) -> tuple[int, bytes]:
+    """Run fixed argv while keeping child output out of Python heap until capped."""
+
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            shell=False,
+        )
+        try:
+            process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+        stdout.seek(0)
+        output = stdout.read(max_output_bytes + 1)
+        return process.returncode, output
 
 
 def probe_mp3(
@@ -95,26 +123,21 @@ def probe_mp3(
         str(candidate),
     ]
     try:
-        completed = subprocess.run(
+        returncode, stdout_bytes = _run_bounded_process(
             command,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="strict",
-            timeout=timeout_seconds,
-            shell=False,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=_MAX_PROBE_OUTPUT_BYTES,
         )
     except subprocess.TimeoutExpired:
         _fail("probe_timeout")
     except (OSError, UnicodeError, ValueError):
         _fail("probe_failed")
-    if completed.returncode != 0:
+    if returncode != 0:
         _fail("probe_failed")
-    if len(completed.stdout.encode("utf-8")) > _MAX_PROBE_OUTPUT_BYTES:
+    if len(stdout_bytes) > _MAX_PROBE_OUTPUT_BYTES:
         _fail("probe_invalid")
     try:
-        payload = json.loads(completed.stdout)
+        payload = json.loads(stdout_bytes.decode("utf-8", errors="strict"))
     except (TypeError, json.JSONDecodeError, UnicodeError):
         _fail("probe_invalid")
     if not isinstance(payload, dict):
@@ -159,3 +182,96 @@ def probe_mp3(
         bytes=byte_size,
         sha256=sha256_file(candidate),
     )
+
+
+def canonicalize_mp3(
+    source: Path,
+    target: Path,
+    *,
+    timeout_seconds: float,
+    max_bytes: int,
+) -> MediaProbe:
+    """Re-encode one candidate into the fixed, tag-free publication profile."""
+
+    source_path = Path(source)
+    target_path = Path(target)
+    if timeout_seconds <= 0 or not math.isfinite(timeout_seconds):
+        _fail("canonicalize_config_invalid")
+    if isinstance(max_bytes, bool) or max_bytes <= 0 or source_path == target_path:
+        _fail("canonicalize_config_invalid")
+    try:
+        if not source_path.is_file() or source_path.stat().st_size <= 0:
+            _fail("canonicalize_failed")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+    except MediaProbeError:
+        raise
+    except OSError:
+        _fail("canonicalize_failed")
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{target_path.stem}-",
+            suffix=".mp3",
+            dir=target_path.parent,
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+        command = [
+            FFMPEG_EXECUTABLE,
+            "-v",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(source_path),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-metadata",
+            "encoder=",
+            "-id3v2_version",
+            "0",
+            "-write_xing",
+            "0",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "32k",
+            str(temporary_path),
+        ]
+        returncode, output = _run_bounded_process(
+            command,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=_MAX_TRANSCODE_OUTPUT_BYTES,
+        )
+        if returncode != 0 or len(output) > _MAX_TRANSCODE_OUTPUT_BYTES:
+            _fail("canonicalize_failed")
+        probe = probe_mp3(
+            temporary_path,
+            timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
+        )
+        os.replace(temporary_path, target_path)
+        temporary_path = None
+        return probe
+    except subprocess.TimeoutExpired:
+        _fail("canonicalize_timeout")
+    except MediaProbeError:
+        raise
+    except (OSError, ValueError):
+        _fail("canonicalize_failed")
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
