@@ -30,7 +30,7 @@ patterns-established:
   - "Report, card and recap implementations consume the same sealed PresentationModel and ArtifactIdentity."
   - "Renderer failures cross the boundary only as report_render_failed or citation_render_failed with no exception chain."
 requirements-progressed: [MULTI-01, UX-01]
-duration: 78m
+duration: 94m
 completed: 2026-07-13
 ---
 
@@ -40,11 +40,11 @@ completed: 2026-07-13
 
 ## Performance
 
-- **Duration:** 78m including two independent-review remediation cycles
+- **Duration:** 94m including three independent-review remediation cycles
 - **Completed:** 2026-07-13T10:28:26+08:00
 - **Tasks:** 3 strict TDD tasks plus one adversarial identity-hardening cycle
-- **Focused tests:** 40 passed
-- **Full offline suite:** 550 passed, 22 deselected
+- **Focused tests:** 44 passed
+- **Full offline suite:** 554 passed, 22 deselected
 
 ## Accomplishments
 
@@ -72,11 +72,13 @@ completed: 2026-07-13
 12. **Copied private-state RED/GREEN** — `72249d9` / `85d133f`: copying private authority and rewriting its fingerprint reproduced acceptance; renderers now require the exact weak-registered build instance.
 13. **Partial/cross-spliced graph RED/GREEN** — `054b036` / `6e46953`: partial-fact and cross-spliced graphs failed first; partial-fact, partial-evidence and cross-spliced variants now all reject unless one support edge exactly equals both candidate ID sets.
 14. **Registry lifecycle evidence** — `eec969d`: 32 concurrent renders are byte-identical and the weak registry does not keep an otherwise unreachable presentation alive.
+15. **In-place mutation RED/GREEN** — `24490ee` / `1c01c0d`: limitations, inferred causes and command ordering could be changed on the registered object with `object.__setattr__` and a recomputed seal; the registry now retains the immutable original seal snapshot.
+16. **Duplicate exact-edge RED/GREEN** — `aa41fd1` / `3a66a08`: two identical complete edges previously passed; every grounded candidate now requires exactly one match.
 
 ## Verification Gates
 
-- `python -m pytest -q tests/results/test_presentation.py tests/results/test_report.py` — **40 passed**.
-- `python -m pytest -q` — **550 passed, 22 deselected**.
+- `python -m pytest -q tests/results/test_presentation.py tests/results/test_report.py` — **44 passed**.
+- `python -m pytest -q` — **554 passed, 22 deselected**.
 - `python -m ruff check .` — **passed**.
 - `python -m pip check` — **no broken requirements**.
 - `git diff --check HEAD~6..HEAD` — **passed**.
@@ -128,6 +130,19 @@ completed: 2026-07-13
 - **Evidence:** partial-fact, partial-evidence and cross-spliced verified-source fixtures all reject; an exact complete edge succeeds.
 
 **Test authenticity:** renderer variants now rebuild through a cloned, integrity-updated source bundle, `load_verified_outcome`, prepared context and `build_presentation`. Tests contain no helper or registry call that grants production authenticity to a forged projection.
+
+### Third Independent Review Remediation
+
+**1. [Important] The registered object itself could be changed in place.**
+
+- **Verified issue:** Python's `object.__setattr__` can bypass Pydantic frozen enforcement. Changing limitations, root causes or commands on the exact registered object and recomputing `projection_sha256` passed the weakref-only registry.
+- **Fix:** each registry entry now stores `(weakref, original_projection_sha256)`. Validation requires the exact instance, registry snapshot equal to object seal, and object seal equal to a fresh current-payload hash.
+- **Lifecycle invariants retained:** the callback compares the stored weakref before removal, the identity check prevents ID-reuse authority, the registry retains no strong model reference, and every access remains under `RLock`.
+
+**2. [Minor] Duplicate identical complete support edges were ambiguous.**
+
+- **Verified issue:** `any(exact_match)` treated two identical complete edges as valid.
+- **Fix:** exact matches are counted and must equal one. Zero, duplicate, partial and cross-spliced support graphs all reject before citation export.
 
 ## Remaining Scope
 
