@@ -19,9 +19,9 @@ from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui.app import (
     UiCallbacks,
     UiContentUrl,
-    _VerifiedAudio,
-    _VerifiedDownloadButton,
-    _VerifiedImage,
+    _verified_audio,
+    _verified_download_button,
+    _verified_image,
     correction_draft_from_fields,
     mount_content_endpoint,
 )
@@ -180,9 +180,9 @@ def test_process_api_serializes_verified_urls_without_a_server_path() -> None:
     )
     with gr.Blocks() as app:
         trigger = gr.Button("deliver")
-        card = _VerifiedImage(type="filepath", sources=None, buttons=[])
-        audio = _VerifiedAudio(type="filepath", sources=None, recording=False, buttons=[])
-        bundle = _VerifiedDownloadButton("download")
+        card = _verified_image(type="filepath", sources=None, buttons=[])
+        audio = _verified_audio(type="filepath", sources=None, recording=False, buttons=[])
+        bundle = _verified_download_button(value="download")
         trigger.click(
             lambda: (card_url, audio_url, bundle_url),
             outputs=[card, audio, bundle],

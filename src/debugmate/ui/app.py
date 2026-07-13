@@ -115,31 +115,55 @@ class UiContentUrl:
     mime_type: str
 
 
-class _VerifiedImage(gr.Image):
-    def postprocess(self, value):
+def _verified_image(**kwargs: object) -> gr.Image:
+    """Return a native Image that serializes a checked token URL as FileData."""
+
+    component = gr.Image(**kwargs)
+    original = component.postprocess
+
+    def postprocess(value: object):
         if isinstance(value, UiContentUrl):
             return ImageData(
                 path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
             )
-        return super().postprocess(value)
+        return original(value)
+
+    component.postprocess = postprocess
+    return component
 
 
-class _VerifiedAudio(gr.Audio):
-    def postprocess(self, value):
+def _verified_audio(**kwargs: object) -> gr.Audio:
+    """Return a native Audio that serializes a checked token URL as FileData."""
+
+    component = gr.Audio(**kwargs)
+    original = component.postprocess
+
+    def postprocess(value: object):
         if isinstance(value, UiContentUrl):
             return FileData(
                 path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
             )
-        return super().postprocess(value)
+        return original(value)
+
+    component.postprocess = postprocess
+    return component
 
 
-class _VerifiedDownloadButton(gr.DownloadButton):
-    def postprocess(self, value):
+def _verified_download_button(**kwargs: object) -> gr.DownloadButton:
+    """Return a native DownloadButton with a capability-only FileData output."""
+
+    component = gr.DownloadButton(**kwargs)
+    original = component.postprocess
+
+    def postprocess(value: object):
         if isinstance(value, UiContentUrl):
             return FileData(
                 path="", url=value.url, orig_name=value.filename, mime_type=value.mime_type
             )
-        return super().postprocess(value)
+        return original(value)
+
+    component.postprocess = postprocess
+    return component
 
 
 class _UiContentStore:
@@ -659,7 +683,7 @@ def build_app(
                     with gr.Tab("文字报告"):
                         report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
                     with gr.Tab("诊断卡"):
-                        card = _VerifiedImage(
+                        card = _verified_image(
                             label="诊断卡",
                             type="filepath",
                             interactive=False,
@@ -667,7 +691,7 @@ def build_app(
                             buttons=[],
                         )
                     with gr.Tab("语音复盘"):
-                        audio = _VerifiedAudio(
+                        audio = _verified_audio(
                             label="语音复盘",
                             type="filepath",
                             interactive=False,
@@ -689,8 +713,8 @@ def build_app(
                             label="引用",
                         )
                         gr.File(label="已验证单个产物", interactive=False, visible=False)
-                        download = _VerifiedDownloadButton(
-                            "下载结果包", visible=False, interactive=False
+                        download = _verified_download_button(
+                            value="下载结果包", visible=False, interactive=False
                         )
         start_button = gr.Button("开始诊断", variant="primary", interactive=False)
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
