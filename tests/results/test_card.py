@@ -192,6 +192,19 @@ def test_png_resource_limits_are_checked_before_decode(tmp_path: Path) -> None:
         verify_card_png(huge, expected_size=(1600, 20_000))
 
 
+def test_png_decompression_bomb_is_mapped_to_safe_failure(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "valid-shape.png"
+    Image.new("RGB", (1600, 10), "white").save(target)
+
+    def bomb(*args, **kwargs):
+        raise Image.DecompressionBombError("sensitive decoder detail")
+
+    monkeypatch.setattr("debugmate.results.card.Image.open", bomb)
+    with pytest.raises(CardRenderFailure, match="png_verify_failed") as caught:
+        verify_card_png(target, expected_size=(1600, 10))
+    assert "sensitive" not in str(caught.value)
+
+
 def test_final_disk_verify_failure_removes_success_looking_target(
     completed_source_bundle, tmp_path: Path, monkeypatch
 ) -> None:
@@ -309,11 +322,29 @@ def test_paint_exception_is_value_free_and_cleans_temp(
 def test_layout_golden_is_font_hash_qualified(completed_source_bundle, tmp_path: Path) -> None:
     presentation, context = _card_inputs(completed_source_bundle, tmp_path)
     layout = measure_card(presentation, context)
-    payload = layout.model_dump(mode="json")
     golden = json.loads(
         (Path(__file__).parent / "golden" / "card-layout.json").read_text(encoding="utf-8")
     )
-    assert payload["canvas_width"] == golden["canvas_width"]
-    assert payload["section_order"] == golden["section_order"]
-    assert len(payload["sections"]) == golden["section_count"]
-    assert payload["font_sha256"] == context.resolved_font.sha256
+    actual = {
+        "font_sha256": layout.font_sha256,
+        "canvas_width": layout.canvas_width,
+        "canvas_height": layout.canvas_height,
+        "title": layout.title,
+        "identity_suffix": presentation.identity.case_id[-8:],
+        "section_order": list(layout.section_order),
+        "sections": [
+            {
+                "section_id": section.section_id,
+                "x": section.x,
+                "y": section.y,
+                "width": section.width,
+                "height": section.height,
+                "content_width": section.content_width,
+                "line_bounds": [
+                    [line.x, line.y, line.width, line.height] for line in section.lines
+                ],
+            }
+            for section in layout.sections
+        ],
+    }
+    assert actual == golden
