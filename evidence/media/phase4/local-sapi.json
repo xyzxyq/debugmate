@@ -1,0 +1,31 @@
+{
+  "evidence_version": "1.0.0",
+  "recorded_on": "2026-07-13",
+  "scope": "current-code local SAPI fallback chain; no cloud TTS claim",
+  "backend": "sapi",
+  "voice": "Microsoft Huihui Desktop",
+  "rate_profile": "normal",
+  "fallback_used": true,
+  "codec": "mp3",
+  "channels": 1,
+  "duration_ms": 45144,
+  "bytes": 180576,
+  "sha256": "10fb8c17b2c1c31b51055a71fa223deeb9ae9412f0f9218c1936bd4b933f0db6",
+  "ffmpeg_decode_exit": 0,
+  "decoded_sample_count": 722304,
+  "mean_absolute_pcm": 813.372,
+  "peak_pcm": 24908,
+  "clipping_samples": 0,
+  "non_silent_signal": true,
+  "automatic_clipping_check": "pass",
+  "human_listening_check": {
+    "status": "human_needed",
+    "reason": "The execution agent cannot perceive host speaker output; no intelligibility or subjective clipping claim is fabricated.",
+    "required_check": "A human listens once for intelligible Chinese, silence, clipping, and garbling before final course recording."
+  },
+  "redaction": {
+    "spoken_text_recorded": false,
+    "temporary_path_recorded": false,
+    "secret_recorded": false
+  }
+}
