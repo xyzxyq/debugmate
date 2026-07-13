@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,7 @@ from debugmate.results.media import MediaProbe, MediaProbeError
 from debugmate.results.recap import SafeRecapText
 from debugmate.results.tts.base import AudioCandidate, RateProfile, TtsRequestIdentity
 from debugmate.results.tts.dify import DifyTtsAdapter
+from debugmate.results.tts import edge as edge_module
 from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
 from debugmate.settings import DebugMateSettings
@@ -159,6 +161,61 @@ def test_candidate_capability_blocks_junction_swap_during_canonicalization(
     assert result.available is False
     assert outside_was_created is False
     assert not (outside / "recap.mp3").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction replacement attack")
+def test_leased_temp_child_blocks_junction_swap_during_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exact adapter temp directory is non-renamable before target exposure."""
+
+    root = tmp_path / "debugmate-private-candidates"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    calls: list[tuple[str, str]] = []
+    attack_snapshots: list[bool] = []
+    swap_attempted = False
+    swap_succeeded = False
+
+    class TempSwapAdapter:
+        backend = "dify"
+
+        def synthesize(self, text, target, request_identity, rate_profile):
+            nonlocal swap_attempted, swap_succeeded
+            temp = target.parent
+            parked = root / f"{temp.name}-parked"
+            swap_attempted = True
+            try:
+                temp.replace(parked)
+                swap_succeeded = True
+                _make_junction(temp, outside)
+            except OSError:
+                pass
+            attack_snapshots.append((outside / target.name).exists())
+            target.write_bytes(b"\xff\xfb" + b"x" * 64)
+            attack_snapshots.append((outside / target.name).exists())
+            return AudioCandidate(
+                backend=self.backend,
+                rate_profile=rate_profile,
+                path=target,
+                request_identity=request_identity,
+            )
+
+    monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
+    result = TtsFallbackChain(
+        (
+            TempSwapAdapter(),
+            FakeAdapter("edge_tts", ["transport"], calls),
+            FakeAdapter("sapi", ["process"], calls),
+        )
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
+
+    assert swap_attempted is True
+    assert swap_succeeded is False
+    assert attack_snapshots == [False, False]
+    assert not list(outside.iterdir())
+    assert result.available is True
 
 
 def test_fallback_order_and_success_short_circuit(tmp_path: Path, monkeypatch) -> None:
@@ -437,6 +494,50 @@ def test_edge_cleanup_failure_does_not_leak_a_directory_target(
         EdgeTtsAdapter().synthesize(_recap(), blocked_target, _identity(), RateProfile.NORMAL)
 
     assert str(blocked_target) not in str(caught.value)
+
+
+def test_edge_timeout_is_bounded_cancelled_and_falls_through_to_sapi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A nonresponsive edge request is value-free, bounded, and never blocks SAPI."""
+
+    class NeverCompletes:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def save(self, _target: str) -> None:
+            await edge_module.asyncio.Event().wait()
+
+    wait_for_calls: list[float] = []
+    real_wait_for = edge_module.asyncio.wait_for
+
+    async def record_wait_for(awaitable, timeout):
+        wait_for_calls.append(timeout)
+        return await real_wait_for(awaitable, timeout)
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(edge_module.edge_tts, "Communicate", NeverCompletes)
+    monkeypatch.setattr(edge_module.asyncio, "wait_for", record_wait_for)
+    monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
+    started = time.monotonic()
+    result = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["transport"], calls),
+            EdgeTtsAdapter(timeout_seconds=0.05),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    ).synthesize(_recap(), _identity(), _candidate_root(tmp_path))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.0
+    assert wait_for_calls == [0.05]
+    assert calls == [("dify", "normal"), ("sapi", "normal")]
+    assert result.available is True
+    assert result.backend == "sapi"
+    assert result.attempts[1].backend == "edge_tts"
+    assert result.attempts[1].safe_error_code == "tts_backend_failed"
+    assert not list((tmp_path / "debugmate-private-candidates").rglob("candidate-1-normal.mp3"))
 
 
 def test_sapi_uses_bounded_file_boundary_and_never_places_recap_in_argv(
