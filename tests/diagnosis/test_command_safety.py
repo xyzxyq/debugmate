@@ -142,3 +142,31 @@ def test_command_handling_sources_have_no_shell_execution_capability() -> None:
 
     assert forbidden_imports == []
     assert forbidden_calls == []
+
+
+def test_process_capability_audit_detects_non_allowlisted_calls_and_os_system(
+    tmp_path: Path,
+) -> None:
+    ordinary = tmp_path / "ordinary.py"
+    allowed = tmp_path / "media.py"
+    findings = _scan_process_capabilities(
+        {
+            ordinary: (
+                "import os\nimport subprocess\n"
+                "subprocess.run(['safe-looking'])\n"
+                "subprocess.Popen(['also-safe-looking'])\n"
+                "os.system('still-forbidden')\n"
+            ),
+            allowed: "import subprocess\nsubprocess.run(['separately-audited'])\n",
+        },
+        audited_process_modules={allowed},
+    )
+
+    assert findings == (
+        (f"{ordinary}:subprocess",),
+        (
+            f"{ordinary}:os.system",
+            f"{ordinary}:subprocess.Popen",
+            f"{ordinary}:subprocess.run",
+        ),
+    )
