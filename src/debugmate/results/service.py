@@ -8,6 +8,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from queue import Queue
 
 from pydantic import Field
 
@@ -63,6 +64,15 @@ _SAFE_FAILURE_CODES = {
     "result_composition_failed": ("result", "result"),
     "correction_invalid": ("correction", "correction"),
 }
+_RESULT_STAGES = (
+    "source",
+    "presentation",
+    "report",
+    "card",
+    "audio",
+    "consistency",
+    "publish",
+)
 
 
 class ResultServiceError(ValueError):
@@ -298,16 +308,21 @@ class ResultApplicationService:
         mode: ResultMode,
         fixture_id: str | None,
         fixture_name: str | None,
+        stage_callback: Callable[[str], None] | None = None,
     ) -> ResultViewState:
         try:
             if self._composer is None:
                 raise ResultServiceError("result_composition_failed")
-            published = self._composer(
-                source,
-                mode=mode,
-                fixture_id=fixture_id,
-                fixture_name=fixture_name,
-            )
+            arguments = {
+                "mode": mode,
+                "fixture_id": fixture_id,
+                "fixture_name": fixture_name,
+            }
+            if stage_callback is not None and getattr(
+                self._composer, "supports_stage_events", False
+            ):
+                arguments["stage_callback"] = stage_callback
+            published = self._composer(source, **arguments)
             if not isinstance(published, PublishedResultBundle):
                 raise ValueError("publisher")
             verified = verify_result_bundle(published.path)
@@ -327,10 +342,14 @@ class ResultApplicationService:
         except (ResultVerificationError, ResultLoadError, ValueError, TypeError):
             raise ResultServiceError("result_composition_failed") from None
 
-    def diagnose_and_compose(self, approved: ApprovedRedactedInput | str) -> ResultViewState:
-        """Run Phase 3 from approved input, then persist and compose Phase 4."""
+    def _diagnose_and_compose(
+        self,
+        checked: ApprovedRedactedInput,
+        *,
+        stage_callback: Callable[[str], None] | None = None,
+    ) -> ResultViewState:
+        """Execute live composition after strict input parsing, optionally reporting real stages."""
 
-        checked = self._strict_approved(approved)
         key = (checked.case_id, checked.preview_hash)
         with self._case_lock(checked.case_id):
             cached = self._live_cache.get(key)
@@ -346,8 +365,14 @@ class ResultApplicationService:
                 publish_diagnosis_evidence(outcome, self._evidence_root)
                 self._store_outcome(outcome)
                 source = load_verified_outcome(outcome, evidence_root=self._evidence_root)
+                if stage_callback is not None:
+                    stage_callback("source")
                 state = self._compose(
-                    source, mode=ResultMode.LIVE, fixture_id=None, fixture_name=None
+                    source,
+                    mode=ResultMode.LIVE,
+                    fixture_id=None,
+                    fixture_name=None,
+                    stage_callback=stage_callback,
                 )
             except ResultServiceError as error:
                 return self._failure(error.code)
@@ -357,6 +382,56 @@ class ResultApplicationService:
                 return self._failure("result_composition_failed")
             self._live_cache[key] = state
             return state
+
+    def diagnose_and_compose(self, approved: ApprovedRedactedInput | str) -> ResultViewState:
+        """Run Phase 3 from approved input, then persist and compose Phase 4."""
+
+        checked = self._strict_approved(approved)
+        return self._diagnose_and_compose(checked)
+
+    def diagnose_and_compose_events(
+        self, approved: ApprovedRedactedInput | str
+    ):
+        """Yield only ordered, actual Phase 4 stage state while composing live input."""
+
+        try:
+            checked = self._strict_approved(approved)
+        except (TypeError, ValueError):
+            yield ServiceStageEvent(state=self._failure("result_composition_failed"))
+            return
+        channel: Queue[tuple[str, object]] = Queue()
+        emitted: list[str] = []
+
+        def stage_callback(stage: str) -> None:
+            expected = _RESULT_STAGES[len(emitted)] if len(emitted) < len(_RESULT_STAGES) else None
+            if stage != expected:
+                raise ResultServiceError("result_composition_failed")
+            emitted.append(stage)
+            channel.put(("stage", stage))
+
+        def worker() -> None:
+            result = self._diagnose_and_compose(checked, stage_callback=stage_callback)
+            channel.put(("terminal", result))
+
+        thread = threading.Thread(target=worker, name="debugmate-result-compose", daemon=True)
+        thread.start()
+        while True:
+            kind, value = channel.get()
+            if kind == "terminal":
+                thread.join()
+                yield ServiceStageEvent(state=value)
+                return
+            stage = str(value)
+            index = _RESULT_STAGES.index(stage)
+            yield ServiceStageEvent(
+                state=ResultViewState(
+                    mode=ResultMode.LIVE,
+                    status=ResultStatus.RUNNING,
+                    availability=ArtifactAvailability(),
+                    current_stage=stage,
+                    completed_stages=_RESULT_STAGES[:index],
+                )
+            )
 
     def load_replay(self, fixture_id: str) -> ResultViewState:
         """Allowlist a fixture, reverify source, then publish a new replay result."""

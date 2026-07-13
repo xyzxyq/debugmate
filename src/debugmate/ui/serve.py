@@ -78,10 +78,14 @@ def _local_composer(
     candidate_root = TrustedCandidateRoot.for_testing(runtime_root / "tts-candidates")
     card_root = runtime_root / "cards"
 
-    def compose(source, *, mode, fixture_id, fixture_name):
+    def compose(source, *, mode, fixture_id, fixture_name, stage_callback=None):
         presentation = build_presentation(source, context)
+        if stage_callback is not None:
+            stage_callback("presentation")
         report = render_report(presentation)
         citations = render_citations(presentation)
+        if stage_callback is not None:
+            stage_callback("report")
         recap = compose_recap(presentation)
         target = card_root / f"{source.source_run_id}-{secrets.token_hex(16)}.png"
         try:
@@ -89,6 +93,8 @@ def _local_composer(
                 card = render_card(presentation, context, target=target)
             except CardRenderFailure as failure:
                 card = failure
+            if stage_callback is not None:
+                stage_callback("card")
             audio = tts.synthesize(
                 recap,
                 TtsRequestIdentity(
@@ -100,19 +106,27 @@ def _local_composer(
                 ),
                 candidate_root,
             )
+            if stage_callback is not None:
+                stage_callback("audio")
             candidates = validate_result_candidates(
                 source, presentation, report, citations, card, recap, audio
             )
-            return publish_result_bundle(
+            if stage_callback is not None:
+                stage_callback("consistency")
+            published = publish_result_bundle(
                 results_root,
                 candidates,
                 mode=mode,
                 fixture_id=fixture_id,
                 fixture_name=fixture_name,
             )
+            if stage_callback is not None:
+                stage_callback("publish")
+            return published
         finally:
             target.unlink(missing_ok=True)
 
+    compose.supports_stage_events = True
     return compose
 
 

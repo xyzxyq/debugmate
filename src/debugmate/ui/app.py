@@ -19,7 +19,12 @@ from debugmate.results.contracts import (
     ResultViewState,
     SafeFailure,
 )
-from debugmate.results.service import CorrectionDraft, ResultApplicationService, ResultServiceError
+from debugmate.results.service import (
+    CorrectionDraft,
+    ResultApplicationService,
+    ResultServiceError,
+    ServiceStageEvent,
+)
 from debugmate.ui.presentation import ComponentViewModel, render_view_state
 
 WORKBENCH_CSS = "\n".join(
@@ -260,6 +265,17 @@ class UiCallbacks:
             return self._render(self._service.diagnose_and_compose(approved_payload))
         except (ResultServiceError, TypeError, ValueError):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+
+    def diagnose_events(self, approved_payload: object):
+        """Yield strict UI payloads as the service completes actual result stages."""
+
+        try:
+            for event in self._service.diagnose_and_compose_events(approved_payload):
+                if not isinstance(event, ServiceStageEvent):
+                    raise ResultServiceError("result_bundle_invalid")
+                yield self._render(event.state)
+        except (ResultServiceError, TypeError, ValueError):
+            yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
     def refresh(self, case_id: object, result_id: object) -> CallbackPayload:
         if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
@@ -521,6 +537,8 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
             confirmation_summary,
             confirmation_panel,
             create_button,
+            replay_button,
+            start_button,
         ]
 
         def apply_payload(payload: CallbackPayload) -> tuple[object, ...]:
@@ -543,10 +561,16 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
                 gr.update(value=""),
                 gr.update(open=False),
                 gr.update(interactive=False),
+                gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
+                gr.update(interactive=False),
             )
 
         def load_replay(fixture_id: str | None):
             return apply_payload(callbacks.load_replay(fixture_id))
+
+        def diagnose_stream(approved: object):
+            for payload in callbacks.diagnose_events(approved):
+                yield apply_payload(payload)
 
         def update_correction_draft(
             original: object, previous_run_id: object, *values: object
@@ -610,7 +634,7 @@ def build_app(service: ResultApplicationService) -> gr.Blocks:
         # The only live boundary is an application-owned approved payload State;
         # no component supplies a DiagnosisRunOutcome, path, command or shell.
         start_button.click(
-            lambda approved: apply_payload(callbacks.diagnose(approved)),
+            diagnose_stream,
             inputs=[approved_payload],
             outputs=result_outputs,
             api_name=False,
