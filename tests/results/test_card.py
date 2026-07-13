@@ -170,6 +170,10 @@ def test_height_and_pixel_limits_accept_exact_and_reject_plus_one(
     monkeypatch.setattr(card, "MAX_PNG_HEIGHT", baseline.canvas_height - 1)
     with pytest.raises(CardRenderFailure, match="png_layout_failed"):
         measure_card(presentation, context)
+    monkeypatch.setattr(card, "MAX_PNG_HEIGHT", baseline.canvas_height)
+    monkeypatch.setattr(card, "MAX_PNG_PIXELS", 1600 * baseline.canvas_height - 1)
+    with pytest.raises(CardRenderFailure, match="png_layout_failed"):
+        measure_card(presentation, context)
 
 
 def test_item_limit_accepts_exact_and_rejects_plus_one(
