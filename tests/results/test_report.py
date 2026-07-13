@@ -4,12 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from debugmate.contracts import CommandPlatform
+from debugmate.contracts import ClaimKind, CommandPlatform
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.loader import load_verified_outcome
 from debugmate.results.presentation import (
     PresentationCitation,
+    PresentationCause,
     PresentationCommand,
     PresentationSupport,
     build_presentation,
@@ -299,3 +300,42 @@ def test_callers_cannot_reseal_a_forged_projection_for_rendering(
         render_report(caller_resealed)
     with pytest.raises(CitationRenderError, match="citation_render_failed"):
         render_citations(caller_resealed)
+
+
+def test_supported_candidate_ids_require_a_complete_grounded_support_edge(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    presentation = _presentation(completed_source_bundle, tmp_path)
+    fact_id = presentation.observed_facts[0].fact_id
+    evidence_id = presentation.citations[0].evidence_id
+    candidate_id = "candidate_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    inferred = PresentationCause(
+        candidate_id=candidate_id,
+        cause="inferred only",
+        claim_kind=ClaimKind.INFERENCE,
+        fact_ids=(fact_id,),
+        evidence_ids=(evidence_id,),
+        confidence=0.4,
+        applicability="fixture",
+        counterevidence_or_limits="not grounded",
+    )
+    inferred_projection = _reseal_for_adversarial_renderer_test(
+        presentation, root_causes=(inferred,), support_links=()
+    )
+    assert render_citations(inferred_projection).rows[0].supported_candidate_ids == ()
+
+    grounded = inferred.model_copy(update={"claim_kind": ClaimKind.GROUNDED})
+    grounded_projection = _reseal_for_adversarial_renderer_test(
+        presentation,
+        root_causes=(grounded,),
+        support_links=(
+            PresentationSupport(
+                fact_ids=(fact_id,),
+                evidence_ids=(evidence_id,),
+                support_type="supports",
+            ),
+        ),
+    )
+    assert render_citations(grounded_projection).rows[0].supported_candidate_ids == (
+        candidate_id,
+    )
