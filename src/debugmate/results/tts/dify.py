@@ -37,25 +37,32 @@ class DifyTtsAdapter:
         request_identity: TtsRequestIdentity,
         rate_profile: RateProfile,
     ) -> AudioCandidate:
-        del request_identity, rate_profile
+        del request_identity
         if self._settings.dify_api_key is None:
             raise TtsAdapterError("tts_not_configured")
         try:
-            response = self._client.post(
+            with self._client.stream(
+                "POST",
                 f"{self._settings.dify_base_url.rstrip('/')}/text-to-audio",
                 headers={
                     "Authorization": f"Bearer {self._settings.dify_api_key.get_secret_value()}"
                 },
                 json={"text": text.text, "user": self._settings.dify_user},
-            )
+            ) as response:
+                content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                if response.status_code >= 300 or content_type not in {
+                    "audio/mpeg",
+                    "audio/mp3",
+                }:
+                    raise TtsAdapterError() from None
+                payload = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(payload) + len(chunk) > self._max_bytes:
+                        raise TtsAdapterError() from None
+                    payload.extend(chunk)
         except httpx.HTTPError:
             raise TtsAdapterError() from None
-        if response.status_code >= 300 or response.headers.get("content-type", "").split(";", 1)[
-            0
-        ].lower() not in {"audio/mpeg", "audio/mp3"}:
-            raise TtsAdapterError() from None
-        payload = response.content
-        if not payload or len(payload) > self._max_bytes:
+        if not payload:
             raise TtsAdapterError() from None
         target.write_bytes(payload)
-        return AudioCandidate(backend=self.backend, rate_profile=RateProfile.NORMAL, path=target)
+        return AudioCandidate(backend=self.backend, rate_profile=rate_profile, path=target)
