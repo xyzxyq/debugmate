@@ -24,8 +24,8 @@ completed: 2026-07-13
 ## Accomplishments
 
 - Added `verify_prepared_font` that revalidates the indivisible `PreparedGenerationContext`, current confined non-link font bytes, generation profile, all renderer contract versions and the exact registered presentation instance.
-- Added a deterministic 1600px layout tree with fixed section order, fixed readable sizes, token-safe character measurement, bounded items/text/height/pixels and complete pre-paint bounds validation.
-- Added Pillow-only RGB painting followed by pixels-only re-encoding, PNG chunk allowlisting, single-frame/mode/size/metadata checks and a second verification after atomic placement.
+- Added a deterministic 1600px layout tree with fixed title and identity bar, case suffix, source run and generation version, evidence IDs, grounding labels, confidence, fixed section order, token-safe measurement and complete pre-paint bounds validation.
+- Added Pillow-only RGB painting followed by pixels-only re-encoding, canonical single `IHDR`/`IDAT`/`IEND` encoding, CRC/order/length checks, compressed-byte and decoded-pixel gates, single-frame/mode/size/metadata checks and a second verification after atomic placement.
 - Added typed `png_layout_failed`, `png_render_failed` and `png_verify_failed` failures. They expose only stage/retry scope and keep report, recap text and audio independently eligible.
 - Added fail-closed cleanup for layout, paint, temporary-file and final-disk verification failures; no placeholder, crop, font substitution or second image is emitted.
 
@@ -37,11 +37,14 @@ completed: 2026-07-13
 4. `6cd4a64` — GREEN deterministic clean PNG paint/reopen verification and final-target cleanup.
 5. `5292fa3` — locked partial, cleanup, multilingual long-token and resource boundary behavior.
 6. `b91e1b1` — separated exact-height and exact-pixel gates and their immediate overflow cases.
+7. `82be205` — RED traceability, CRC, duplicate/split/order and pre-decode resource attacks.
+8. `4a6b661` — GREEN identity/evidence rendering, canonical chunks, CRC validation and independent resource gates.
+9. `c5ae359` — fixed font-hash-qualified geometry golden plus decompression-bomb mapping evidence.
 
 ## Verification
 
-- Focused card suite: **12 passed**.
-- Full offline suite: **566 passed, 22 deselected**.
+- Focused card suite: **15 passed**.
+- Full offline suite: **569 passed, 22 deselected**.
 - Ruff: **passed**.
 - `pip check`: **no broken requirements**.
 - `git diff --check ad87b2a`: **passed**.
@@ -51,6 +54,13 @@ completed: 2026-07-13
 
 - The tested project font uses a byte-for-byte copy of the approved Windows Chinese font because the repository intentionally does not vendor a large font binary. Its exact SHA-256 remains part of both generation and layout identity.
 - Pillow BASIC layout is selected explicitly. RAQM was not requested because this Windows wheel lacks it and an implicit RAQM-to-basic fallback would violate renderer determinism.
+
+## Independent Review Remediation
+
+- Added the approved visible identity bar and retained evidence IDs/grounding/confidence in the card rather than relying on the downloadable report for traceability.
+- Replaced the permissive PNG walk with a canonical three-chunk contract that validates every CRC and rejects duplicate, split, reordered or trailing chunks, including corrupt `IEND`.
+- Added a compressed-byte gate before reading, parsed and bounded `IHDR` before decoding, and independently enforced 1600px width, maximum height/pixels and safe decompression-bomb handling instead of trusting caller-provided dimensions.
+- Upgraded the structural golden from section-count assertions to a font-SHA-qualified canvas height, title/identity element, every section rectangle and every measured line bound; no machine path is recorded.
 
 ## Remaining Scope
 
