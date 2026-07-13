@@ -263,6 +263,42 @@ def test_process_allowlist_is_call_precise_and_requires_literal_shell_false(
     )
 
 
+def test_process_allowlist_rejects_extra_or_wrong_popen_boundary_arguments(
+    tmp_path: Path,
+) -> None:
+    boundary = tmp_path / "boundary.py"
+    findings = _scan_process_capabilities(
+        {
+            boundary: (
+                "import subprocess\n"
+                "command = ['fixed']\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
+                "stderr=stderr, shell=False, cwd='extra')\n"
+                "subprocess.Popen(command, stdin=subprocess.PIPE, stdout=stdout, "
+                "stderr=stderr, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
+                "stderr=stderr, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
+                "stderr=subprocess.PIPE, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
+                "stderr=stderr, shell=safe_shell)\n"
+            )
+        },
+        audited_process_modules={boundary},
+    )
+
+    assert findings == (
+        (),
+        (
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+            f"{boundary}:subprocess.Popen[shell_not_false]",
+        ),
+    )
+
+
 def test_process_audit_detects_direct_os_imports_and_process_families(
     tmp_path: Path,
 ) -> None:

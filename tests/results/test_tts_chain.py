@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -449,3 +450,82 @@ def test_all_adapters_reject_constructed_secret_and_mismatched_identity(
             adapter.synthesize(
                 _recap(), tmp_path / f"identity-{index}.mp3", wrong_identity, RateProfile.NORMAL
             )
+
+
+def test_chain_rejects_a_constructed_seven_unit_recap_before_any_adapter_call(
+    tmp_path: Path,
+) -> None:
+    recap = _recap()
+    forged = SafeRecapText.model_construct(
+        identity=recap.identity,
+        text=recap.text,
+        sha256=recap.sha256,
+        units=(*recap.units, "forged seventh unit"),
+        word_budget_version=recap.word_budget_version,
+    )
+    calls: list[tuple[str, str]] = []
+    chain = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["ok"], calls),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    )
+
+    with pytest.raises(ValueError, match="^tts_input_invalid$"):
+        chain.synthesize(forged, _identity(), tmp_path / "safe")
+
+    assert calls == []
+
+
+def _make_junction(link: Path, target: Path) -> None:
+    completed = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        check=False,
+        shell=False,
+        timeout=10,
+    )
+    if completed.returncode != 0:  # pragma: no cover - Windows target gate
+        pytest.fail("could not create required junction attack fixture")
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows junction attack")
+def test_chain_rejects_nested_junction_root_before_adapter_or_outside_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safe = tmp_path / "safe"
+    outside = tmp_path / "outside"
+    safe.mkdir()
+    outside.mkdir()
+    junction = safe / "nested"
+    _make_junction(junction, outside)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr("debugmate.results.audio.probe_mp3", _probe)
+    monkeypatch.setattr("debugmate.results.audio.canonicalize_mp3", _canonicalize)
+    chain = TtsFallbackChain(
+        (
+            FakeAdapter("dify", ["ok"], calls),
+            FakeAdapter("edge_tts", ["ok"], calls),
+            FakeAdapter("sapi", ["ok"], calls),
+        )
+    )
+
+    with pytest.raises(ValueError, match="^tts_target_invalid$"):
+        chain.synthesize(_recap(), _identity(), junction / "result")
+
+    assert calls == []
+    assert not (outside / "result").exists()
+
+
+def test_sapi_ignores_a_forged_systemroot_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forged_root = tmp_path / "forged-system-root"
+    forged_root.mkdir()
+    monkeypatch.setenv("SYSTEMROOT", str(forged_root))
+
+    adapter = SapiTtsAdapter(project_root=Path.cwd())
+
+    assert Path(adapter._powershell).is_absolute()
+    assert str(forged_root) not in adapter._powershell

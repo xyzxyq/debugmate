@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from debugmate.results import media as media_module
-from debugmate.results.media import MediaProbeError, canonicalize_mp3, probe_mp3
+from debugmate.results.media import (
+    MediaProbeError,
+    canonicalize_mp3,
+    probe_mp3,
+    trusted_media_tools,
+)
 
 FFMPEG = "ffmpeg"
 
@@ -350,3 +355,24 @@ def test_canonicalize_failure_does_not_publish_partial_target(
 
     _assert_code(error, "canonicalize_failed")
     assert not target.exists()
+
+
+def test_production_media_tools_ignore_path_shadowing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The production resolver may not select an executable from mutable PATH."""
+
+    shadow = tmp_path / "shadow-bin"
+    shadow.mkdir()
+    for executable in ("ffmpeg.exe", "ffprobe.exe"):
+        (shadow / executable).write_bytes(b"not-a-real-tool")
+    monkeypatch.setenv("PATH", str(shadow))
+
+    tools = trusted_media_tools()
+
+    assert tools.ffmpeg.is_absolute()
+    assert tools.ffprobe.is_absolute()
+    assert tools.ffmpeg.parent != shadow
+    assert tools.ffprobe.parent != shadow
+    assert tools.ffmpeg.name.casefold() == "ffmpeg.exe"
+    assert tools.ffprobe.name.casefold() == "ffprobe.exe"
