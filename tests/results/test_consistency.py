@@ -6,7 +6,7 @@ import pytest
 
 from debugmate.hashing import sha256_bytes
 from debugmate.results import audio as audio_module
-from debugmate.results.audio import TtsFallbackChain, TrustedCandidateRoot
+from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.card import render_card
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.loader import load_verified_outcome
@@ -107,7 +107,9 @@ def test_gate_revalidates_all_modalities_without_exposing_a_candidate_path(candi
     assert not hasattr(validated, "audio_bytes")
 
 
-@pytest.mark.parametrize("field", ["case_id", "source_run_id", "diagnosis_sha256", "generation_version"])
+@pytest.mark.parametrize(
+    "field", ["case_id", "source_run_id", "diagnosis_sha256", "generation_version"]
+)
 def test_gate_rejects_each_shared_identity_drift(candidates, field: str):
     from debugmate.results import consistency as consistency_module
 

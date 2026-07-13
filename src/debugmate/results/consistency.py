@@ -8,7 +8,6 @@ existing one-shot handoff until the publisher has an exclusive transaction.
 
 from __future__ import annotations
 
-import os
 import stat
 import threading
 import weakref
@@ -16,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from debugmate.diagnosis.workflow import WorkflowStatus
-from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
+from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.audio import TtsSynthesisOutcome
 from debugmate.results.card import CardCandidate, CardRenderFailure, verify_card_png
@@ -111,11 +110,7 @@ def take_verified_audio_for_publication(candidate: ValidatedResultCandidates) ->
         payload = state.outcome.handoff.take_verified_bytes(state.outcome.audio)
     except Exception:
         raise ResultConsistencyError("audio_handoff_invalid") from None
-    if (
-        not payload
-        or sha256_bytes(payload) != candidate.audio.sha256
-        or len(payload) > 8_000_000
-    ):
+    if not payload or sha256_bytes(payload) != candidate.audio.sha256 or len(payload) > 8_000_000:
         raise ResultConsistencyError("audio_handoff_invalid")
     return payload
 
@@ -185,7 +180,9 @@ def _source_manifest_bytes(source: LoadedDiagnosisSource) -> bytes:
         "knowledge_build_id": source.source_manifest.knowledge_build_id,
         "prompt_version": source.source_manifest.prompt_version,
         "workflow_version": source.source_manifest.workflow_version,
-        "node_states": [item.model_dump(mode="json") for item in source.source_manifest.node_states],
+        "node_states": [
+            item.model_dump(mode="json") for item in source.source_manifest.node_states
+        ],
     }
     assert_export_safe(summary)
     return canonical_json_bytes(summary)
