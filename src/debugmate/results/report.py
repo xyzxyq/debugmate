@@ -265,7 +265,13 @@ def _citation_rows(presentation: PresentationModel) -> tuple[CitationRow, ...]:
         supported_candidates = sorted(
             candidate.candidate_id
             for candidate in presentation.root_causes
-            if item.evidence_id in candidate.evidence_ids
+            if candidate.claim_label == "有依据"
+            and item.evidence_id in candidate.evidence_ids
+            and any(
+                item.evidence_id in link.evidence_ids
+                and bool(set(candidate.fact_ids).intersection(link.fact_ids))
+                for link in presentation.support_links
+            )
         )
         rows.append(
             CitationRow(
