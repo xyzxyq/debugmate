@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -281,29 +285,16 @@ def test_rejects_untrusted_ffprobe_shapes_with_fixed_codes(
     assert "SECRET" not in repr(error.value)
 
 
-def test_ffprobe_output_is_file_bounded_before_python_memory(
+def test_ffprobe_output_cap_maps_to_a_value_free_probe_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     media = tmp_path / "candidate.mp3"
     media.write_bytes(b"\xff\xfb" + b"x" * 100)
 
-    class Process:
-        returncode = 0
+    def flood(*_args: object, **_kwargs: object) -> None:
+        raise media_module.ProcessOutputLimitExceeded
 
-        def communicate(self, *, timeout: float) -> tuple[None, None]:
-            assert timeout == 5.0
-            return None, None
-
-    def popen(command: list[str], **kwargs: object) -> Process:
-        assert kwargs["shell"] is False
-        assert kwargs["stdout"] is not subprocess.PIPE
-        assert kwargs["stderr"] is not subprocess.PIPE
-        stdout = kwargs["stdout"]
-        assert hasattr(stdout, "write")
-        stdout.write(b"x" * (1024 * 1024 + 1))  # type: ignore[union-attr]
-        return Process()
-
-    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(media_module, "_run_bounded_process", flood)
 
     with pytest.raises(MediaProbeError) as error:
         probe_mp3(media, timeout_seconds=5.0, max_bytes=1_000)
@@ -376,3 +367,78 @@ def test_production_media_tools_ignore_path_shadowing(
     assert tools.ffprobe.parent != shadow
     assert tools.ffmpeg.name.casefold() == "ffmpeg.exe"
     assert tools.ffprobe.name.casefold() == "ffprobe.exe"
+
+
+def test_media_resolver_rejects_same_size_mtime_restored_tamper_in_child_process(
+    tmp_path: Path,
+) -> None:
+    """A process-local metadata cache must not bless a restored replacement."""
+
+    local_app_data = tmp_path / "local-app-data"
+    executable = local_app_data / media_module._WINGET_FFMPEG_BIN / "ffmpeg.exe"
+    executable.parent.mkdir(parents=True)
+    original = b"trusted-media-tool"
+    replacement = b"untrusted-tool-xxx"
+    assert len(original) == len(replacement)
+    executable.write_bytes(original)
+    original_stat = executable.stat()
+    ready = tmp_path / "resolver-ready"
+    proceed = tmp_path / "replace-now"
+    helper = tmp_path / "resolver-child.py"
+    helper.write_text(
+        "\n".join(
+            (
+                "from pathlib import Path",
+                "from debugmate.results import media",
+                f"media._windows_local_app_data = lambda: Path({str(local_app_data)!r})",
+                "media._EXPECTED_MEDIA_HASHES['ffmpeg.exe'] = "
+                f"{hashlib.sha256(original).hexdigest()!r}",
+                "media._verified_media_executable('ffmpeg.exe')",
+                f"Path({str(ready)!r}).write_text('ready', encoding='utf-8')",
+                f"while not Path({str(proceed)!r}).exists(): pass",
+                "try:",
+                "    media._verified_media_executable('ffmpeg.exe')",
+                "except media.MediaProbeError:",
+                "    raise SystemExit(0)",
+                "raise SystemExit(1)",
+            )
+        ),
+        encoding="utf-8",
+    )
+    child = subprocess.Popen(
+        [sys.executable, str(helper)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
+    )
+    try:
+        for _ in range(200):
+            if ready.exists():
+                break
+            time.sleep(0.01)
+        else:  # pragma: no cover - protects the child-process test itself
+            pytest.fail("resolver child did not reach the cached verification point")
+        executable.write_bytes(replacement)
+        os.utime(executable, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        proceed.write_text("go", encoding="utf-8")
+        assert child.wait(timeout=10) == 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=10)
+
+
+def test_bounded_runner_terminates_an_output_flood_before_persisting_it() -> None:
+    """Child output must be terminated while streaming, not re-read after exit."""
+
+    flood = (
+        "import sys\n"
+        "chunk = b'x' * 4096\n"
+        "for _ in range(100000):\n"
+        "    sys.stdout.buffer.write(chunk)\n"
+        "    sys.stderr.buffer.write(chunk)\n"
+        "    sys.stdout.buffer.flush()\n"
+        "    sys.stderr.buffer.flush()\n"
+    )
+
+    with pytest.raises(media_module.ProcessOutputLimitExceeded):
+        media_module._run_bounded_process(
+            [sys.executable, "-c", flood], timeout_seconds=10.0, max_output_bytes=8_192
+        )

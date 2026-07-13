@@ -62,10 +62,8 @@ def _scan_process_capabilities(
             and call.args[0].id == "command"
             and set(keyword_values) == expected_keywords
             and _is_subprocess_attribute(keyword_values["stdin"], "DEVNULL")
-            and isinstance(keyword_values["stdout"], ast.Name)
-            and keyword_values["stdout"].id == "stdout"
-            and isinstance(keyword_values["stderr"], ast.Name)
-            and keyword_values["stderr"].id == "stderr"
+            and _is_subprocess_attribute(keyword_values["stdout"], "PIPE")
+            and _is_subprocess_attribute(keyword_values["stderr"], "PIPE")
             and isinstance(keyword_values["shell"], ast.Constant)
             and keyword_values["shell"].value is False
         )
@@ -260,8 +258,8 @@ def test_process_allowlist_is_call_precise_and_requires_literal_shell_false(
             boundary: (
                 "import subprocess\n"
                 "command = ['fixed']\n"
-                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
-                "stderr=stderr, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
+                "stderr=subprocess.PIPE, shell=False)\n"
                 "subprocess.Popen(['missing-shell'])\n"
                 "subprocess.Popen(['unsafe'], shell=True)\n"
                 "subprocess.run(['not-the-audited-call'], shell=False)\n"
@@ -289,16 +287,16 @@ def test_process_allowlist_rejects_extra_or_wrong_popen_boundary_arguments(
             boundary: (
                 "import subprocess\n"
                 "command = ['fixed']\n"
-                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
-                "stderr=stderr, shell=False, cwd='extra')\n"
-                "subprocess.Popen(command, stdin=subprocess.PIPE, stdout=stdout, "
-                "stderr=stderr, shell=False)\n"
                 "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
-                "stderr=stderr, shell=False)\n"
-                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
+                "stderr=subprocess.PIPE, shell=False, cwd='extra')\n"
+                "subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, "
                 "stderr=subprocess.PIPE, shell=False)\n"
                 "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, "
-                "stderr=stderr, shell=safe_shell)\n"
+                "stderr=subprocess.PIPE, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
+                "stderr=stderr, shell=False)\n"
+                "subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
+                "stderr=subprocess.PIPE, shell=safe_shell)\n"
             )
         },
         audited_process_modules={boundary},
