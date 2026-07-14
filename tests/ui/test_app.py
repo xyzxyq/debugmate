@@ -157,6 +157,11 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "html" not in {component["type"] for component in config["components"]}
     assert "subprocess" not in Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
     assert "gr.HTML" not in Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
+    assert "#workbench-grid:has(> #workbench-grid)" in app.css
+    assert (
+        "minmax(280px, 3fr) minmax(360px, 4fr) minmax(440px, 5fr)" in app.css
+    )
+    assert "gap: 16px;" in app.css
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "overflow-x: hidden" not in app.css
@@ -165,6 +170,35 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
 def test_gap_01_archive_preserves_the_original_browser_failure() -> None:
     assert _GAP_01_ARCHIVE.is_file()
     assert hashlib.sha256(_GAP_01_ARCHIVE.read_bytes()).hexdigest() == _GAP_01_ARCHIVE_SHA256
+
+
+def test_replay_default_is_allowlisted_and_only_enables_its_control() -> None:
+    app = build_app(_Service())
+    config = app.get_config_file()
+    replay = next(
+        component
+        for component in config["components"]
+        if component["type"] == "dropdown"
+        and component["props"].get("label") == "固定回放案例"
+    )
+    replay_button = next(
+        component
+        for component in config["components"]
+        if component["type"] == "button"
+        and component["props"].get("value") == "加载回放案例"
+    )
+    enabled = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "replay_button_enabled"
+    )
+
+    assert replay["props"]["value"] == "module-not-found"
+    assert replay["props"]["allow_custom_value"] is False
+    assert replay_button["props"]["interactive"] is True
+    assert enabled("module-not-found")["interactive"] is True
+    assert enabled(None)["interactive"] is False
+    assert enabled("not-allowlisted")["interactive"] is False
 
 
 def test_replay_button_callback_streams_running_states_and_disables_repeat_action() -> None:

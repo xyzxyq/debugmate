@@ -133,29 +133,49 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions() -> None:
                 page = browser.new_page(viewport={"width": 1366, "height": 768})
                 page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
                 page.locator(".gradio-container").wait_for(timeout=30_000)
-                page.wait_for_timeout(1_000)
+                for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+                    page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
+                page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
+                page.get_by_role("button", name="加载回放案例", exact=True).wait_for(
+                    timeout=30_000
+                )
+                visible_before_viewport = []
+                for text, locator in (
+                    (
+                        "输入与抽取",
+                        page.get_by_role("heading", name="输入与抽取", exact=True),
+                    ),
+                    (
+                        "诊断与证据",
+                        page.get_by_role("heading", name="诊断与证据", exact=True),
+                    ),
+                    (
+                        "三模态结果",
+                        page.get_by_role("heading", name="三模态结果", exact=True),
+                    ),
+                    ("固定回放案例", page.get_by_text("固定回放案例", exact=True)),
+                    (
+                        "加载回放案例",
+                        page.get_by_role("button", name="加载回放案例", exact=True),
+                    ),
+                ):
+                    box = locator.bounding_box()
+                    visible_before_viewport.append(
+                        {
+                            "text": text,
+                            "visible": box is not None
+                            and box["width"] > 0
+                            and box["height"] > 0
+                            and box["y"] >= 0
+                            and box["y"] + box["height"] <= 768,
+                        }
+                    )
                 screenshot = _capture_failure_screenshot(page)
                 metrics = page.evaluate(
                     """() => ({
                         regions: [...document.querySelectorAll('.region')].map((element) => {
                             const box = element.getBoundingClientRect();
                             return { width: box.width, y: box.y };
-                        }),
-                        visibleBeforeViewport: [
-                            ...document.querySelectorAll('h2, label, button')
-                        ].filter((element) => [
-                            '输入与抽取',
-                            '诊断与证据',
-                            '三模态结果',
-                            '固定回放案例',
-                            '加载回放案例',
-                        ].includes(element.textContent.trim())).map((element) => {
-                            const box = element.getBoundingClientRect();
-                            return {
-                                text: element.textContent.trim(),
-                                visible: box.width > 0 && box.height > 0
-                                    && box.y >= 0 && box.bottom <= 768,
-                            };
                         }),
                         scrollWidth: document.documentElement.scrollWidth,
                         clientWidth: document.documentElement.clientWidth,
@@ -171,7 +191,7 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions() -> None:
             for item, minimum in zip(metrics["regions"], (280, 360, 440), strict=True)
         )
         assert all(item["y"] < 768 for item in metrics["regions"])
-        assert metrics["visibleBeforeViewport"] == [
+        assert visible_before_viewport == [
             {"text": "输入与抽取", "visible": True},
             {"text": "诊断与证据", "visible": True},
             {"text": "三模态结果", "visible": True},

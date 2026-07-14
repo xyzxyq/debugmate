@@ -37,18 +37,43 @@ WORKBENCH_CSS = "\n".join(
         ".gradio-container { background: var(--canvas); }",
         ".status-bar { position: sticky; top: 0; z-index: 2; background: var(--surface); }",
         ".status-bar { border-bottom: 1px solid #ccd6e5; }",
-        ".workbench-grid { display: grid; grid-template-columns: 3fr 4fr 5fr; gap: 14px; }",
-        ".workbench-grid { align-items: start; }",
-        ".region { min-width: 0; background: var(--surface); border: 1px solid #ccd6e5; }",
-        ".region { border-radius: 10px; padding: 12px; }",
+        "#workbench-grid:has(> #workbench-grid) { display: grid; }",
+        (
+            "#workbench-grid:has(> #workbench-grid) { "
+            "grid-template-columns: minmax(280px, 3fr) minmax(360px, 4fr) "
+            "minmax(440px, 5fr); gap: 16px; }"
+        ),
+        "#workbench-grid:has(> #workbench-grid) { align-items: start; }",
+        "#workbench-grid:has(> #workbench-grid) > #workbench-grid { display: contents; }",
+        (
+            "#workbench-grid:has(> #workbench-grid) > #workbench-grid > .styler "
+            "{ display: contents; }"
+        ),
+        (
+            "#workbench-grid:has(> #workbench-grid) .region { min-width: 0; "
+            "background: var(--surface); border: 1px solid #ccd6e5; }"
+        ),
+        "#workbench-grid:has(> #workbench-grid) .region { border-radius: 10px; padding: 12px; }",
         ".metadata { font-family: Cascadia Mono, Consolas, monospace; font-size: 12px; }",
         ".metadata { overflow-wrap: anywhere; }",
         ".report-panel { max-height: 440px; overflow: auto; }",
         ":focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }",
-        "@media (max-width: 1199px) { .workbench-grid { grid-template-columns: 5fr 7fr; } }",
-        "@media (max-width: 1199px) { .results-region { grid-column: 1 / -1; } }",
-        "@media (max-width: 899px) { .workbench-grid { grid-template-columns: 1fr; } }",
-        "@media (max-width: 899px) { .results-region { grid-column: auto; } }",
+        (
+            "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
+            "{ grid-template-columns: 5fr 7fr; } }"
+        ),
+        (
+            "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
+            ".results-region { grid-column: 1 / -1; } }"
+        ),
+        (
+            "@media (max-width: 899px) { #workbench-grid:has(> #workbench-grid) "
+            "{ grid-template-columns: 1fr; } }"
+        ),
+        (
+            "@media (max-width: 899px) { #workbench-grid:has(> #workbench-grid) "
+            ".results-region { grid-column: auto; } }"
+        ),
         "@media (max-width: 899px) { .report-panel { max-height: none; } }",
         "@media (max-width: 639px) { .gradio-container { padding: 8px !important; } }",
     )
@@ -621,7 +646,7 @@ def build_app(
             gr.Markdown("# DebugMate 诊断工作台")
             status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
             result_metadata = gr.Markdown("", elem_classes="metadata")
-        with gr.Group(elem_classes="workbench-grid"):
+        with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes="region"):
                 gr.Markdown("## 输入与抽取")
                 redacted_input = gr.Textbox(
@@ -633,7 +658,7 @@ def build_app(
                 replay = gr.Dropdown(
                     choices=[("ModuleNotFoundError：缺少虚构依赖包", "module-not-found")],
                     label="固定回放案例",
-                    value=None,
+                    value="module-not-found",
                 )
                 replay_button = gr.Button("加载回放案例", variant="secondary")
                 fields = [
@@ -772,6 +797,9 @@ def build_app(
             for payload in callbacks.load_replay_events(fixture_id, request=request):
                 yield apply_payload(payload)
 
+        def replay_button_enabled(fixture_id: object) -> dict[str, bool]:
+            return gr.update(interactive=fixture_id == "module-not-found")
+
         def diagnose_stream(approved: object, request: gr.Request):
             for payload in callbacks.diagnose_events(approved, request=request):
                 yield apply_payload(payload)
@@ -839,6 +867,13 @@ def build_app(
             concurrency_limit=1,
             concurrency_id="debugmate-case",
             postprocess=False,
+        )
+        replay.change(
+            replay_button_enabled,
+            inputs=[replay],
+            outputs=[replay_button],
+            api_name=False,
+            queue=False,
         )
         # The only live boundary is an application-owned approved payload State;
         # no component supplies a DiagnosisRunOutcome, path, command or shell.
