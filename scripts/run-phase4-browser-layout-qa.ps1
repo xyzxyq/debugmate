@@ -1,5 +1,10 @@
 [CmdletBinding()]
-param()
+param(
+    # This explicit, bounded switch exists only for the repository's lifecycle
+    # smoke test. It causes the existing ownership audit to fail after the
+    # runner has captured its own child, so cleanup can be verified safely.
+    [switch]$FailOwnershipAuditForSmoke
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -80,6 +85,33 @@ function Assert-CapturedServerOwnership {
     }
 }
 
+function Stop-CapturedServer {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory)]
+        [int]$ExpectedProcessId,
+        [Parameter(Mandatory)]
+        [Int64]$ExpectedStartTicks
+    )
+
+    $Process.Refresh()
+    if ($Process.Id -ne $ExpectedProcessId) {
+        throw "Captured process object changed from PID $ExpectedProcessId to PID $($Process.Id)."
+    }
+    if ($Process.HasExited) {
+        return
+    }
+    if ($Process.StartTime.ToUniversalTime().Ticks -ne $ExpectedStartTicks) {
+        throw "Captured process PID $ExpectedProcessId no longer has its recorded start time."
+    }
+
+    Stop-Process -InputObject $Process -ErrorAction Stop
+    if (-not $Process.WaitForExit(10000)) {
+        throw "Captured server PID $ExpectedProcessId did not exit within 10 seconds."
+    }
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -88,13 +120,17 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 
 $listener = $null
 $serverProcess = $null
-$serverProcessVerified = $false
+$serverProcessId = $null
+$serverProcessStartUtc = $null
+$serverProcessStartTicks = $null
 $port = $null
 $hadBaseUrl = Test-Path -LiteralPath Env:DEBUGMATE_UI_BASE_URL
 $priorBaseUrl = $env:DEBUGMATE_UI_BASE_URL
+$locationPushed = $false
 
-Push-Location -LiteralPath $projectRoot
 try {
+    Push-Location -LiteralPath $projectRoot
+    $locationPushed = $true
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
@@ -107,8 +143,14 @@ try {
         -WorkingDirectory $projectRoot `
         -WindowStyle Hidden `
         -PassThru
-    Assert-CapturedServerOwnership -Process $serverProcess -Python $python -Port $port
-    $serverProcessVerified = $true
+    $serverProcessId = $serverProcess.Id
+    $serverProcessStartUtc = $serverProcess.StartTime.ToUniversalTime()
+    $serverProcessStartTicks = $serverProcessStartUtc.Ticks
+    $auditPython = $python
+    if ($FailOwnershipAuditForSmoke) {
+        $auditPython = "$python.controlled-failure"
+    }
+    Assert-CapturedServerOwnership -Process $serverProcess -Python $auditPython -Port $port
 
     $baseUrl = "http://127.0.0.1:$port"
     $readyTimer = [System.Diagnostics.Stopwatch]::StartNew()
@@ -129,34 +171,67 @@ try {
     }
 
     $env:DEBUGMATE_UI_BASE_URL = $baseUrl
-    & $python -m pytest tests/ui/test_browser.py -m browser -q
+    & $python -m pytest tests/ui/test_browser.py -m browser -k 'not runner_' -q
     if ($LASTEXITCODE -ne 0) {
         throw "Browser layout tests failed with exit code $LASTEXITCODE."
     }
 }
 finally {
-    if ($null -ne $listener) {
-        $listener.Stop()
-    }
-    if ($null -ne $serverProcess) {
-        $serverProcess.Refresh()
-        if (-not $serverProcess.HasExited) {
-            if (-not $serverProcessVerified) {
-                throw "Refusing to stop unverified captured server PID $($serverProcess.Id)."
+    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+    try {
+        if ($null -ne $listener) {
+            try {
+                $listener.Stop()
             }
-            Stop-Process -Id $serverProcess.Id -ErrorAction Stop
-            [void]$serverProcess.WaitForExit(10000)
+            catch {
+                [void]$cleanupErrors.Add("TcpListener stop: $($_.Exception.Message)")
+            }
+        }
+        if ($null -ne $serverProcess) {
+            try {
+                Stop-CapturedServer `
+                    -Process $serverProcess `
+                    -ExpectedProcessId $serverProcessId `
+                    -ExpectedStartTicks $serverProcessStartTicks
+            }
+            catch {
+                [void]$cleanupErrors.Add("Captured server stop: $($_.Exception.Message)")
+            }
+        }
+        if ($null -ne $port) {
+            try {
+                Wait-ForLoopbackPortClosed -Port $port
+                Write-Host "Captured loopback server stopped; port $port is closed."
+            }
+            catch {
+                [void]$cleanupErrors.Add("Loopback port $port close check: $($_.Exception.Message)")
+            }
         }
     }
-    if ($null -ne $port) {
-        Wait-ForLoopbackPortClosed -Port $port
-        Write-Host "Captured loopback server stopped; port $port is closed."
+    finally {
+        try {
+            if ($hadBaseUrl) {
+                $env:DEBUGMATE_UI_BASE_URL = $priorBaseUrl
+            }
+            else {
+                Remove-Item -LiteralPath Env:DEBUGMATE_UI_BASE_URL -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            [void]$cleanupErrors.Add("Environment restore: $($_.Exception.Message)")
+        }
+        finally {
+            if ($locationPushed) {
+                try {
+                    Pop-Location
+                }
+                catch {
+                    [void]$cleanupErrors.Add("Location restore: $($_.Exception.Message)")
+                }
+            }
+        }
     }
-    if ($hadBaseUrl) {
-        $env:DEBUGMATE_UI_BASE_URL = $priorBaseUrl
+    if ($cleanupErrors.Count -gt 0) {
+        throw "Runner cleanup errors: $($cleanupErrors -join '; ')"
     }
-    else {
-        Remove-Item -LiteralPath Env:DEBUGMATE_UI_BASE_URL -ErrorAction SilentlyContinue
-    }
-    Pop-Location
 }

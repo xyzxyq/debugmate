@@ -8,6 +8,7 @@ acceptance.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import socket
@@ -31,6 +32,7 @@ _FAILURE_SCREENSHOT_ENV = "DEBUGMATE_UI_FAILURE_SCREENSHOT"
 _FAILURE_SCREENSHOT = _EVIDENCE / "tmp" / "GAP-01-layout-red.png"
 _UI_BASE_URL_ENV = "DEBUGMATE_UI_BASE_URL"
 _STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z")
+_RUNNER = _ROOT / "scripts" / "run-phase4-browser-layout-qa.ps1"
 
 
 def _reserve_loopback_port() -> int:
@@ -84,7 +86,11 @@ def _wait_for_config(
         try:
             response = httpx.get(f"{base_url}/config", timeout=1.0)
             payload = response.json()
-            if response.status_code == 200 and isinstance(payload.get("components"), list):
+            if (
+                response.status_code == 200
+                and isinstance(payload, dict)
+                and isinstance(payload.get("components"), list)
+            ):
                 return base_url
         except (httpx.HTTPError, ValueError):
             pass
@@ -207,6 +213,86 @@ def test_supplied_browser_base_url_requires_ready_config(
             timeout_seconds=0.01,
             poll_interval_seconds=0,
         )
+
+
+@pytest.mark.parametrize("payload", [[], "not-an-object"])
+def test_supplied_browser_base_url_ignores_non_object_config_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda *args, **kwargs: httpx.Response(200, json=payload),
+    )
+
+    with pytest.raises(pytest.fail.Exception, match="supplied loopback Gradio /config"):
+        _wait_for_config(
+            "http://127.0.0.1:8000",
+            process=None,
+            timeout_seconds=0.01,
+            poll_interval_seconds=0,
+        )
+
+
+def _controlled_runner_failure() -> tuple[dict[str, object], subprocess.CompletedProcess[str]]:
+    runner_path = str(_RUNNER).replace("'", "''")
+    sentinel = "http://127.0.0.1:61234"
+    command = f"""
+$ErrorActionPreference = 'Stop'
+$summary = [ordered]@{{ error = $null; base_url = $null; debugmate_server_count = $null }}
+try {{
+    & '{runner_path}' -FailOwnershipAuditForSmoke
+}}
+catch {{
+    $summary.error = $_.Exception.Message
+}}
+$summary.base_url = $env:DEBUGMATE_UI_BASE_URL
+$summary.debugmate_server_count = @(
+    Get-CimInstance Win32_Process |
+        Where-Object {{ $_.CommandLine -match 'debugmate\\.ui\\.serve' }}
+).Count
+$summary | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=_ROOT,
+        env={**os.environ, _UI_BASE_URL_ENV: sentinel},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    json_line = next(
+        (line for line in reversed(completed.stdout.splitlines()) if line.lstrip().startswith("{")),
+        "",
+    )
+    return json.loads(json_line), completed
+
+
+def test_runner_cleanup_contract_restores_context_after_cleanup_errors() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    cleanup_start = source.index("finally {\n    $cleanupErrors")
+    port_probe = source.index("Wait-ForLoopbackPortClosed -Port $port", cleanup_start)
+    restore_environment = source.index("if ($hadBaseUrl)", cleanup_start)
+    pop_location = source.index("Pop-Location", cleanup_start)
+    raise_cleanup_error = source.index("if ($cleanupErrors.Count -gt 0)", cleanup_start)
+
+    assert "function Stop-CapturedServer" in source
+    assert "Stop-Process -InputObject $Process" in source
+    assert "$serverProcessStartUtc" in source
+    assert "$serverProcessVerified" not in source
+    assert port_probe < restore_environment < pop_location < raise_cleanup_error
+
+
+def test_runner_controlled_failure_cleans_server_and_restores_base_url() -> None:
+    summary, completed = _controlled_runner_failure()
+
+    assert completed.returncode == 0, completed.stderr
+    assert "command line does not match" in str(summary["error"])
+    assert summary["base_url"] == "http://127.0.0.1:61234"
+    assert summary["debugmate_server_count"] == 0
+    assert "Captured loopback server stopped; port" in completed.stdout
 
 
 def test_browser_fixture_reuses_external_url_without_terminating_its_server(
