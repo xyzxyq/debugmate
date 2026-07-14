@@ -201,3 +201,100 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions() -> None:
         assert metrics["scrollWidth"] == metrics["clientWidth"]
     finally:
         _stop_loopback_server(process, port)
+
+
+def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1024px() -> None:
+    """The tablet breakpoint keeps inputs/evidence together and spans results below."""
+
+    port = _reserve_loopback_port()
+    process = _start_loopback_server(port)
+    try:
+        base_url = _wait_for_config(port, process)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel="msedge", headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 1024, "height": 768})
+                page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
+                page.locator(".gradio-container").wait_for(timeout=30_000)
+                for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+                    page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
+                page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
+                page.get_by_role("button", name="加载回放案例", exact=True).wait_for(
+                    timeout=30_000
+                )
+                metrics = page.evaluate(
+                    """() => ({
+                        regions: [...document.querySelectorAll('.region')].map((element) => {
+                            const box = element.getBoundingClientRect();
+                            return { x: box.x, y: box.y, width: box.width, height: box.height };
+                        }),
+                        scrollWidth: document.documentElement.scrollWidth,
+                        clientWidth: document.documentElement.clientWidth,
+                    })"""
+                )
+            finally:
+                browser.close()
+        assert len(metrics["regions"]) == 3
+        input_region, evidence_region, results_region = metrics["regions"]
+        assert abs(input_region["y"] - evidence_region["y"]) <= 1
+        assert input_region["x"] < evidence_region["x"]
+        assert results_region["y"] > input_region["y"]
+        assert results_region["y"] > evidence_region["y"]
+        assert abs(results_region["x"] - input_region["x"]) <= 1
+        assert abs(
+            (results_region["x"] + results_region["width"])
+            - (evidence_region["x"] + evidence_region["width"])
+        ) <= 1
+        assert metrics["scrollWidth"] == metrics["clientWidth"]
+    finally:
+        _stop_loopback_server(process, port)
+
+
+def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_at_768px() -> None:
+    """The mobile breakpoint stacks the ordered regions without hiding replay controls."""
+
+    port = _reserve_loopback_port()
+    process = _start_loopback_server(port)
+    try:
+        base_url = _wait_for_config(port, process)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel="msedge", headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 768, "height": 1024})
+                page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
+                page.locator(".gradio-container").wait_for(timeout=30_000)
+                for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+                    page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
+                replay_label = page.get_by_text("固定回放案例", exact=True)
+                replay_label.wait_for(timeout=30_000)
+                replay_button = page.get_by_role("button", name="加载回放案例", exact=True)
+                replay_button.wait_for(timeout=30_000)
+                replay_boxes = [replay_label.bounding_box(), replay_button.bounding_box()]
+                metrics = page.evaluate(
+                    """() => ({
+                        regions: [...document.querySelectorAll('.region')].map((element) => {
+                            const box = element.getBoundingClientRect();
+                            return { x: box.x, y: box.y, width: box.width, height: box.height };
+                        }),
+                        scrollWidth: document.documentElement.scrollWidth,
+                        clientWidth: document.documentElement.clientWidth,
+                    })"""
+                )
+            finally:
+                browser.close()
+        assert len(metrics["regions"]) == 3
+        input_region, evidence_region, results_region = metrics["regions"]
+        assert abs(input_region["x"] - evidence_region["x"]) <= 1
+        assert abs(evidence_region["x"] - results_region["x"]) <= 1
+        assert input_region["y"] < evidence_region["y"] < results_region["y"]
+        assert all(
+            box is not None
+            and box["width"] > 0
+            and box["height"] > 0
+            and box["y"] >= 0
+            and box["y"] + box["height"] <= 1024
+            for box in replay_boxes
+        )
+        assert metrics["scrollWidth"] == metrics["clientWidth"]
+    finally:
+        _stop_loopback_server(process, port)
