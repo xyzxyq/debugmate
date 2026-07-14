@@ -8,7 +8,7 @@ acceptance.
 
 from __future__ import annotations
 
-import hashlib
+import os
 import socket
 import subprocess
 import sys
@@ -23,6 +23,8 @@ pytestmark = pytest.mark.browser
 
 _ROOT = Path(__file__).resolve().parents[2]
 _EVIDENCE = _ROOT / "evidence" / "ui" / "phase4"
+_FAILURE_SCREENSHOT_ENV = "DEBUGMATE_UI_FAILURE_SCREENSHOT"
+_FAILURE_SCREENSHOT = _EVIDENCE / "tmp" / "GAP-01-layout-red.png"
 
 
 def _reserve_loopback_port() -> int:
@@ -84,13 +86,45 @@ def _stop_loopback_server(process: subprocess.Popen[bytes], port: int) -> None:
     pytest.fail("captured loopback server port remained open after cleanup")
 
 
-def test_vq_01_real_loopback_workbench_has_three_visible_regions() -> None:
-    """VQ-01: the first screen must keep all three regions usable at 1366px."""
+def _capture_failure_screenshot(page) -> Path | None:
+    """Capture only an explicitly requested, ignored temporary diagnostic image."""
+
+    if os.environ.get(_FAILURE_SCREENSHOT_ENV) != "1":
+        return None
+    _FAILURE_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(_FAILURE_SCREENSHOT), full_page=True)
+    return _FAILURE_SCREENSHOT
+
+
+def test_failure_screenshot_capture_is_opt_in_and_uses_only_ignored_temp_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ScreenshotPage:
+        def __init__(self) -> None:
+            self.paths: list[str] = []
+
+        def screenshot(self, *, path: str, full_page: bool) -> None:
+            assert full_page is True
+            self.paths.append(path)
+
+    page = ScreenshotPage()
+    monkeypatch.delenv(_FAILURE_SCREENSHOT_ENV, raising=False)
+    assert _capture_failure_screenshot(page) is None
+    assert page.paths == []
+
+    monkeypatch.setenv(_FAILURE_SCREENSHOT_ENV, "1")
+    assert _capture_failure_screenshot(page) == _FAILURE_SCREENSHOT
+    assert page.paths == [str(_FAILURE_SCREENSHOT)]
+    assert _FAILURE_SCREENSHOT.is_relative_to(_EVIDENCE / "tmp")
+    assert _FAILURE_SCREENSHOT.name != "VQ-01.png"
+    assert _FAILURE_SCREENSHOT.name != "GAP-01-VQ-01-failing.png"
+
+
+def test_gap_01_real_loopback_workbench_has_three_usable_regions() -> None:
+    """RED: the first screen must keep its three regions usable at 1366px."""
 
     port = _reserve_loopback_port()
     process = _start_loopback_server(port)
-    _EVIDENCE.mkdir(parents=True, exist_ok=True)
-    screenshot = _EVIDENCE / "VQ-01.png"
     try:
         base_url = _wait_for_config(port, process)
         with sync_playwright() as playwright:
@@ -100,12 +134,28 @@ def test_vq_01_real_loopback_workbench_has_three_visible_regions() -> None:
                 page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
                 page.locator(".gradio-container").wait_for(timeout=30_000)
                 page.wait_for_timeout(1_000)
-                page.screenshot(path=str(screenshot), full_page=True)
+                screenshot = _capture_failure_screenshot(page)
                 metrics = page.evaluate(
                     """() => ({
                         regions: [...document.querySelectorAll('.region')].map((element) => {
                             const box = element.getBoundingClientRect();
                             return { width: box.width, y: box.y };
+                        }),
+                        visibleBeforeViewport: [
+                            ...document.querySelectorAll('h2, label, button')
+                        ].filter((element) => [
+                            '输入与抽取',
+                            '诊断与证据',
+                            '三模态结果',
+                            '固定回放案例',
+                            '加载回放案例',
+                        ].includes(element.textContent.trim())).map((element) => {
+                            const box = element.getBoundingClientRect();
+                            return {
+                                text: element.textContent.trim(),
+                                visible: box.width > 0 && box.height > 0
+                                    && box.y >= 0 && box.bottom <= 768,
+                            };
                         }),
                         scrollWidth: document.documentElement.scrollWidth,
                         clientWidth: document.documentElement.clientWidth,
@@ -113,14 +163,21 @@ def test_vq_01_real_loopback_workbench_has_three_visible_regions() -> None:
                 )
             finally:
                 browser.close()
-        assert screenshot.is_file()
-        assert hashlib.sha256(screenshot.read_bytes()).hexdigest()
+        if screenshot is not None:
+            assert screenshot.is_file()
         assert len(metrics["regions"]) == 3
         assert all(
             item["width"] >= minimum
             for item, minimum in zip(metrics["regions"], (280, 360, 440), strict=True)
         )
         assert all(item["y"] < 768 for item in metrics["regions"])
+        assert metrics["visibleBeforeViewport"] == [
+            {"text": "输入与抽取", "visible": True},
+            {"text": "诊断与证据", "visible": True},
+            {"text": "三模态结果", "visible": True},
+            {"text": "固定回放案例", "visible": True},
+            {"text": "加载回放案例", "visible": True},
+        ]
         assert metrics["scrollWidth"] == metrics["clientWidth"]
     finally:
         _stop_loopback_server(process, port)

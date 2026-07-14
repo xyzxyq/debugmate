@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import socket
 import subprocess
 import sys
@@ -27,6 +28,10 @@ from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui import serve as serve_module
 from debugmate.ui.app import build_app
 from debugmate.ui.serve import _local_service
+
+_ROOT = Path(__file__).resolve().parents[2]
+_GAP_01_ARCHIVE = _ROOT / "evidence" / "ui" / "phase4" / "archive" / "GAP-01-VQ-01-failing.png"
+_GAP_01_ARCHIVE_SHA256 = "12be2e55e45f78ddee0f8c6cdbc9cce4ffdd4c494192d63c2c22c6ef61fd10cc"
 
 
 def _completed_state() -> ResultViewState:
@@ -128,6 +133,13 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     config = app.get_config_file()
     rendered = repr(config)
 
+    workbench_grids = [
+        component
+        for component in config["components"]
+        if component.get("props", {}).get("elem_id") == "workbench-grid"
+    ]
+    assert len(workbench_grids) == 1
+
     for text in (
         "DebugMate 诊断工作台",
         "输入与抽取",
@@ -148,6 +160,11 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "overflow-x: hidden" not in app.css
+
+
+def test_gap_01_archive_preserves_the_original_browser_failure() -> None:
+    assert _GAP_01_ARCHIVE.is_file()
+    assert hashlib.sha256(_GAP_01_ARCHIVE.read_bytes()).hexdigest() == _GAP_01_ARCHIVE_SHA256
 
 
 def test_replay_button_callback_streams_running_states_and_disables_repeat_action() -> None:
