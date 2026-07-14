@@ -9,11 +9,15 @@ acceptance.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import httpx
 import pytest
@@ -25,6 +29,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 _EVIDENCE = _ROOT / "evidence" / "ui" / "phase4"
 _FAILURE_SCREENSHOT_ENV = "DEBUGMATE_UI_FAILURE_SCREENSHOT"
 _FAILURE_SCREENSHOT = _EVIDENCE / "tmp" / "GAP-01-layout-red.png"
+_UI_BASE_URL_ENV = "DEBUGMATE_UI_BASE_URL"
+_STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z")
 
 
 def _reserve_loopback_port() -> int:
@@ -52,21 +58,38 @@ def _start_loopback_server(port: int) -> subprocess.Popen[bytes]:
     )
 
 
-def _wait_for_config(port: int, process: subprocess.Popen[bytes]) -> str:
-    deadline = time.monotonic() + 30.0
-    url = f"http://127.0.0.1:{port}"
+def _parse_supplied_browser_base_url(value: str) -> str:
+    """Accept only a literal IPv4 loopback URL with a valid nonzero port."""
+
+    match = _STRICT_LOOPBACK_BASE_URL.fullmatch(value)
+    if match is None or int(match.group(1)) > 65535:
+        raise ValueError(
+            f"{_UI_BASE_URL_ENV} must be literal http://127.0.0.1:N with N between 1 and 65535"
+        )
+    return value
+
+
+def _wait_for_config(
+    base_url: str,
+    process: subprocess.Popen[bytes] | None = None,
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.25,
+) -> str:
+    deadline = time.monotonic() + timeout_seconds
+    owner = "loopback Gradio process" if process is not None else "supplied loopback Gradio"
     while time.monotonic() < deadline:
-        if process.poll() is not None:
+        if process is not None and process.poll() is not None:
             pytest.fail("loopback Gradio process exited before /config became ready")
         try:
-            response = httpx.get(f"{url}/config", timeout=1.0)
+            response = httpx.get(f"{base_url}/config", timeout=1.0)
             payload = response.json()
             if response.status_code == 200 and isinstance(payload.get("components"), list):
-                return url
+                return base_url
         except (httpx.HTTPError, ValueError):
             pass
-        time.sleep(0.25)
-    pytest.fail("loopback Gradio /config did not become ready in 30 seconds")
+        time.sleep(poll_interval_seconds)
+    pytest.fail(f"{owner} /config did not become ready in {timeout_seconds:g} seconds")
 
 
 def _stop_loopback_server(process: subprocess.Popen[bytes], port: int) -> None:
@@ -86,6 +109,27 @@ def _stop_loopback_server(process: subprocess.Popen[bytes], port: int) -> None:
     pytest.fail("captured loopback server port remained open after cleanup")
 
 
+@pytest.fixture
+def browser_base_url() -> Iterator[str]:
+    """Supply one ready loopback UI server without ever taking over an external owner."""
+
+    supplied_base_url = os.environ.get(_UI_BASE_URL_ENV)
+    if supplied_base_url is not None:
+        try:
+            base_url = _parse_supplied_browser_base_url(supplied_base_url)
+        except ValueError as error:
+            pytest.fail(str(error))
+        yield _wait_for_config(base_url)
+        return
+
+    port = _reserve_loopback_port()
+    process = _start_loopback_server(port)
+    try:
+        yield _wait_for_config(f"http://127.0.0.1:{port}", process)
+    finally:
+        _stop_loopback_server(process, port)
+
+
 def _capture_failure_screenshot(page) -> Path | None:
     """Capture only an explicitly requested, ignored temporary diagnostic image."""
 
@@ -94,6 +138,85 @@ def _capture_failure_screenshot(page) -> Path | None:
     _FAILURE_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(_FAILURE_SCREENSHOT), full_page=True)
     return _FAILURE_SCREENSHOT
+
+
+@pytest.fixture
+def _external_config_server() -> Iterator[str]:
+    """Provide an independently owned ready server for lifecycle coverage."""
+
+    class ConfigHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+            if self.path == "/config":
+                body = b'{"components": []}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_error(404)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ConfigHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        assert thread.is_alive(), "browser fixture terminated an externally owned server"
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://[::1]:8000",
+        "http://127.0.0.1:8000/config",
+        "http://127.0.0.1:8000?debug=1",
+        "http://user:password@127.0.0.1:8000",
+        "http://127.0.0.1:0",
+        "http://127.0.0.1:65536",
+    ],
+)
+def test_supplied_browser_base_url_rejects_everything_except_literal_ipv4_loopback(
+    value: str,
+) -> None:
+    with pytest.raises(ValueError, match="literal http://127\\.0\\.0\\.1:N"):
+        _parse_supplied_browser_base_url(value)
+
+
+def test_supplied_browser_base_url_requires_ready_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda *args, **kwargs: httpx.Response(200, json={"components": "not-a-list"}),
+    )
+
+    with pytest.raises(pytest.fail.Exception, match="supplied loopback Gradio /config"):
+        _wait_for_config(
+            "http://127.0.0.1:8000",
+            process=None,
+            timeout_seconds=0.01,
+            poll_interval_seconds=0,
+        )
+
+
+def test_browser_fixture_reuses_external_url_without_terminating_its_server(
+    _external_config_server: str,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    monkeypatch.setenv(_UI_BASE_URL_ENV, _external_config_server)
+
+    assert request.getfixturevalue("browser_base_url") == _external_config_server
 
 
 def test_failure_screenshot_capture_is_opt_in_and_uses_only_ignored_temp_path(
@@ -120,181 +243,153 @@ def test_failure_screenshot_capture_is_opt_in_and_uses_only_ignored_temp_path(
     assert _FAILURE_SCREENSHOT.name != "GAP-01-VQ-01-failing.png"
 
 
-def test_gap_01_real_loopback_workbench_has_three_usable_regions() -> None:
+def test_gap_01_real_loopback_workbench_has_three_usable_regions(
+    browser_base_url: str,
+) -> None:
     """RED: the first screen must keep its three regions usable at 1366px."""
 
-    port = _reserve_loopback_port()
-    process = _start_loopback_server(port)
-    try:
-        base_url = _wait_for_config(port, process)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel="msedge", headless=True)
-            try:
-                page = browser.new_page(viewport={"width": 1366, "height": 768})
-                page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
-                page.locator(".gradio-container").wait_for(timeout=30_000)
-                for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
-                    page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-                page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
-                page.get_by_role("button", name="加载回放案例", exact=True).wait_for(
-                    timeout=30_000
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1366, "height": 768})
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+                page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
+            page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
+            page.get_by_role("button", name="加载回放案例", exact=True).wait_for(timeout=30_000)
+            visible_before_viewport = []
+            for text, locator in (
+                ("输入与抽取", page.get_by_role("heading", name="输入与抽取", exact=True)),
+                ("诊断与证据", page.get_by_role("heading", name="诊断与证据", exact=True)),
+                ("三模态结果", page.get_by_role("heading", name="三模态结果", exact=True)),
+                ("固定回放案例", page.get_by_text("固定回放案例", exact=True)),
+                ("加载回放案例", page.get_by_role("button", name="加载回放案例", exact=True)),
+            ):
+                box = locator.bounding_box()
+                visible_before_viewport.append(
+                    {
+                        "text": text,
+                        "visible": box is not None
+                        and box["width"] > 0
+                        and box["height"] > 0
+                        and box["y"] >= 0
+                        and box["y"] + box["height"] <= 768,
+                    }
                 )
-                visible_before_viewport = []
-                for text, locator in (
-                    (
-                        "输入与抽取",
-                        page.get_by_role("heading", name="输入与抽取", exact=True),
-                    ),
-                    (
-                        "诊断与证据",
-                        page.get_by_role("heading", name="诊断与证据", exact=True),
-                    ),
-                    (
-                        "三模态结果",
-                        page.get_by_role("heading", name="三模态结果", exact=True),
-                    ),
-                    ("固定回放案例", page.get_by_text("固定回放案例", exact=True)),
-                    (
-                        "加载回放案例",
-                        page.get_by_role("button", name="加载回放案例", exact=True),
-                    ),
-                ):
-                    box = locator.bounding_box()
-                    visible_before_viewport.append(
-                        {
-                            "text": text,
-                            "visible": box is not None
-                            and box["width"] > 0
-                            and box["height"] > 0
-                            and box["y"] >= 0
-                            and box["y"] + box["height"] <= 768,
-                        }
-                    )
-                screenshot = _capture_failure_screenshot(page)
-                metrics = page.evaluate(
-                    """() => ({
-                        regions: [...document.querySelectorAll('.region')].map((element) => {
-                            const box = element.getBoundingClientRect();
-                            return { width: box.width, y: box.y };
-                        }),
-                        scrollWidth: document.documentElement.scrollWidth,
-                        clientWidth: document.documentElement.clientWidth,
-                    })"""
-                )
-            finally:
-                browser.close()
-        if screenshot is not None:
-            assert screenshot.is_file()
-        assert len(metrics["regions"]) == 3
-        assert all(
-            item["width"] >= minimum
-            for item, minimum in zip(metrics["regions"], (280, 360, 440), strict=True)
-        )
-        assert all(item["y"] < 768 for item in metrics["regions"])
-        assert visible_before_viewport == [
-            {"text": "输入与抽取", "visible": True},
-            {"text": "诊断与证据", "visible": True},
-            {"text": "三模态结果", "visible": True},
-            {"text": "固定回放案例", "visible": True},
-            {"text": "加载回放案例", "visible": True},
-        ]
-        assert metrics["scrollWidth"] == metrics["clientWidth"]
-    finally:
-        _stop_loopback_server(process, port)
+            screenshot = _capture_failure_screenshot(page)
+            metrics = page.evaluate(
+                """() => ({
+                    regions: [...document.querySelectorAll('.region')].map((element) => {
+                        const box = element.getBoundingClientRect();
+                        return { width: box.width, y: box.y };
+                    }),
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                })"""
+            )
+        finally:
+            browser.close()
+    if screenshot is not None:
+        assert screenshot.is_file()
+    assert len(metrics["regions"]) == 3
+    assert all(
+        item["width"] >= minimum
+        for item, minimum in zip(metrics["regions"], (280, 360, 440), strict=True)
+    )
+    assert all(item["y"] < 768 for item in metrics["regions"])
+    assert visible_before_viewport == [
+        {"text": "输入与抽取", "visible": True},
+        {"text": "诊断与证据", "visible": True},
+        {"text": "三模态结果", "visible": True},
+        {"text": "固定回放案例", "visible": True},
+        {"text": "加载回放案例", "visible": True},
+    ]
+    assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
-def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1024px() -> None:
+def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1024px(
+    browser_base_url: str,
+) -> None:
     """The tablet breakpoint keeps inputs/evidence together and spans results below."""
 
-    port = _reserve_loopback_port()
-    process = _start_loopback_server(port)
-    try:
-        base_url = _wait_for_config(port, process)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel="msedge", headless=True)
-            try:
-                page = browser.new_page(viewport={"width": 1024, "height": 768})
-                page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
-                page.locator(".gradio-container").wait_for(timeout=30_000)
-                for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
-                    page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-                page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
-                page.get_by_role("button", name="加载回放案例", exact=True).wait_for(
-                    timeout=30_000
-                )
-                metrics = page.evaluate(
-                    """() => ({
-                        regions: [...document.querySelectorAll('.region')].map((element) => {
-                            const box = element.getBoundingClientRect();
-                            return { x: box.x, y: box.y, width: box.width, height: box.height };
-                        }),
-                        scrollWidth: document.documentElement.scrollWidth,
-                        clientWidth: document.documentElement.clientWidth,
-                    })"""
-                )
-            finally:
-                browser.close()
-        assert len(metrics["regions"]) == 3
-        input_region, evidence_region, results_region = metrics["regions"]
-        assert abs(input_region["y"] - evidence_region["y"]) <= 1
-        assert input_region["x"] < evidence_region["x"]
-        assert results_region["y"] > input_region["y"]
-        assert results_region["y"] > evidence_region["y"]
-        assert abs(results_region["x"] - input_region["x"]) <= 1
-        assert abs(
-            (results_region["x"] + results_region["width"])
-            - (evidence_region["x"] + evidence_region["width"])
-        ) <= 1
-        assert metrics["scrollWidth"] == metrics["clientWidth"]
-    finally:
-        _stop_loopback_server(process, port)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1024, "height": 768})
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+                page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
+            page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
+            page.get_by_role("button", name="加载回放案例", exact=True).wait_for(timeout=30_000)
+            metrics = page.evaluate(
+                """() => ({
+                    regions: [...document.querySelectorAll('.region')].map((element) => {
+                        const box = element.getBoundingClientRect();
+                        return { x: box.x, y: box.y, width: box.width, height: box.height };
+                    }),
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                })"""
+            )
+        finally:
+            browser.close()
+    assert len(metrics["regions"]) == 3
+    input_region, evidence_region, results_region = metrics["regions"]
+    assert abs(input_region["y"] - evidence_region["y"]) <= 1
+    assert input_region["x"] < evidence_region["x"]
+    assert results_region["y"] > input_region["y"]
+    assert results_region["y"] > evidence_region["y"]
+    assert abs(results_region["x"] - input_region["x"]) <= 1
+    assert abs(
+        (results_region["x"] + results_region["width"])
+        - (evidence_region["x"] + evidence_region["width"])
+    ) <= 1
+    assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
-def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_at_768px() -> None:
+def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_at_768px(
+    browser_base_url: str,
+) -> None:
     """The mobile breakpoint stacks the ordered regions without hiding replay controls."""
 
-    port = _reserve_loopback_port()
-    process = _start_loopback_server(port)
-    try:
-        base_url = _wait_for_config(port, process)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel="msedge", headless=True)
-            try:
-                page = browser.new_page(viewport={"width": 768, "height": 1024})
-                page.goto(base_url, wait_until="domcontentloaded", timeout=30_000)
-                page.locator(".gradio-container").wait_for(timeout=30_000)
-                for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
-                    page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-                replay_label = page.get_by_text("固定回放案例", exact=True)
-                replay_label.wait_for(timeout=30_000)
-                replay_button = page.get_by_role("button", name="加载回放案例", exact=True)
-                replay_button.wait_for(timeout=30_000)
-                replay_boxes = [replay_label.bounding_box(), replay_button.bounding_box()]
-                metrics = page.evaluate(
-                    """() => ({
-                        regions: [...document.querySelectorAll('.region')].map((element) => {
-                            const box = element.getBoundingClientRect();
-                            return { x: box.x, y: box.y, width: box.width, height: box.height };
-                        }),
-                        scrollWidth: document.documentElement.scrollWidth,
-                        clientWidth: document.documentElement.clientWidth,
-                    })"""
-                )
-            finally:
-                browser.close()
-        assert len(metrics["regions"]) == 3
-        input_region, evidence_region, results_region = metrics["regions"]
-        assert abs(input_region["x"] - evidence_region["x"]) <= 1
-        assert abs(evidence_region["x"] - results_region["x"]) <= 1
-        assert input_region["y"] < evidence_region["y"] < results_region["y"]
-        assert all(
-            box is not None
-            and box["width"] > 0
-            and box["height"] > 0
-            and box["y"] >= 0
-            and box["y"] + box["height"] <= 1024
-            for box in replay_boxes
-        )
-        assert metrics["scrollWidth"] == metrics["clientWidth"]
-    finally:
-        _stop_loopback_server(process, port)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 768, "height": 1024})
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+                page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
+            replay_label = page.get_by_text("固定回放案例", exact=True)
+            replay_label.wait_for(timeout=30_000)
+            replay_button = page.get_by_role("button", name="加载回放案例", exact=True)
+            replay_button.wait_for(timeout=30_000)
+            replay_boxes = [replay_label.bounding_box(), replay_button.bounding_box()]
+            metrics = page.evaluate(
+                """() => ({
+                    regions: [...document.querySelectorAll('.region')].map((element) => {
+                        const box = element.getBoundingClientRect();
+                        return { x: box.x, y: box.y, width: box.width, height: box.height };
+                    }),
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                })"""
+            )
+        finally:
+            browser.close()
+    assert len(metrics["regions"]) == 3
+    input_region, evidence_region, results_region = metrics["regions"]
+    assert abs(input_region["x"] - evidence_region["x"]) <= 1
+    assert abs(evidence_region["x"] - results_region["x"]) <= 1
+    assert input_region["y"] < evidence_region["y"] < results_region["y"]
+    assert all(
+        box is not None
+        and box["width"] > 0
+        and box["height"] > 0
+        and box["y"] >= 0
+        and box["y"] + box["height"] <= 1024
+        for box in replay_boxes
+    )
+    assert metrics["scrollWidth"] == metrics["clientWidth"]
