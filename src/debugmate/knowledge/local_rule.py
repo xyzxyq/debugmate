@@ -128,7 +128,13 @@ def _require_exact_keys(value: dict[str, Any], expected: set[str], *, label: str
 
 
 def _require_lexically_relative(relative: Path, *, label: str) -> None:
-    if relative.is_absolute() or ".." in relative.parts:
+    if (
+        relative.anchor
+        or relative.root
+        or relative.drive
+        or relative.is_absolute()
+        or ".." in relative.parts
+    ):
         raise LocalRuleSnapshotError(f"{label} path escapes the local-rule snapshot")
 
 

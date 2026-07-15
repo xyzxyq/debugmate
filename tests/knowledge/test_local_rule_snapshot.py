@@ -176,16 +176,19 @@ def test_local_rule_loader_rejects_any_untracked_tree_content(
         load_local_rule_snapshot(root)
 
 
-@pytest.mark.parametrize("escape_kind", ["absolute", "parent"])
+@pytest.mark.parametrize(
+    "escape_kind", ["absolute", "parent", "rooted_without_drive"]
+)
 def test_payload_escape_is_rejected_before_any_escape_metadata_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, escape_kind: str
 ) -> None:
     root = _copy_valid_snapshot_tree(tmp_path)
-    payload_file = (
-        str((tmp_path / "outside.json").resolve())
-        if escape_kind == "absolute"
-        else "../outside.json"
-    )
+    if escape_kind == "absolute":
+        payload_file = str((tmp_path / "outside.json").resolve())
+    elif escape_kind == "rooted_without_drive":
+        payload_file = r"\outside.json"
+    else:
+        payload_file = "../outside.json"
     _rewrite_manifest(root, payload_file=payload_file)
     probed: list[Path] = []
     original_is_link = local_rule._is_link
