@@ -138,13 +138,55 @@ def _confined_path(root: Path, relative: Path, *, label: str) -> Path:
     return candidate
 
 
+def _is_link(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or (is_junction is not None and is_junction())
+
+
+def _reject_linked_components(root: Path, relative: Path, *, label: str) -> None:
+    candidate = root
+    for part in relative.parts:
+        candidate /= part
+        try:
+            if _is_link(candidate):
+                raise LocalRuleSnapshotError(
+                    f"{label} path must not contain a symlink or junction"
+                )
+        except OSError as error:
+            raise LocalRuleSnapshotError(f"unable to inspect {label} path") from error
+
+
+def _require_exact_snapshot_tree(
+    snapshot_dir: Path, *, manifest_path: Path, payload_path: Path
+) -> None:
+    try:
+        entries = list(snapshot_dir.rglob("*"))
+        linked = [entry for entry in entries if _is_link(entry)]
+    except OSError as error:
+        raise LocalRuleSnapshotError("unable to audit local-rule snapshot tree") from error
+    if linked:
+        names = sorted(entry.relative_to(snapshot_dir).as_posix() for entry in linked)
+        raise LocalRuleSnapshotError(
+            f"local-rule snapshot tree contains symlink or junction: {names}"
+        )
+    allowed = {manifest_path, payload_path}
+    if untracked := [entry for entry in entries if entry not in allowed]:
+        names = sorted(entry.relative_to(snapshot_dir).as_posix() for entry in untracked)
+        raise LocalRuleSnapshotError(f"untracked local-rule snapshot content: {names}")
+
+
 def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
     """Load the one committed local-rule snapshot without network access."""
 
     try:
+        if _is_link(project_root):
+            raise LocalRuleSnapshotError("project root must not be a symlink or junction")
         root = project_root.resolve()
+        _reject_linked_components(root, SNAPSHOT_RELATIVE_PATH, label="snapshot")
         snapshot_dir = (root / SNAPSHOT_RELATIVE_PATH).resolve()
         snapshot_dir.relative_to(root)
+    except LocalRuleSnapshotError:
+        raise
     except (OSError, RuntimeError, ValueError) as error:
         raise LocalRuleSnapshotError(
             "local-rule snapshot directory escapes project root"
@@ -152,6 +194,7 @@ def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
     if not snapshot_dir.is_dir():
         raise LocalRuleSnapshotError("local-rule snapshot directory is missing")
 
+    _reject_linked_components(snapshot_dir, Path(MANIFEST_NAME), label="manifest")
     manifest_path = _confined_path(snapshot_dir, Path(MANIFEST_NAME), label="manifest")
     raw_manifest = _load_json_object(manifest_path, label="manifest")
     _require_exact_keys(
@@ -168,19 +211,11 @@ def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
     payload_file = raw_files[0].get("file")
     if not isinstance(payload_file, str):
         raise LocalRuleSnapshotError("manifest payload file must be text")
+    _reject_linked_components(snapshot_dir, Path(payload_file), label="payload")
     payload_path = _confined_path(snapshot_dir, Path(payload_file), label="payload")
-
-    unresolved_payload = snapshot_dir / payload_file
-    if unresolved_payload.is_symlink():
-        raise LocalRuleSnapshotError("local-rule payload must not be a symlink")
-    try:
-        json_paths = list(snapshot_dir.glob("*.json"))
-    except OSError as error:
-        raise LocalRuleSnapshotError("unable to enumerate local-rule JSON files") from error
-    tracked_names = {MANIFEST_NAME, Path(payload_file).name}
-    if untracked := [path for path in json_paths if path.name not in tracked_names]:
-        names = sorted(path.name for path in untracked)
-        raise LocalRuleSnapshotError(f"untracked local-rule JSON files: {names}")
+    _require_exact_snapshot_tree(
+        snapshot_dir, manifest_path=manifest_path, payload_path=payload_path
+    )
     if not payload_path.is_file():
         raise LocalRuleSnapshotError("local-rule payload is missing")
 
@@ -191,6 +226,10 @@ def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
         raise LocalRuleSnapshotError("unable to read local-rule payload for sha256") from error
     if actual_sha256 != expected_sha256:
         raise LocalRuleSnapshotError("local-rule payload sha256 mismatch")
+    if raw_manifest.get("knowledge_build_id") != actual_sha256:
+        raise LocalRuleSnapshotError(
+            "manifest knowledge_build_id must equal the payload sha256"
+        )
 
     raw_payload = _load_json_object(payload_path, label="payload")
     _require_exact_keys(

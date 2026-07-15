@@ -51,9 +51,11 @@ def _hit(**updates: object) -> RetrievalHit:
     return RetrievalHit.model_validate(values, strict=True)
 
 
-def _trace(*, hits: list[RetrievalHit] | None = None) -> RetrievalTrace:
+def _trace(
+    *, case_id: str = CASE_ID, hits: list[RetrievalHit] | None = None
+) -> RetrievalTrace:
     return RetrievalTrace(
-        case_id=CASE_ID,
+        case_id=case_id,
         query_sha256="a" * 64,
         knowledge_build_id=BUILD_ID,
         retrieved_at_utc=datetime(2026, 7, 12, 9, 0, tzinfo=UTC),
@@ -82,6 +84,25 @@ def test_valid_trace_binds_deterministic_summary_only_anchor() -> None:
     assert "raw_chunk" not in payload
     assert "provider_body" not in payload
     assert "model_reasoning" not in payload
+
+
+def test_evidence_identity_is_bound_to_the_fresh_case_id() -> None:
+    other_case_id = "case_66666666666666666666666666666666"
+
+    first = bind_retrieval_evidence(
+        _trace(),
+        case_id=CASE_ID,
+        expected_build_id=BUILD_ID,
+        build_manifest=_manifest(),
+    )
+    second = bind_retrieval_evidence(
+        _trace(case_id=other_case_id),
+        case_id=other_case_id,
+        expected_build_id=BUILD_ID,
+        build_manifest=_manifest(),
+    )
+
+    assert first[0].evidence_id != second[0].evidence_id
 
 
 @pytest.mark.parametrize(

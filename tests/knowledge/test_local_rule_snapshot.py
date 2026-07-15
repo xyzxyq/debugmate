@@ -101,6 +101,78 @@ def test_local_rule_loader_rejects_missing_or_tampered_payload(tmp_path: Path) -
         load_local_rule_snapshot(root)
 
 
+def test_local_rule_loader_binds_build_id_to_actual_payload_sha256(tmp_path: Path) -> None:
+    root = _copy_valid_snapshot_tree(tmp_path)
+    manifest = json.loads(_manifest_path(root).read_text(encoding="utf-8"))
+    manifest["knowledge_build_id"] = "f" * 64
+    _write_json(_manifest_path(root), manifest)
+
+    with pytest.raises(LocalRuleSnapshotError, match="knowledge_build_id|sha256"):
+        load_local_rule_snapshot(root)
+
+
+def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError:
+        pytest.skip("symlinks are unavailable for this Windows account")
+
+
+@pytest.mark.parametrize("component", ["knowledge", "snapshots", "local-rule"])
+def test_local_rule_loader_rejects_symlinked_snapshot_path_component(
+    tmp_path: Path, component: str
+) -> None:
+    root = tmp_path / component / "project"
+    root.mkdir(parents=True)
+    knowledge = root / "knowledge"
+    snapshots = knowledge / "snapshots"
+    snapshot = snapshots / "local-rule"
+    if component == "knowledge":
+        target = root / "real-knowledge"
+        shutil.copytree(SNAPSHOT_RELATIVE_PATH, target / "snapshots/local-rule")
+        _symlink_or_skip(knowledge, target, target_is_directory=True)
+    elif component == "snapshots":
+        knowledge.mkdir()
+        target = root / "real-snapshots"
+        shutil.copytree(SNAPSHOT_RELATIVE_PATH, target / "local-rule")
+        _symlink_or_skip(snapshots, target, target_is_directory=True)
+    else:
+        target = root / "real-local-rule"
+        shutil.copytree(SNAPSHOT_RELATIVE_PATH, target)
+        snapshots.mkdir(parents=True)
+        _symlink_or_skip(snapshot, target, target_is_directory=True)
+
+    with pytest.raises(LocalRuleSnapshotError, match="symlink"):
+        load_local_rule_snapshot(root)
+
+
+@pytest.mark.parametrize("name", ["manifest.json", "module-not-found.json"])
+def test_local_rule_loader_rejects_symlinked_snapshot_file(
+    tmp_path: Path, name: str
+) -> None:
+    root = _copy_valid_snapshot_tree(tmp_path)
+    path = _snapshot_dir(root) / name
+    target = _snapshot_dir(root) / f"{name}.data"
+    path.replace(target)
+    _symlink_or_skip(path, target, target_is_directory=False)
+
+    with pytest.raises(LocalRuleSnapshotError, match="symlink"):
+        load_local_rule_snapshot(root)
+
+
+@pytest.mark.parametrize("relative", [Path("nested/untracked.json"), Path("extra.txt")])
+def test_local_rule_loader_rejects_any_untracked_tree_content(
+    tmp_path: Path, relative: Path
+) -> None:
+    root = _copy_valid_snapshot_tree(tmp_path)
+    untracked = _snapshot_dir(root) / relative
+    untracked.parent.mkdir(parents=True, exist_ok=True)
+    untracked.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(LocalRuleSnapshotError, match="untracked"):
+        load_local_rule_snapshot(root)
+
+
 def test_local_rule_loader_rejects_escape_extra_or_nonofficial_source(tmp_path: Path) -> None:
     root = _copy_valid_snapshot_tree(tmp_path)
     _rewrite_manifest(root, payload_file="../tests/diagnosis.json")

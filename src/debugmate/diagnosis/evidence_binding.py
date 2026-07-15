@@ -22,10 +22,13 @@ def _strict_trace(value: object) -> RetrievalTrace:
     return RetrievalTrace.model_validate_json(json.dumps(value), strict=True)
 
 
-def _evidence_id(*, knowledge_build_id: str, chunk_id: str, source_id: str, locator: str) -> str:
+def _evidence_id(
+    *, case_id: str, knowledge_build_id: str, chunk_id: str, source_id: str, locator: str
+) -> str:
     digest = sha256_bytes(
         canonical_json_bytes(
             {
+                "case_id": case_id,
                 "knowledge_build_id": knowledge_build_id,
                 "chunk_id": chunk_id,
                 "source_id": source_id,
@@ -55,6 +58,7 @@ def bind_retrieval_evidence(
     anchors = [
         EvidenceAnchor(
             evidence_id=_evidence_id(
+                case_id=strict_trace.case_id,
                 knowledge_build_id=validated.knowledge_build_id,
                 chunk_id=hit.chunk_id,
                 source_id=hit.source_id,
