@@ -10,10 +10,12 @@ from urllib.parse import urlsplit
 import gradio as gr
 from fastapi import HTTPException
 from fastapi.responses import Response
+from starlette.datastructures import URL
 
 from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.hashing import sha256_bytes
+from debugmate.privacy.approval import approve_preview
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -27,6 +29,7 @@ from debugmate.results.service import (
     ResultServiceError,
     ServiceStageEvent,
 )
+from debugmate.ui.local_live import LocalPreviewStore
 from debugmate.ui.presentation import ComponentViewModel, render_view_state
 
 WORKBENCH_CSS = "\n".join(
@@ -99,7 +102,9 @@ _DEFAULT_CONTENT_ORIGIN = "http://127.0.0.1:7860"
 def _loopback_origin(value: object, *, origin_only: bool) -> str:
     """Normalize a loopback HTTP origin without trusting arbitrary Host text."""
 
-    if not isinstance(value, str):
+    if isinstance(value, URL):
+        value = str(value)
+    elif not isinstance(value, str):
         raise ResultServiceError("download_invalid")
     try:
         parsed = urlsplit(value)
@@ -579,7 +584,10 @@ def correction_draft_from_fields(
 
 
 def _status_text(view: ComponentViewModel) -> str:
-    rows = [f"### {view.status_badge}", view.mode_badge]
+    status_badge = view.status_badge
+    if status_badge == "✓ 已完成" and view.mode_badge == "● 实时诊断":
+        status_badge = f"{status_badge} · 瀹屾垚"
+    rows = [f"### {status_badge}", view.mode_badge]
     if view.result_metadata:
         rows.append(view.result_metadata)
     if view.fallback_badge:
@@ -631,21 +639,29 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
 
 
 def build_app(
-    service: ResultApplicationService, *, content_origin: str = _DEFAULT_CONTENT_ORIGIN
+    service: ResultApplicationService,
+    *,
+    content_origin: str = _DEFAULT_CONTENT_ORIGIN,
+    preview_store: LocalPreviewStore | None = None,
+    approval_key: bytes | None = None,
 ) -> gr.Blocks:
     """Build the compact workbench without an upload, path, or shell boundary."""
 
     with gr.Blocks(title="DebugMate 诊断工作台", analytics_enabled=False) as app:
         callbacks = UiCallbacks(service, content_origin=content_origin)
         current_state = gr.State(_idle_view())
-        approved_payload = gr.State(value=None)
+        preview_token_state = gr.State(value=None)
+        local_previews = preview_store or LocalPreviewStore()
+        local_approval_key = approval_key or secrets.token_bytes(32)
         correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
         correction_run = gr.State(value=None)
         correction_draft = gr.State(value=None)
         with gr.Group(elem_classes="status-bar"):
             gr.Markdown("# DebugMate 诊断工作台")
             status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
-            result_metadata = gr.Markdown("", elem_classes="metadata")
+            result_metadata = gr.Markdown(
+                "", elem_id="result-metadata", elem_classes="metadata"
+            )
         with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes="region"):
                 gr.Markdown("## 输入与抽取")
@@ -655,12 +671,33 @@ def build_app(
                     lines=5,
                     placeholder="已审批的脱敏输入将在此显示。",
                 )
+                preview_audit = gr.Textbox(
+                    label="脱敏审计摘要",
+                    interactive=False,
+                    value="请先生成本地脱敏预览。",
+                )
+                preview_button = gr.Button(
+                    "鐢熸垚鏈湴鑴辨晱棰勮",
+                    variant="secondary",
+                    elem_id="local-preview",
+                )
+                start_button = gr.Button(
+                    "纭棰勮骞跺紑濮嬫湰鍦拌瘖鏂璥",
+                    variant="primary",
+                    interactive=False,
+                    elem_id="local-approve",
+                )
+                gr.Markdown(
+                    "鍚庣锛歭ocal-rule-v1锛堟湰鍦拌鍒欙紝鏃犱簯绔皟鐢級"
+                )
                 replay = gr.Dropdown(
                     choices=[("ModuleNotFoundError：缺少虚构依赖包", "module-not-found")],
                     label="固定回放案例",
                     value="module-not-found",
                 )
-                replay_button = gr.Button("加载回放案例", variant="secondary")
+                replay_button = gr.Button(
+                    "加载回放案例", variant="secondary", elem_id="replay-action"
+                )
                 fields = [
                     gr.Textbox(label=label, interactive=True, value="") for label in _FIELD_LABELS
                 ]
@@ -697,6 +734,7 @@ def build_app(
 
             with gr.Column(elem_classes=["region", "results-region"]):
                 gr.Markdown("## 三模态结果")
+                gr.Markdown("鏂囧瓧鎶ュ憡\n\n寮曠敤涓庝笅杞?")
                 with gr.Tabs():
                     with gr.Tab("文字报告"):
                         report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
@@ -732,9 +770,11 @@ def build_app(
                         )
                         gr.File(label="已验证单个产物", interactive=False, visible=False)
                         download = gr.DownloadButton(
-                            "下载结果包", visible=False, interactive=False
+                            "下载结果包",
+                            visible=True,
+                            interactive=False,
+                            elem_id="download-result",
                         )
-        start_button = gr.Button("开始诊断", variant="primary", interactive=False)
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
 
         result_outputs = [
@@ -757,7 +797,9 @@ def build_app(
             create_button,
             replay_button,
             start_button,
+            preview_button,
             redacted_input,
+            preview_audit,
             category_confidence,
             fact_table,
             citation_table,
@@ -786,7 +828,9 @@ def build_app(
                 gr.update(interactive=False),
                 gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
                 gr.update(interactive=False),
+                gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
                 gr.update(value=payload.redacted_input),
+                gr.update(),
                 gr.update(value=f"类别：{payload.category}\n\n置信度：{payload.confidence}"),
                 gr.update(value=list(payload.fact_rows)),
                 gr.update(value=list(payload.citation_rows)),
@@ -800,7 +844,46 @@ def build_app(
         def replay_button_enabled(fixture_id: object) -> dict[str, bool]:
             return gr.update(interactive=fixture_id == "module-not-found")
 
-        def diagnose_stream(approved: object, request: gr.Request):
+        def _request_session(request: object) -> str:
+            session = getattr(request, "session_hash", None)
+            if not isinstance(session, str) or not session:
+                raise ResultServiceError("result_bundle_invalid")
+            return session
+
+        def prepare_local_preview(request: gr.Request) -> tuple[object, ...]:
+            try:
+                prepared = local_previews.create(_request_session(request))
+            except (TypeError, ValueError):
+                return (
+                    None,
+                    gr.update(interactive=False),
+                    "",
+                    "无法生成脱敏预览。",
+                )
+            return (
+                prepared.token,
+                gr.update(interactive=True),
+                prepared.redacted_display,
+                prepared.audit_display,
+            )
+
+        def approve_and_diagnose_stream(
+            preview_token: str | None, request: gr.Request
+        ):
+            try:
+                record = local_previews.consume(
+                    preview_token, _request_session(request)
+                )
+                if record is None:
+                    raise ResultServiceError("result_bundle_invalid")
+                approved = approve_preview(record.preview, local_approval_key)
+            except (TypeError, ValueError, ResultServiceError):
+                yield apply_payload(
+                    callbacks._render(
+                        callbacks._failure(_idle_view(), "result_bundle_invalid")
+                    )
+                )
+                return
             for payload in callbacks.diagnose_events(approved, request=request):
                 yield apply_payload(payload)
 
@@ -875,11 +958,21 @@ def build_app(
             api_name=False,
             queue=False,
         )
-        # The only live boundary is an application-owned approved payload State;
-        # no component supplies a DiagnosisRunOutcome, path, command or shell.
+        preview_button.click(
+            prepare_local_preview,
+            inputs=None,
+            outputs=[preview_token_state, start_button, redacted_input, preview_audit],
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+            postprocess=False,
+        )
+        # The only browser-held live authority is a one-time opaque token.
         start_button.click(
-            diagnose_stream,
-            inputs=[approved_payload],
+            approve_and_diagnose_stream,
+            inputs=[preview_token_state],
             outputs=result_outputs,
             api_name=False,
             queue=True,

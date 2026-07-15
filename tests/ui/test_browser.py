@@ -457,6 +457,61 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
+def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1366, "height": 768})
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            preview = page.locator("#local-preview").first
+            approve = page.locator("#local-approve").first
+            preview.wait_for(timeout=30_000)
+            assert approve.is_disabled()
+            preview.click()
+            deadline = time.monotonic() + 30
+            while approve.is_disabled() and time.monotonic() < deadline:
+                page.wait_for_timeout(100)
+            assert approve.is_enabled()
+            approve.click()
+            status = page.locator("#diagnostic-status").first
+            deadline = time.monotonic() + 90
+            status_text = ""
+            while time.monotonic() < deadline:
+                status_text = status.inner_text()
+                if "瀹屾垚" in status_text:
+                    break
+                page.wait_for_timeout(250)
+            page.get_by_role("tab", name="引用与下载", exact=True).click()
+            download_button = page.locator("text=下载完整证据包").first
+            body_text = page.locator("body").inner_text()
+            result_metadata = page.locator("#result-metadata").first.inner_text()
+            report_visible = page.get_by_text("鏂囧瓧鎶ュ憡", exact=True).is_visible()
+            citations_visible = page.get_by_text(
+                "寮曠敤涓庝笅杞?", exact=True
+            ).is_visible()
+            assert download_button.count() == 1, body_text
+            download_enabled = download_button.is_enabled(timeout=1_000)
+            metrics = page.evaluate(
+                """() => ({
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                })"""
+            )
+        finally:
+            browser.close()
+
+    assert "瀹屾垚" in status_text or "已完成" in status_text
+    assert "鍚庣锛歭ocal-rule-v1锛堟湰鍦拌鍒欙紝鏃犱簯绔皟鐢級" in body_text
+    assert "鍥炴斁" not in result_metadata
+    assert report_visible
+    assert citations_visible
+    assert download_enabled
+    assert metrics["scrollWidth"] == metrics["clientWidth"]
+
+
 def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1024px(
     browser_base_url: str,
 ) -> None:

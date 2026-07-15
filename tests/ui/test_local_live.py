@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import json
 import socket
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,52 @@ from debugmate.privacy.models import InputEnvelope
 from debugmate.privacy.text_redactor import redact_input
 from debugmate.results.contracts import ResultMode, ResultStatus
 from debugmate.ui import serve as serve_module
+from debugmate.ui.local_live import LocalPreviewStore
 
 _KEY = b"local-live-approval-key-is-32bytes"
+
+
+def test_preview_store_atomically_consumes_only_same_session_token() -> None:
+    now = datetime(2026, 7, 15, tzinfo=UTC)
+    store = LocalPreviewStore(clock=lambda: now)
+    prepared = store.create("session-a")
+
+    record = store.consume(prepared.token, "session-a")
+
+    assert record is not None
+    assert record.request_session == "session-a"
+    assert store.consume(prepared.token, "session-a") is None
+
+
+def test_preview_store_rejects_expired_cross_session_and_tampered_tokens() -> None:
+    now = datetime(2026, 7, 15, tzinfo=UTC)
+    current = [now]
+    store = LocalPreviewStore(
+        ttl=timedelta(seconds=1), max_entries=2, clock=lambda: current[0]
+    )
+    cross_session = store.create("session-a")
+    tampered = store.create("session-a")
+
+    assert store.consume(cross_session.token, "session-b") is None
+    assert store.consume(tampered.token + "0", "session-a") is None
+    current[0] = now + timedelta(seconds=2)
+    assert store.consume(cross_session.token, "session-a") is None
+    assert store.consume(tampered.token, "session-a") is None
+
+
+def test_preview_store_is_bounded_and_issues_only_opaque_redacted_presentations() -> None:
+    store = LocalPreviewStore(max_entries=2)
+    first = store.create("session-a")
+    second = store.create("session-a")
+    third = store.create("session-a")
+
+    assert store.consume(first.token, "session-a") is None
+    assert store.consume(second.token, "session-a") is not None
+    assert store.consume(third.token, "session-a") is not None
+    assert "ModuleNotFoundError" in third.redacted_display
+    assert third.audit_display
+    assert "PreviewBundle" not in repr(third)
+    assert "approval_signature" not in repr(third)
 
 
 def _install_project_read_guard(

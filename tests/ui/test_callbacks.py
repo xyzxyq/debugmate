@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.datastructures import URL
 
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -12,13 +14,25 @@ from debugmate.results.contracts import (
     ResultStatus,
     ResultViewState,
 )
+from debugmate.results.service import ResultServiceError
 from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui.app import (
     UiCallbacks,
     _component_updates,
+    _loopback_origin,
     correction_draft_from_fields,
     mount_content_endpoint,
 )
+
+
+def test_loopback_origin_accepts_only_string_or_real_starlette_url() -> None:
+    expected = "http://127.0.0.1:7868"
+
+    assert _loopback_origin(
+        URL("http://127.0.0.1:7868/gradio_api/queue/join"), origin_only=False
+    ) == expected
+    with pytest.raises(ResultServiceError):
+        _loopback_origin(object(), origin_only=False)
 
 
 def _state() -> ResultViewState:

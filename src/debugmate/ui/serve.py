@@ -152,13 +152,15 @@ def _local_composer(
     return compose
 
 
-def _local_service(*, runtime_root: Path | None = None) -> ResultApplicationService:
+def _local_service(
+    *, runtime_root: Path | None = None, approval_key: bytes | None = None
+) -> ResultApplicationService:
     project_root = Path(__file__).resolve().parents[3]
     runtime_root = runtime_root or project_root / ".debugmate-runtime"
     runtime_root = Path(runtime_root).absolute()
     runtime_root.mkdir(exist_ok=True)
     results_root = TrustedResultRoot.for_testing(runtime_root / "results")
-    approval_key = secrets.token_bytes(32)
+    approval_key = approval_key or secrets.token_bytes(32)
     snapshot = load_local_rule_snapshot(project_root)
     workflow = DiagnosisWorkflow(
         extraction_provider=ProductionExtractionProvider(
@@ -190,8 +192,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.host != "127.0.0.1":
         parser.error("host must be literal 127.0.0.1")
+    approval_key = secrets.token_bytes(32)
     app = build_app(
-        _local_service(), content_origin=f"http://{args.host}:{args.port}"
+        _local_service(approval_key=approval_key),
+        content_origin=f"http://{args.host}:{args.port}",
+        approval_key=approval_key,
     )
     app.launch(
         server_name=args.host,

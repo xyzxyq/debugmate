@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from gradio.state_holder import SessionState
 
+from debugmate.privacy.models import ApprovedRedactedInput
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ArtifactIdentity,
@@ -74,6 +75,22 @@ class _Service:
     def load_replay(self, fixture_id: str) -> ResultViewState:
         assert fixture_id == "module-not-found"
         return _completed_state()
+
+    def __init__(self) -> None:
+        self.diagnose_calls: list[ApprovedRedactedInput] = []
+
+    def diagnose_and_compose_events(self, approved: ApprovedRedactedInput):
+        assert isinstance(approved, ApprovedRedactedInput)
+        self.diagnose_calls.append(approved)
+        yield ServiceStageEvent(
+            state=ResultViewState(
+                mode=ResultMode.LIVE,
+                status=ResultStatus.RUNNING,
+                availability=ArtifactAvailability(),
+                current_stage="source",
+            )
+        )
+        yield ServiceStageEvent(state=_completed_state())
 
     def load_replay_events(self, fixture_id: str):
         assert fixture_id == "module-not-found"
@@ -165,6 +182,166 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "overflow-x: hidden" not in app.css
+
+
+class _Request:
+    def __init__(self, session_hash: str) -> None:
+        self.session_hash = session_hash
+        self.url = "http://127.0.0.1:7860/queue/join"
+
+
+def _callback(app, name: str):
+    return next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == name
+    )
+
+
+def test_local_live_requires_preview_then_same_session_approval() -> None:
+    service = _Service()
+    app = build_app(service)
+    prepare = _callback(app, "prepare_local_preview")
+    approve = _callback(app, "approve_and_diagnose_stream")
+    request = _Request("session-a")
+
+    prepared = prepare(request)
+
+    assert len(prepared) == 4
+    token, approval_update, redacted_display, audit_display = prepared
+    assert isinstance(token, str) and len(token) >= 32
+    assert approval_update["interactive"] is True
+    assert isinstance(redacted_display, str) and "ModuleNotFoundError" in redacted_display
+    assert isinstance(audit_display, str) and audit_display
+    assert service.diagnose_calls == []
+    assert "PreviewBundle" not in repr(prepared)
+    assert "approval_signature" not in repr(prepared)
+
+    frames = list(approve(token, request))
+    states = [next(item for item in frame if isinstance(item, ResultViewState)) for frame in frames]
+    assert states[0].status is ResultStatus.RUNNING
+    assert states[-1].status is ResultStatus.COMPLETED
+    assert states[-1].mode is ResultMode.LIVE
+    assert states[-1].fixture_id is None
+    assert states[-1].fixture_name is None
+    assert len(service.diagnose_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("token_transform", "session_hash"),
+    [
+        (lambda _token: None, "session-a"),
+        (lambda token: token + "copied", "session-a"),
+        (lambda token: token, "session-b"),
+    ],
+)
+def test_local_live_rejects_missing_tampered_or_cross_session_token_without_diagnosis(
+    token_transform, session_hash: str
+) -> None:
+    service = _Service()
+    app = build_app(service)
+    prepare = _callback(app, "prepare_local_preview")
+    approve = _callback(app, "approve_and_diagnose_stream")
+    token = prepare(_Request("session-a"))[0]
+
+    frames = list(approve(token_transform(token), _Request(session_hash)))
+    states = [next(item for item in frame if isinstance(item, ResultViewState)) for frame in frames]
+
+    assert len(states) == 1
+    assert states[0].status is ResultStatus.FAILED
+    assert service.diagnose_calls == []
+
+
+def test_local_live_token_is_one_time_and_every_preview_has_fresh_identity() -> None:
+    service = _Service()
+    app = build_app(service)
+    prepare = _callback(app, "prepare_local_preview")
+    approve = _callback(app, "approve_and_diagnose_stream")
+    request = _Request("session-a")
+    first_token = prepare(request)[0]
+    second_token = prepare(request)[0]
+
+    assert first_token != second_token
+    assert list(approve(first_token, request))[-1][8].status is ResultStatus.COMPLETED
+    reused = list(approve(first_token, request))
+
+    assert reused[0][8].status is ResultStatus.FAILED
+    assert len(service.diagnose_calls) == 1
+
+
+def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_input() -> None:
+    app = build_app(_Service())
+    config = app.get_config_file()
+    buttons = {
+        component["props"].get("value"): component
+        for component in config["components"]
+        if component["type"] == "button"
+    }
+    source = Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
+
+    assert "鐢熸垚鏈湴鑴辨晱棰勮" in buttons
+    assert "纭棰勮骞跺紑濮嬫湰鍦拌瘖鏂璥" in buttons
+    assert buttons["纭棰勮骞跺紑濮嬫湰鍦拌瘖鏂璥"]["props"]["interactive"] is False
+    assert any(
+        component["type"] == "markdown"
+        and component["props"].get("value")
+        == "鍚庣锛歭ocal-rule-v1锛堟湰鍦拌鍒欙紝鏃犱簯绔皟鐢級"
+        for component in config["components"]
+    )
+    assert "approved_payload = gr.State" not in source
+    assert "inputs=[approved_payload]" not in source
+    live_callback_source = source[
+        source.index("def approve_and_diagnose_stream") : source.index(
+            "def update_correction_draft"
+        )
+    ]
+    assert "load_replay" not in live_callback_source
+    assert "Dify" not in source
+    assert "EdgeTtsAdapter" not in source
+
+
+def test_local_live_events_share_the_bounded_diagnosis_queue_lane() -> None:
+    app = build_app(_Service())
+    prepare = next(
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "prepare_local_preview"
+    )
+    diagnose = next(
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "approve_and_diagnose_stream"
+    )
+
+    assert prepare.queue is True
+    assert prepare.concurrency_id == "debugmate-case"
+    assert prepare.concurrency_limit == 1
+    assert diagnose.queue is True
+    assert diagnose.concurrency_id == "debugmate-case"
+    assert diagnose.concurrency_limit == 1
+
+
+def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None:
+    config = build_app(_Service()).get_config_file()
+    elem_ids = {
+        component["props"].get("elem_id") for component in config["components"]
+    }
+
+    assert {
+        "diagnostic-status",
+        "result-metadata",
+        "local-preview",
+        "local-approve",
+        "replay-action",
+        "download-result",
+    } <= elem_ids
+    download = next(
+        component
+        for component in config["components"]
+        if component["props"].get("elem_id") == "download-result"
+    )
+    assert download["props"]["visible"] is True
+    assert download["props"]["interactive"] is False
 
 
 def test_gap_01_archive_preserves_the_original_browser_failure() -> None:
