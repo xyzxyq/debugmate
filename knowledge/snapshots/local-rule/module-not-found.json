@@ -1,0 +1,27 @@
+{
+  "rule_version": "module-not-found-v1",
+  "match": {
+    "category": "dependency_environment",
+    "exception_type": "ModuleNotFoundError"
+  },
+  "retrieval": {
+    "chunk_id": "python-exceptions:module-not-found-error",
+    "content_summary": "Python 在无法定位导入目标时会引发 ModuleNotFoundError；应先核对包是否安装在当前解释器环境中，以及导入名称与安装包名称是否一致。",
+    "source_id": "python-exceptions",
+    "source_url": "https://docs.python.org/3/library/exceptions.html",
+    "locator": "ModuleNotFoundError",
+    "relevance_score": 1.0
+  },
+  "response": {
+    "diagnosis": "当前报错属于依赖或解释器环境问题：Python 未能在当前导入路径中找到目标模块。先确认正在运行的解释器，再核对对应包是否安装在同一环境中。",
+    "commands": [
+      {
+        "command": "python -m pip show PACKAGE_NAME",
+        "platform": "platform_agnostic",
+        "impact": "只读取当前 Python 解释器环境中的包元数据，不修改环境。",
+        "expected_result": "若包已安装，将显示名称、版本和安装位置；否则会提示未找到该包。",
+        "rollback": "无需回滚；该命令不会修改环境。"
+      }
+    ]
+  }
+}

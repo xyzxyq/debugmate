@@ -1,0 +1,11 @@
+{
+  "snapshot_version": "1.0.0",
+  "backend": "local-rule-v1",
+  "knowledge_build_id": "4b9be0b50bd08a13f3ebbd8ec9b80673611383001999d5b88fbfb5f3252847c1",
+  "files": [
+    {
+      "file": "module-not-found.json",
+      "sha256": "4b9be0b50bd08a13f3ebbd8ec9b80673611383001999d5b88fbfb5f3252847c1"
+    }
+  ]
+}
