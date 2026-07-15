@@ -295,6 +295,69 @@ def test_runner_controlled_failure_cleans_server_and_restores_base_url() -> None
     assert "Captured loopback server stopped; port" in completed.stdout
 
 
+def _runner_config_readiness_results() -> dict[str, bool]:
+    runner_path = str(_RUNNER).replace("'", "''")
+    command = f"""
+$ErrorActionPreference = 'Stop'
+function Invoke-WebRequest {{
+    return [pscustomobject]@{{
+        StatusCode = $global:configPayload.status_code
+        Content = $global:configPayload.content
+    }}
+}}
+. '{runner_path}'
+$cases = [ordered]@{{
+    string = [pscustomobject]@{{ status_code = 200; content = '"ordinary string"' }}
+    wrapped_object = [pscustomobject]@{{
+        status_code = 200
+        content = (ConvertTo-Json -InputObject '{{"components":[]}}' -Compress)
+    }}
+    array = [pscustomobject]@{{ status_code = 200; content = '[]' }}
+    number = [pscustomobject]@{{ status_code = 200; content = '7' }}
+    object = [pscustomobject]@{{ status_code = 200; content = '{{"components":[]}}' }}
+    object_with_empty_key = [pscustomobject]@{{
+        status_code = 200
+        content = '{{"components":[],"":null}}'
+    }}
+    not_found = [pscustomobject]@{{ status_code = 404; content = '{{"components":[]}}' }}
+}}
+$results = [ordered]@{{}}
+foreach ($case in $cases.GetEnumerator()) {{
+    $global:configPayload = $case.Value
+    $results[$case.Key] = [bool](Test-ConfigReady -BaseUrl 'http://127.0.0.1:8000')
+}}
+$results | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_runner_config_validation_requires_a_root_object_with_components_list() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+    assert "if ($MyInvocation.InvocationName -eq '.')" in source
+    assert "return $config -match" not in source
+
+    assert _runner_config_readiness_results() == {
+        "string": False,
+        "wrapped_object": False,
+        "array": False,
+        "number": False,
+        "object": True,
+        "object_with_empty_key": True,
+        "not_found": False,
+    }
+    assert "$config -is [string]" not in source
+    assert "DeserializeObject($config)" not in source
+
+
 def test_browser_fixture_reuses_external_url_without_terminating_its_server(
     _external_config_server: str,
     monkeypatch: pytest.MonkeyPatch,

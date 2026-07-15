@@ -42,9 +42,17 @@ function Test-ConfigReady {
     )
 
     try {
-        $config = Invoke-RestMethod -Uri "$BaseUrl/config" -TimeoutSec 1
-        if ($config -is [string]) {
-            return $config -match '"components"\s*:\s*\['
+        $response = Invoke-WebRequest -Uri "$BaseUrl/config" -TimeoutSec 1 -UseBasicParsing
+        if ($response.StatusCode -ne 200) {
+            return $false
+        }
+        Add-Type -AssemblyName System.Web.Extensions
+        $config = [System.Web.Script.Serialization.JavaScriptSerializer]::new().DeserializeObject(
+            [string]$response.Content
+        )
+        if ($config -is [System.Collections.IDictionary]) {
+            return $config.Keys -contains 'components' -and `
+                $config['components'] -is [System.Collections.IList]
         }
         return $null -ne $config.PSObject.Properties['components'] -and `
             $config.components -is [System.Collections.IList]
@@ -110,6 +118,10 @@ function Stop-CapturedServer {
     if (-not $Process.WaitForExit(10000)) {
         throw "Captured server PID $ExpectedProcessId did not exit within 10 seconds."
     }
+}
+
+if ($MyInvocation.InvocationName -eq '.') {
+    return
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
