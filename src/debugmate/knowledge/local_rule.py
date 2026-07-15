@@ -127,9 +127,13 @@ def _require_exact_keys(value: dict[str, Any], expected: set[str], *, label: str
         raise LocalRuleSnapshotError(f"{label} contains missing or unknown keys")
 
 
-def _confined_path(root: Path, relative: Path, *, label: str) -> Path:
+def _require_lexically_relative(relative: Path, *, label: str) -> None:
     if relative.is_absolute() or ".." in relative.parts:
         raise LocalRuleSnapshotError(f"{label} path escapes the local-rule snapshot")
+
+
+def _confined_path(root: Path, relative: Path, *, label: str) -> Path:
+    _require_lexically_relative(relative, label=label)
     candidate = (root / relative).resolve()
     try:
         candidate.relative_to(root)
@@ -211,8 +215,10 @@ def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
     payload_file = raw_files[0].get("file")
     if not isinstance(payload_file, str):
         raise LocalRuleSnapshotError("manifest payload file must be text")
-    _reject_linked_components(snapshot_dir, Path(payload_file), label="payload")
-    payload_path = _confined_path(snapshot_dir, Path(payload_file), label="payload")
+    payload_relative = Path(payload_file)
+    _require_lexically_relative(payload_relative, label="payload")
+    _reject_linked_components(snapshot_dir, payload_relative, label="payload")
+    payload_path = _confined_path(snapshot_dir, payload_relative, label="payload")
     _require_exact_snapshot_tree(
         snapshot_dir, manifest_path=manifest_path, payload_path=payload_path
     )
