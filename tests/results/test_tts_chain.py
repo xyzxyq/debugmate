@@ -124,6 +124,37 @@ def _fake_media(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(audio_module, "canonicalize_mp3", _canonicalize)
 
 
+def test_sapi_only_chain_requires_explicit_local_only_mode() -> None:
+    sapi = FakeAdapter("sapi", ["ok"], [])
+
+    with pytest.raises(ValueError, match="^tts_chain_invalid$"):
+        TtsFallbackChain((sapi,))
+    TtsFallbackChain((sapi,), local_only=True)
+
+
+def test_local_only_flag_rejects_non_boolean_values() -> None:
+    with pytest.raises(TypeError, match="^local_only must be bool$"):
+        TtsFallbackChain((FakeAdapter("sapi", ["ok"], []),), local_only=1)
+
+
+@pytest.mark.parametrize(
+    ("backends", "local_only"),
+    [
+        (("dify", "edge_tts", "sapi"), True),
+        (("edge_tts", "sapi"), False),
+        (("dify", "sapi"), False),
+        (("sapi", "edge_tts"), True),
+    ],
+)
+def test_chain_rejects_every_other_backend_tuple(
+    backends: tuple[str, ...], local_only: bool
+) -> None:
+    adapters = tuple(FakeAdapter(backend, ["ok"], []) for backend in backends)
+
+    with pytest.raises(ValueError, match="^tts_chain_invalid$"):
+        TtsFallbackChain(adapters, local_only=local_only)
+
+
 def test_chain_requires_a_trusted_candidate_root_capability(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

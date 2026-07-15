@@ -685,7 +685,11 @@ def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
             workflow_version=outcome.workflow_version,
             prompt_version=outcome.prompt_version,
             schema_version=outcome.schema_version,
-            knowledge_version=outcome.knowledge_build_id,
+            knowledge_version=(
+                "local-rule-v1"
+                if outcome.backend == "local-rule-v1"
+                else outcome.knowledge_build_id
+            ),
             input_sha256=outcome.facts_sha256,
             run_id=outcome.run_id,
             node_states=node_states,

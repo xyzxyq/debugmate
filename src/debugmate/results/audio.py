@@ -227,10 +227,19 @@ class TtsFallbackChain:
         self,
         adapters: tuple[TtsAdapter, ...],
         *,
+        local_only: bool = False,
         probe_timeout: float = 15.0,
         max_bytes: int = 8_000_000,
     ) -> None:
-        if tuple(adapter.backend for adapter in adapters) != ("dify", "edge_tts", "sapi"):
+        if not isinstance(local_only, bool):
+            raise TypeError("local_only must be bool")
+        backends = tuple(adapter.backend for adapter in adapters)
+        valid = backends == ("sapi",) if local_only else backends == (
+            "dify",
+            "edge_tts",
+            "sapi",
+        )
+        if not valid:
             raise ValueError("tts_chain_invalid") from None
         self._adapters = adapters
         self._probe_timeout = probe_timeout

@@ -218,7 +218,12 @@ def _manifest_matches(outcome: DiagnosisRunOutcome, manifest: RunManifest) -> bo
             manifest.input_sha256 == outcome.facts_sha256,
             manifest.routing_rule_version == outcome.routing.rule_version,
             manifest.knowledge_build_id == outcome.knowledge_build_id,
-            manifest.knowledge_version == outcome.knowledge_build_id,
+            manifest.knowledge_version
+            == (
+                "local-rule-v1"
+                if outcome.backend == "local-rule-v1"
+                else outcome.knowledge_build_id
+            ),
             manifest.schema_version == outcome.schema_version,
             manifest.prompt_version == outcome.prompt_version,
             manifest.workflow_version == outcome.workflow_version,

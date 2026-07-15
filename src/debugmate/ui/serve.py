@@ -8,9 +8,17 @@ import socket
 from collections.abc import Sequence
 from pathlib import Path
 
+from debugmate.diagnosis.local_rule import LocalRuleGenerationProvider
+from debugmate.diagnosis.providers import ProductionExtractionProvider
+from debugmate.diagnosis.workflow import DiagnosisWorkflow
+from debugmate.knowledge.local_rule import (
+    LocalRuleRetrievalProvider,
+    load_local_rule_snapshot,
+)
 from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.card import CardRenderFailure, render_card
 from debugmate.results.consistency import validate_result_candidates
+from debugmate.results.contracts import ResultMode
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.outcome_store import DiagnosisOutcomeStore
 from debugmate.results.presentation import build_presentation
@@ -24,6 +32,13 @@ from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
 from debugmate.settings import DebugMateSettings
 from debugmate.ui.app import WORKBENCH_CSS, build_app
+
+
+class _NoopOcr:
+    """Text-only local workflow OCR port with no external side effects."""
+
+    def recognize(self, _path: Path) -> list[object]:
+        return []
 
 
 def _available_loopback_port(value: str) -> int:
@@ -65,20 +80,27 @@ def _local_composer(
     """Build the real Phase 4 chain used by fixed replay demonstrations."""
 
     context = prepare_generation_context(project_root=project_root)
-    settings = DebugMateSettings.from_env()
-    tts = TtsFallbackChain(
-        (
-            _optional_tts_adapter("dify", lambda: DifyTtsAdapter(settings)),
-            _optional_tts_adapter("edge_tts", lambda: EdgeTtsAdapter(timeout_seconds=5.0)),
-            _optional_tts_adapter(
-                "sapi", lambda: SapiTtsAdapter(project_root=project_root)
-            ),
-        )
-    )
     candidate_root = TrustedCandidateRoot.for_testing(runtime_root / "tts-candidates")
     card_root = runtime_root / "cards"
 
     def compose(source, *, mode, fixture_id, fixture_name, stage_callback=None):
+        if mode is ResultMode.LIVE:
+            tts = TtsFallbackChain(
+                (SapiTtsAdapter(project_root=project_root),), local_only=True
+            )
+        else:
+            settings = DebugMateSettings.from_env()
+            tts = TtsFallbackChain(
+                (
+                    _optional_tts_adapter("dify", lambda: DifyTtsAdapter(settings)),
+                    _optional_tts_adapter(
+                        "edge_tts", lambda: EdgeTtsAdapter(timeout_seconds=5.0)
+                    ),
+                    _optional_tts_adapter(
+                        "sapi", lambda: SapiTtsAdapter(project_root=project_root)
+                    ),
+                )
+            )
         presentation = build_presentation(source, context)
         if stage_callback is not None:
             stage_callback("presentation")
@@ -136,8 +158,19 @@ def _local_service(*, runtime_root: Path | None = None) -> ResultApplicationServ
     runtime_root = Path(runtime_root).absolute()
     runtime_root.mkdir(exist_ok=True)
     results_root = TrustedResultRoot.for_testing(runtime_root / "results")
+    approval_key = secrets.token_bytes(32)
+    snapshot = load_local_rule_snapshot(project_root)
+    workflow = DiagnosisWorkflow(
+        extraction_provider=ProductionExtractionProvider(
+            redacted_root=runtime_root / "redacted", ocr_backend=_NoopOcr()
+        ),
+        retrieval_provider=LocalRuleRetrievalProvider(snapshot),
+        generator=LocalRuleGenerationProvider(snapshot),
+        approval_key=approval_key,
+        redacted_root=runtime_root / "redacted",
+    )
     return ResultApplicationService(
-        workflow=None,
+        workflow=workflow,
         evidence_root=runtime_root / "evidence",
         outcome_store=DiagnosisOutcomeStore(runtime_root / "outcomes"),
         results_root=results_root,
