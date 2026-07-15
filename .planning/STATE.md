@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-13T23:53:46.851Z"
-last_activity: 2026-07-13 -- Phase 04 execution started
+stopped_at: Phase 04 Plan 08 complete; Plan 09 ready
+last_updated: "2026-07-15T10:18:43.700Z"
+last_activity: 2026-07-15 -- Phase 04 Plan 08 completed and Plan 09 prepared
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 20
-  completed_plans: 19
+  total_plans: 21
+  completed_plans: 20
   percent: 95
 ---
 
@@ -26,9 +26,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-10)
 ## Current Position
 
 Phase: 04 (multimodal-results-ui) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 04
-Last activity: 2026-07-13 -- Phase 04 execution started
+Plan: 9 of 9
+Status: Ready to execute 04-09 local-rule live VQ-01
+Last activity: 2026-07-15 -- Phase 04 Plan 08 completed and Plan 09 prepared
 
 Progress: [██████████] Phase 3 100%
 
@@ -36,7 +36,7 @@ Progress: [██████████] Phase 3 100%
 
 **Velocity:**
 
-- Total plans completed: 12
+- Total plans completed: 20
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -67,6 +67,7 @@ Decisions are logged in `PROJECT.md` Key Decisions table. Recent decisions affec
 - [Phase 1]: `DiagnosisRecord v1` 是文字、PNG 和 MP3 的单一事实源。
 - [Phase 2]: 知识库只收录官方或可核验来源，输入离开本机前必须脱敏。
 - [Phase 4]: 核心 PNG 使用确定性渲染；TTS 与 PNG 均保留可记录的本地降级后端。
+- [Phase 4]: 在外部 Dify 凭据不可用时，先以严格哈希校验的官方知识快照和无网络 `local-rule-v1` 打通真实审批、诊断与多模态结果链；不得将回放伪装成 live。
 - [Phase 5]: 只有通过引用、隐私、Schema、文件有效性和一致性门禁的案例才能进入课程材料。
 
 ### Pending Todos
