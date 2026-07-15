@@ -8,6 +8,7 @@ acceptance.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -33,6 +35,65 @@ _FAILURE_SCREENSHOT = _EVIDENCE / "tmp" / "GAP-01-layout-red.png"
 _UI_BASE_URL_ENV = "DEBUGMATE_UI_BASE_URL"
 _STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z")
 _RUNNER = _ROOT / "scripts" / "run-phase4-browser-layout-qa.ps1"
+_LOCAL_LIVE_RUNNER = _ROOT / "scripts" / "run-phase4-local-live-qa.ps1"
+_LOCAL_LIVE_SCREENSHOT_ENV = "DEBUGMATE_UI_SCREENSHOT_PATH"
+_LOCAL_LIVE_LEDGER = _EVIDENCE / "local-live-vq01.json"
+_LOCAL_LIVE_RESULTS = _ROOT / ".debugmate-runtime" / "results"
+_LOCAL_LIVE_LEDGER_KEYS = {
+    "evidence_version",
+    "viewport",
+    "status",
+    "mode",
+    "fixture_id",
+    "fixture_name",
+    "backend",
+    "case_id_sha256",
+    "source_run_id_sha256",
+    "result_id_sha256",
+    "screenshot_sha256",
+    "body_horizontal_overflow",
+    "server_owner",
+    "verified_at_utc",
+}
+
+
+def test_local_live_runner_has_single_owner_and_evidence_contract() -> None:
+    source = _LOCAL_LIVE_RUNNER.read_text(encoding="utf-8")
+
+    assert "[System.Net.IPAddress]::Loopback" in source
+    assert "Start-Process" in source and "-PassThru" in source
+    assert "-WindowStyle Hidden" in source
+    assert "debugmate.ui.serve" in source
+    assert "--host', '127.0.0.1'" in source
+    assert "DEBUGMATE_UI_BASE_URL" in source
+    assert _LOCAL_LIVE_SCREENSHOT_ENV in source
+    assert "test_vq_01_real_loopback_local_approval_produces_completed_live_result" in source
+    assert "Wait-ForLoopbackPortClosed -Port $port" in source
+    assert "Stop-Process -InputObject $Process" in source
+    assert "fixtures/" not in source and "fixtures\\" not in source
+    assert "RedirectStandard" not in source
+
+
+def test_local_live_ledger_has_exact_redacted_allowlist() -> None:
+    payload = json.loads(_LOCAL_LIVE_LEDGER.read_text(encoding="utf-8"))
+
+    assert set(payload) == _LOCAL_LIVE_LEDGER_KEYS
+    assert payload["evidence_version"] == 1
+    assert payload["viewport"] == {"width": 1366, "height": 768}
+    assert payload["status"] == "completed"
+    assert payload["mode"] == "live"
+    assert payload["fixture_id"] is None
+    assert payload["fixture_name"] is None
+    assert payload["backend"] == "local-rule-v1"
+    assert payload["body_horizontal_overflow"] is False
+    assert payload["server_owner"] == "run-phase4-local-live-qa.ps1"
+    for key in (
+        "case_id_sha256",
+        "source_run_id_sha256",
+        "result_id_sha256",
+        "screenshot_sha256",
+    ):
+        assert re.fullmatch(r"[0-9a-f]{64}", payload[key])
 
 
 def _reserve_loopback_port() -> int:
@@ -460,6 +521,7 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
 def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
     browser_base_url: str,
 ) -> None:
+    manifests_before = set(_LOCAL_LIVE_RESULTS.glob("case_*/result_*/result-manifest.json"))
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="msedge", headless=True)
         try:
@@ -504,23 +566,77 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
                     clientWidth: document.documentElement.clientWidth,
                 })"""
             )
+
+            assert "✓ 已完成" in status_text
+            assert "后端：local-rule-v1（本地规则，无云端调用）" in body_text
+            assert "实时诊断" in result_metadata
+            source_run_match = re.search(r"run_[0-9a-f]{32}", result_metadata)
+            assert source_run_match is not None
+            assert "fixture_id=null" in result_metadata
+            assert "fixture_name=null" in result_metadata
+            assert "回放" not in result_metadata
+            assert "module-not-found" not in result_metadata
+            assert "ModuleNotFoundError：缺少虚构依赖包" not in result_metadata
+            assert report_visible
+            assert "DebugMate" in report_text
+            assert citations_visible
+            assert download_enabled
+            assert metrics["scrollWidth"] == metrics["clientWidth"]
+
+            manifests_after = set(
+                _LOCAL_LIVE_RESULTS.glob("case_*/result_*/result-manifest.json")
+            )
+            fresh_manifests = manifests_after - manifests_before
+            assert len(fresh_manifests) == 1
+            result_manifest = json.loads(
+                fresh_manifests.pop().read_text(encoding="utf-8")
+            )
+            identity = result_manifest["identity"]
+            assert result_manifest["status"] == "completed"
+            assert result_manifest["mode"] == "live"
+            assert result_manifest["fixture_id"] is None
+            assert result_manifest["fixture_name"] is None
+            assert re.fullmatch(r"case_[0-9a-f]{32}", identity["case_id"])
+            assert identity["source_run_id"] == source_run_match.group(0)
+            assert re.fullmatch(r"result_[0-9a-f]{32}", result_manifest["result_id"])
+
+            screenshot_value = os.environ.get(_LOCAL_LIVE_SCREENSHOT_ENV)
+            if screenshot_value is not None:
+                screenshot_path = Path(screenshot_value).resolve()
+                expected_path = (_EVIDENCE / "VQ-01-live-local.png").resolve()
+                assert screenshot_path == expected_path
+                screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(screenshot_path))
+                screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+                ledger = {
+                    "evidence_version": 1,
+                    "viewport": {"width": 1366, "height": 768},
+                    "status": "completed",
+                    "mode": "live",
+                    "fixture_id": None,
+                    "fixture_name": None,
+                    "backend": "local-rule-v1",
+                    "case_id_sha256": hashlib.sha256(
+                        identity["case_id"].encode("utf-8")
+                    ).hexdigest(),
+                    "source_run_id_sha256": hashlib.sha256(
+                        source_run_match.group(0).encode("utf-8")
+                    ).hexdigest(),
+                    "result_id_sha256": hashlib.sha256(
+                        result_manifest["result_id"].encode("utf-8")
+                    ).hexdigest(),
+                    "screenshot_sha256": screenshot_sha256,
+                    "body_horizontal_overflow": False,
+                    "server_owner": "run-phase4-local-live-qa.ps1",
+                    "verified_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                }
+                assert set(ledger) == _LOCAL_LIVE_LEDGER_KEYS
+                _LOCAL_LIVE_LEDGER.write_text(
+                    json.dumps(ledger, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
         finally:
             browser.close()
-
-    assert "✓ 已完成" in status_text
-    assert "后端：local-rule-v1（本地规则，无云端调用）" in body_text
-    assert "实时诊断" in result_metadata
-    assert re.search(r"run_[0-9a-f]{32}", result_metadata)
-    assert "fixture_id=null" in result_metadata
-    assert "fixture_name=null" in result_metadata
-    assert "回放" not in result_metadata
-    assert "module-not-found" not in result_metadata
-    assert "ModuleNotFoundError：缺少虚构依赖包" not in result_metadata
-    assert report_visible
-    assert "DebugMate" in report_text
-    assert citations_visible
-    assert download_enabled
-    assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
 def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1024px(
