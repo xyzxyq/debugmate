@@ -121,3 +121,34 @@ Atomic commit subject:
 - Test output retains the existing Starlette deprecation warning from
   `fastapi.testclient`; it is unrelated to this task and does not affect the
   browser or live-service gate.
+
+## Review follow-up: UTF-8 truthfulness and atomic expiry
+
+RED evidence:
+
+- A deterministic fake-clock/RLock test held the preview-store lock while a
+  consumer captured time, advanced the clock beyond the one-second TTL, and
+  then released the lock. The previous implementation incorrectly returned a
+  `LocalPreviewRecord` instead of `None`.
+- UI configuration tests failed on the requested exact UTF-8 controls because
+  the source still contained mojibake. The live callback test also showed that
+  terminal metadata omitted the explicit null fixture fields.
+- The first real-Edge review run exposed an overly broad test poll: running copy
+  containing `已完成 0 个阶段` was mistaken for terminal completion. The
+  poll now waits for the exact terminal badge `✓ 已完成`.
+
+GREEN evidence:
+
+- `LocalPreviewStore.consume()` now obtains the clock value inside the same
+  lock immediately before expiry purge, session check, and one-time pop.
+- The live controls and backend provenance use exact UTF-8 Chinese, and the
+  test-only static result marker was removed. Terminal live metadata is derived
+  from the verified state and includes the fresh source run plus
+  `fixture_id=null` and `fixture_name=null` without replay fixture copy.
+- Focused UI/local-live/callback suite: `30 passed`.
+- Real Microsoft Edge review case: `1 passed, 19 deselected`; it opened the real
+  report and citation/download tabs and verified report content, citations, and
+  an enabled evidence-bundle download.
+- Full browser gate: `20 passed, 22 deselected`.
+- Ruff and `git diff --check` passed; production UI source contains none of the
+  reviewed mojibake fragments; final server audit reported `SERVE_COUNT=0`.

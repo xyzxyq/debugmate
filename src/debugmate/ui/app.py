@@ -585,8 +585,6 @@ def correction_draft_from_fields(
 
 def _status_text(view: ComponentViewModel) -> str:
     status_badge = view.status_badge
-    if status_badge == "✓ 已完成" and view.mode_badge == "● 实时诊断":
-        status_badge = f"{status_badge} · 瀹屾垚"
     rows = [f"### {status_badge}", view.mode_badge]
     if view.result_metadata:
         rows.append(view.result_metadata)
@@ -677,18 +675,18 @@ def build_app(
                     value="请先生成本地脱敏预览。",
                 )
                 preview_button = gr.Button(
-                    "鐢熸垚鏈湴鑴辨晱棰勮",
+                    "生成本地脱敏预览",
                     variant="secondary",
                     elem_id="local-preview",
                 )
                 start_button = gr.Button(
-                    "纭棰勮骞跺紑濮嬫湰鍦拌瘖鏂璥",
+                    "确认预览并开始本地诊断",
                     variant="primary",
                     interactive=False,
                     elem_id="local-approve",
                 )
                 gr.Markdown(
-                    "鍚庣锛歭ocal-rule-v1锛堟湰鍦拌鍒欙紝鏃犱簯绔皟鐢級"
+                    "后端：local-rule-v1（本地规则，无云端调用）"
                 )
                 replay = gr.Dropdown(
                     choices=[("ModuleNotFoundError：缺少虚构依赖包", "module-not-found")],
@@ -734,7 +732,6 @@ def build_app(
 
             with gr.Column(elem_classes=["region", "results-region"]):
                 gr.Markdown("## 三模态结果")
-                gr.Markdown("鏂囧瓧鎶ュ憡\n\n寮曠敤涓庝笅杞?")
                 with gr.Tabs():
                     with gr.Tab("文字报告"):
                         report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")

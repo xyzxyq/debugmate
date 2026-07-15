@@ -466,8 +466,10 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             page = browser.new_page(viewport={"width": 1366, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            preview = page.locator("#local-preview").first
-            approve = page.locator("#local-approve").first
+            preview = page.get_by_role("button", name="生成本地脱敏预览", exact=True)
+            approve = page.get_by_role(
+                "button", name="确认预览并开始本地诊断", exact=True
+            )
             preview.wait_for(timeout=30_000)
             assert approve.is_disabled()
             preview.click()
@@ -481,17 +483,19 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             status_text = ""
             while time.monotonic() < deadline:
                 status_text = status.inner_text()
-                if "瀹屾垚" in status_text:
+                if "✓ 已完成" in status_text:
                     break
                 page.wait_for_timeout(250)
+            page.get_by_role("tab", name="文字报告", exact=True).click()
+            report_panel = page.locator(".report-panel").first
+            report_text = report_panel.inner_text()
+            report_visible = report_panel.is_visible()
             page.get_by_role("tab", name="引用与下载", exact=True).click()
             download_button = page.locator("text=下载完整证据包").first
             body_text = page.locator("body").inner_text()
             result_metadata = page.locator("#result-metadata").first.inner_text()
-            report_visible = page.get_by_text("鏂囧瓧鎶ュ憡", exact=True).is_visible()
-            citations_visible = page.get_by_text(
-                "寮曠敤涓庝笅杞?", exact=True
-            ).is_visible()
+            citation_table = page.get_by_text("引用", exact=True).last
+            citations_visible = citation_table.is_visible()
             assert download_button.count() == 1, body_text
             download_enabled = download_button.is_enabled(timeout=1_000)
             metrics = page.evaluate(
@@ -503,10 +507,17 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
         finally:
             browser.close()
 
-    assert "瀹屾垚" in status_text or "已完成" in status_text
-    assert "鍚庣锛歭ocal-rule-v1锛堟湰鍦拌鍒欙紝鏃犱簯绔皟鐢級" in body_text
-    assert "鍥炴斁" not in result_metadata
+    assert "✓ 已完成" in status_text
+    assert "后端：local-rule-v1（本地规则，无云端调用）" in body_text
+    assert "实时诊断" in result_metadata
+    assert re.search(r"run_[0-9a-f]{32}", result_metadata)
+    assert "fixture_id=null" in result_metadata
+    assert "fixture_name=null" in result_metadata
+    assert "回放" not in result_metadata
+    assert "module-not-found" not in result_metadata
+    assert "ModuleNotFoundError：缺少虚构依赖包" not in result_metadata
     assert report_visible
+    assert "DebugMate" in report_text
     assert citations_visible
     assert download_enabled
     assert metrics["scrollWidth"] == metrics["clientWidth"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import json
 import socket
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,21 @@ from debugmate.ui.local_live import LocalPreviewStore
 _KEY = b"local-live-approval-key-is-32bytes"
 
 
+class _TrackedLock:
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self.waiting = threading.Event()
+
+    def __enter__(self):
+        if not self._lock.acquire(blocking=False):
+            self.waiting.set()
+            self._lock.acquire()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self._lock.release()
+
+
 def test_preview_store_atomically_consumes_only_same_session_token() -> None:
     now = datetime(2026, 7, 15, tzinfo=UTC)
     store = LocalPreviewStore(clock=lambda: now)
@@ -32,6 +48,31 @@ def test_preview_store_atomically_consumes_only_same_session_token() -> None:
     assert record is not None
     assert record.request_session == "session-a"
     assert store.consume(prepared.token, "session-a") is None
+
+
+def test_preview_store_reads_clock_inside_consume_lock_before_atomic_pop() -> None:
+    initial = datetime(2026, 7, 15, tzinfo=UTC)
+    current = [initial]
+    store = LocalPreviewStore(
+        ttl=timedelta(seconds=1), clock=lambda: current[0]
+    )
+    prepared = store.create("session-a")
+    tracked = _TrackedLock()
+    store._lock = tracked
+    consumed: list[object] = []
+
+    def consume() -> None:
+        consumed.append(store.consume(prepared.token, "session-a"))
+
+    with tracked:
+        thread = threading.Thread(target=consume)
+        thread.start()
+        assert tracked.waiting.wait(timeout=2)
+        current[0] = initial + timedelta(seconds=2)
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert consumed == [None]
 
 
 def test_preview_store_rejects_expired_cross_session_and_tampered_tokens() -> None:

@@ -131,8 +131,8 @@ class LocalPreviewStore:
             return None
         if not isinstance(request_session, str) or not request_session:
             return None
-        now = self._now()
         with self._lock:
+            now = self._now()
             self._purge_expired(now)
             record = self._records.get(token)
             if record is None or record.request_session != request_session:

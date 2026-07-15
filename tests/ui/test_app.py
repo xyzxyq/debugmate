@@ -225,6 +225,10 @@ def test_local_live_requires_preview_then_same_session_approval() -> None:
     assert states[-1].fixture_id is None
     assert states[-1].fixture_name is None
     assert len(service.diagnose_calls) == 1
+    assert frames[-1][1] == (
+        f"实时诊断；来源运行：{states[-1].identity.source_run_id}；"
+        "fixture_id=null；fixture_name=null"
+    )
 
 
 @pytest.mark.parametrize(
@@ -279,13 +283,13 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
     }
     source = Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
 
-    assert "鐢熸垚鏈湴鑴辨晱棰勮" in buttons
-    assert "纭棰勮骞跺紑濮嬫湰鍦拌瘖鏂璥" in buttons
-    assert buttons["纭棰勮骞跺紑濮嬫湰鍦拌瘖鏂璥"]["props"]["interactive"] is False
+    assert "生成本地脱敏预览" in buttons
+    assert "确认预览并开始本地诊断" in buttons
+    assert buttons["确认预览并开始本地诊断"]["props"]["interactive"] is False
     assert any(
         component["type"] == "markdown"
         and component["props"].get("value")
-        == "鍚庣锛歭ocal-rule-v1锛堟湰鍦拌鍒欙紝鏃犱簯绔皟鐢級"
+        == "后端：local-rule-v1（本地规则，无云端调用）"
         for component in config["components"]
     )
     assert "approved_payload = gr.State" not in source
@@ -298,6 +302,8 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
     assert "load_replay" not in live_callback_source
     assert "Dify" not in source
     assert "EdgeTtsAdapter" not in source
+    for mojibake in ("鐢熸垚", "纭", "鍚庣", "鏂囧瓧", "寮曠敤", "瀹屾垚"):
+        assert mojibake not in source
 
 
 def test_local_live_events_share_the_bounded_diagnosis_queue_lane() -> None:

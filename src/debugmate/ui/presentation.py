@@ -120,7 +120,11 @@ def _result_metadata(state: ResultViewState) -> str:
     source = "" if state.identity is None else f"；来源运行：{state.identity.source_run_id}"
     if state.mode is ResultMode.REPLAY:
         return f"离线回放：{state.fixture_name}{source}"
-    return "" if not source else f"实时诊断{source}"
+    return (
+        ""
+        if not source
+        else f"实时诊断{source}；fixture_id=null；fixture_name=null"
+    )
 
 
 def _audio_metadata(state: ResultViewState) -> tuple[str | None, str | None]:
