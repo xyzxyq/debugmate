@@ -21,7 +21,6 @@ from starlette.responses import JSONResponse
 
 from debugmate.results.contracts import (
     ArtifactAvailability,
-    ArtifactIdentity,
     AudioAttempt,
     AudioResult,
     ResultMode,
@@ -29,6 +28,7 @@ from debugmate.results.contracts import (
     ResultViewState,
     SafeFailure,
 )
+from debugmate.results.service import ResultApplicationService
 
 QA_STAGE_ORDER: tuple[str, ...] = (
     "source",
@@ -59,6 +59,21 @@ class QaScenario(Enum):
 QA_SCENARIOS = frozenset(QaScenario)
 
 
+class QaStage(Enum):
+    SOURCE = "source"
+    PRESENTATION = "presentation"
+    REPORT = "report"
+    CARD = "card"
+    AUDIO = "audio"
+    CONSISTENCY = "consistency"
+    PUBLISH = "publish"
+
+
+class QaStageAction(Enum):
+    HOLD = "hold"
+    RELEASE = "release"
+
+
 @dataclass(frozen=True, slots=True)
 class QaScenarioSpec:
     """Safe scenario facts plus the strict UI state that realizes them."""
@@ -74,6 +89,19 @@ class QaScenarioSpec:
     retry_scope: str | None = None
     fallback_backend: str | None = None
     download: bool = True
+    source_hashes: tuple[tuple[str, str], ...] = ()
+    category: str | None = None
+    recap_text: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedQaBaseline:
+    """Opaque result state returned only after the real replay service verifies it."""
+
+    state: ResultViewState
+    source_hashes: tuple[tuple[str, str], ...]
+    category: str
+    recap_text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,29 +113,68 @@ class QaStageSnapshot:
 class QaStageGate:
     """A bounded, thread-safe seven-stage rendezvous with strict ordering."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, timeout_seconds: float = 5.0) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("QA stage timeout must be positive")
         self._condition = threading.Condition()
+        self._timeout = timeout_seconds
         self._next_index = 0
         self._current: str | None = None
+        self._broken = False
 
     @property
     def finished(self) -> bool:
         with self._condition:
             return self._next_index == len(QA_STAGE_ORDER) and self._current is None
 
+    @property
+    def protocol_timeout(self) -> float:
+        return self._timeout
+
     def arrive(self, stage: str) -> QaStageSnapshot:
         with self._condition:
-            if self._current is not None or self._next_index >= len(QA_STAGE_ORDER):
+            if self._broken or self._current is not None or self._next_index >= len(QA_STAGE_ORDER):
                 raise RuntimeError("QA stage gate is not ready")
             expected = QA_STAGE_ORDER[self._next_index]
             if stage != expected:
                 raise ValueError("QA stage is out of order")
             self._current = stage
-            return QaStageSnapshot(stage, QA_STAGE_ORDER[: self._next_index])
+            snapshot = QaStageSnapshot(stage, QA_STAGE_ORDER[: self._next_index])
+            self._condition.notify_all()
+            released = self._condition.wait_for(
+                lambda: self._current is None or self._broken,
+                timeout=self._timeout,
+            )
+            if not released:
+                self._broken = True
+                self._current = None
+                self._condition.notify_all()
+                raise TimeoutError("QA stage release timed out")
+            if self._broken:
+                raise RuntimeError("QA stage gate is broken")
+            return snapshot
 
-    def release(self, stage: str) -> None:
+    def wait_for_stage(self, stage: QaStage, *, timeout_seconds: float) -> QaStageSnapshot:
+        if not isinstance(stage, QaStage) or timeout_seconds <= 0:
+            raise ValueError("invalid QA stage wait")
         with self._condition:
-            if self._current is None or stage != self._current:
+            ready = self._condition.wait_for(
+                lambda: self._current == stage.value or self._broken,
+                timeout=timeout_seconds,
+            )
+            if not ready:
+                raise TimeoutError("QA stage arrival timed out")
+            if self._broken:
+                raise RuntimeError("QA stage gate is broken")
+            return QaStageSnapshot(stage.value, QA_STAGE_ORDER[: self._next_index])
+
+    def release(self, stage: QaStage) -> None:
+        with self._condition:
+            if self._broken:
+                raise RuntimeError("QA stage gate is broken")
+            if not isinstance(stage, QaStage) or self._current is None:
+                raise ValueError("QA stage is not awaiting release")
+            if stage.value != self._current:
                 raise ValueError("QA stage is not awaiting release")
             self._current = None
             self._next_index += 1
@@ -144,10 +211,12 @@ class QaCapabilityGate:
         process_enabled: bool,
         capability: str,
         scenario_handler: Callable[[QaScenario], object],
+        stage_gate: QaStageGate | None = None,
     ) -> None:
         self._enabled = process_enabled is True
         self._capability = capability if _CAPABILITY_PATTERN.fullmatch(capability) else ""
         self._handler = scenario_handler
+        self._stage_gate = stage_gate
         self._counts = {"scenario": 0, "workflow": 0, "result": 0, "download": 0}
 
     @property
@@ -160,7 +229,7 @@ class QaCapabilityGate:
 
         return self._enabled and bool(self._capability)
 
-    def dispatch(self, request: object, payload: object) -> object:
+    def authorize(self, request: object) -> None:
         client = getattr(request, "client", None)
         host = getattr(client, "host", None)
         headers = getattr(request, "headers", {})
@@ -173,9 +242,33 @@ class QaCapabilityGate:
             or not hmac.compare_digest(self._capability, supplied)
         ):
             raise QaAccessDenied()
+
+    def dispatch_authorized(self, payload: object) -> object:
+        if isinstance(payload, dict) and set(payload) == {"action", "stage"}:
+            if self._stage_gate is None:
+                raise QaAccessDenied()
+            try:
+                action = QaStageAction(payload["action"])
+                stage = QaStage(payload["stage"])
+            except (TypeError, ValueError):
+                raise QaAccessDenied() from None
+            if action is QaStageAction.HOLD:
+                snapshot = self._stage_gate.wait_for_stage(
+                    stage, timeout_seconds=self._stage_gate.protocol_timeout
+                )
+                return {
+                    "stage": snapshot.current_stage,
+                    "completed_stages": list(snapshot.completed_stages),
+                }
+            self._stage_gate.release(stage)
+            return {"released": stage.value}
         scenario = parse_qa_request(payload)
         self._counts["scenario"] += 1
         return self._handler(scenario)
+
+    def dispatch(self, request: object, payload: object) -> object:
+        self.authorize(request)
+        return self.dispatch_authorized(payload)
 
 
 def mount_qa_endpoint(app: Any, gate: QaCapabilityGate) -> None:
@@ -186,9 +279,10 @@ def mount_qa_endpoint(app: Any, gate: QaCapabilityGate) -> None:
 
     async def dispatch_private_scenario(request: Request) -> JSONResponse:
         try:
+            gate.authorize(request)
             payload = await request.json()
-            result = gate.dispatch(request, payload)
-        except (QaAccessDenied, ValueError, TypeError):
+            result = gate.dispatch_authorized(payload)
+        except (QaAccessDenied, RuntimeError, TimeoutError, ValueError, TypeError):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
         return JSONResponse(result)
 
@@ -221,60 +315,84 @@ def runner_qa_environment(environ: MutableMapping[str, str], capability: str) ->
                 environ[name] = old
 
 
-def _identity() -> ArtifactIdentity:
-    return ArtifactIdentity(
-        case_id="case_" + "1" * 32,
-        source_run_id="run_" + "2" * 32,
-        diagnosis_sha256="3" * 64,
-        schema_version="1.1.0",
-        generation_version="gen_" + "4" * 32,
+def _verified_baseline_state(value: ResultViewState) -> ResultViewState:
+    baseline = ResultViewState.model_validate_json(value.model_dump_json(), strict=True)
+    if (
+        baseline.mode is not ResultMode.REPLAY
+        or baseline.status is not ResultStatus.COMPLETED
+        or baseline.fixture_id != "module-not-found"
+        or baseline.identity is None
+        or baseline.result_id is None
+        or baseline.audio is None
+        or not baseline.audio.available
+    ):
+        raise ValueError("QA baseline must be a verified module-not-found replay")
+    return baseline
+
+
+def load_verified_qa_baseline(service: ResultApplicationService) -> VerifiedQaBaseline:
+    """Load the allowlisted repository fixture through the real strict service."""
+
+    if not isinstance(service, ResultApplicationService):
+        raise TypeError("QA baseline requires ResultApplicationService")
+    _row, outcome, source = service._load_fixture_source("module-not-found")
+    state = _verified_baseline_state(service.load_replay("module-not-found"))
+    if (
+        outcome.extraction is None
+        or outcome.diagnosis is None
+        or state.identity is None
+        or state.identity.case_id != source.case_id
+        or state.identity.source_run_id != source.source_run_id
+    ):
+        raise ValueError("QA fixture source and result identities differ")
+    return VerifiedQaBaseline(
+        state=state,
+        source_hashes=tuple(sorted(outcome.extraction.source_hashes.items())),
+        category=outcome.diagnosis.category,
+        recap_text=outcome.diagnosis.recap_text,
     )
 
 
-def _available_audio(identity: ArtifactIdentity, *, fallback: bool = False) -> AudioResult:
-    successful = AudioAttempt(
-        backend="edge_tts" if fallback else "dify",
-        rate_profile="normal",
-        succeeded=True,
-        duration_ms=40_000,
-        sha256="7" * 64,
-    )
-    attempts = (successful,)
-    if fallback:
-        attempts = (
+def _fallback_audio_from_baseline(baseline: AudioResult) -> AudioResult:
+    """Add only a safe failed attempt while preserving verified media facts."""
+
+    final = baseline.attempts[-1]
+    return AudioResult(
+        identity=baseline.identity,
+        available=True,
+        backend=baseline.backend,
+        fallback_used=True,
+        attempts=(
             AudioAttempt(
                 backend="dify",
                 rate_profile="normal",
                 succeeded=False,
                 safe_error_code="tts_backend_failed",
             ),
-            successful,
-        )
-    return AudioResult(
-        identity=identity,
-        available=True,
-        backend=successful.backend,
-        fallback_used=fallback,
-        attempts=attempts,
-        duration_ms=successful.duration_ms,
-        sha256=successful.sha256,
+            final,
+        ),
+        duration_ms=baseline.duration_ms,
+        sha256=baseline.sha256,
     )
 
 
-def _spec(scenario: QaScenario) -> QaScenarioSpec:
-    identity = _identity()
-    result_id = "result_" + "5" * 32
+def _spec(scenario: QaScenario, verified: VerifiedQaBaseline) -> QaScenarioSpec:
+    if not isinstance(verified, VerifiedQaBaseline):
+        raise TypeError("QA scenarios require a verified baseline handle")
+    baseline = _verified_baseline_state(verified.state)
+    identity = baseline.identity
+    result_id = baseline.result_id
     complete = ArtifactAvailability(report=True, card=True, recap_text=True, audio=True)
     if scenario is QaScenario.VQ_02_REPLAY:
         state = ResultViewState(
             mode=ResultMode.REPLAY,
             status=ResultStatus.COMPLETED,
-            fixture_id="module-not-found",
-            fixture_name="ModuleNotFoundError：缺少虚拟环境依赖包",
+            fixture_id=baseline.fixture_id,
+            fixture_name=baseline.fixture_name,
             identity=identity,
             result_id=result_id,
             availability=complete,
-            audio=_available_audio(identity),
+            audio=baseline.audio,
         )
     elif scenario is QaScenario.VQ_03_RUNNING:
         state = ResultViewState(
@@ -315,7 +433,7 @@ def _spec(scenario: QaScenario) -> QaScenarioSpec:
             result_id=result_id,
             availability=ArtifactAvailability(report=True, recap_text=True, audio=True),
             failure=failure,
-            audio=_available_audio(identity),
+            audio=baseline.audio,
         )
     elif scenario is QaScenario.VQ_08_SOURCE_INVALID:
         state = ResultViewState(
@@ -333,7 +451,7 @@ def _spec(scenario: QaScenario) -> QaScenarioSpec:
             identity=identity,
             result_id=result_id,
             availability=complete,
-            audio=_available_audio(identity, fallback=True),
+            audio=_fallback_audio_from_baseline(baseline.audio),
         )
 
     failure = state.failure
@@ -356,12 +474,15 @@ def _spec(scenario: QaScenario) -> QaScenarioSpec:
             state.audio.backend if state.audio is not None and state.audio.fallback_used else None
         ),
         download=state.status is not ResultStatus.FAILED,
+        source_hashes=(() if state.status is ResultStatus.FAILED else verified.source_hashes),
+        category=None if state.status is ResultStatus.FAILED else verified.category,
+        recap_text=None if state.status is ResultStatus.FAILED else verified.recap_text,
     )
 
 
-def build_qa_scenario(scenario: QaScenario) -> QaScenarioSpec:
+def build_qa_scenario(scenario: QaScenario, *, baseline: VerifiedQaBaseline) -> QaScenarioSpec:
     """Build one deterministic strict scenario without filesystem access."""
 
     if not isinstance(scenario, QaScenario):
         raise TypeError("scenario must be QaScenario")
-    return _spec(scenario)
+    return _spec(scenario, baseline)

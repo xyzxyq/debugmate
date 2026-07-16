@@ -75,7 +75,11 @@ def _optional_tts_adapter(backend: str, factory):
 
 
 def _local_composer(
-    *, project_root: Path, runtime_root: Path, results_root: TrustedResultRoot
+    *,
+    project_root: Path,
+    runtime_root: Path,
+    results_root: TrustedResultRoot,
+    replay_local_only: bool = False,
 ):
     """Build the real Phase 4 chain used by fixed replay demonstrations."""
 
@@ -84,18 +88,14 @@ def _local_composer(
     card_root = runtime_root / "cards"
 
     def compose(source, *, mode, fixture_id, fixture_name, stage_callback=None):
-        if mode is ResultMode.LIVE:
-            tts = TtsFallbackChain(
-                (SapiTtsAdapter(project_root=project_root),), local_only=True
-            )
+        if mode is ResultMode.LIVE or replay_local_only:
+            tts = TtsFallbackChain((SapiTtsAdapter(project_root=project_root),), local_only=True)
         else:
             settings = DebugMateSettings.from_env()
             tts = TtsFallbackChain(
                 (
                     _optional_tts_adapter("dify", lambda: DifyTtsAdapter(settings)),
-                    _optional_tts_adapter(
-                        "edge_tts", lambda: EdgeTtsAdapter(timeout_seconds=5.0)
-                    ),
+                    _optional_tts_adapter("edge_tts", lambda: EdgeTtsAdapter(timeout_seconds=5.0)),
                     _optional_tts_adapter(
                         "sapi", lambda: SapiTtsAdapter(project_root=project_root)
                     ),
@@ -153,7 +153,10 @@ def _local_composer(
 
 
 def _local_service(
-    *, runtime_root: Path | None = None, approval_key: bytes | None = None
+    *,
+    runtime_root: Path | None = None,
+    approval_key: bytes | None = None,
+    replay_local_only: bool = False,
 ) -> ResultApplicationService:
     project_root = Path(__file__).resolve().parents[3]
     runtime_root = runtime_root or project_root / ".debugmate-runtime"
@@ -181,6 +184,7 @@ def _local_service(
             project_root=project_root,
             runtime_root=runtime_root,
             results_root=results_root,
+            replay_local_only=replay_local_only,
         ),
     )
 

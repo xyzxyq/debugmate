@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import logging
 import socket
+import threading
 from dataclasses import dataclass
 
 import pytest
@@ -40,6 +42,16 @@ class _Request:
     @property
     def headers(self):
         return {} if self.capability is None else {HEADER: self.capability}
+
+
+class _JsonProbeRequest(_Request):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.json_calls = 0
+
+    async def json(self):
+        self.json_calls += 1
+        raise AssertionError("denied request body must not be parsed")
 
 
 class _ScenarioCalls:
@@ -161,6 +173,55 @@ def test_real_http_qa_route_accepts_exact_capability_and_records_safe_audit(
     for surface in (response.text, serialized_evidence, caplog.text):
         assert CAPABILITY not in surface
         assert HEADER not in surface.lower()
+
+
+def test_asgi_endpoint_authenticates_request_before_parsing_json() -> None:
+    qa = _qa()
+    gate = qa.QaCapabilityGate(
+        process_enabled=True,
+        capability=CAPABILITY,
+        scenario_handler=lambda _scenario: {"accepted": True},
+    )
+    app = build_app(object())
+    qa.mount_qa_endpoint(app.app, gate)
+    endpoint = next(
+        route.endpoint for route in app.app.routes if getattr(route, "path", None) == QA_ROUTE
+    )
+    request = _JsonProbeRequest(capability=None)
+
+    response = asyncio.run(endpoint(request))
+
+    assert response.status_code == 404
+    assert request.json_calls == 0
+
+
+def test_stage_hold_and_release_protocol_is_strict_and_dual_gated() -> None:
+    qa = _qa()
+    stage_gate = qa.QaStageGate(timeout_seconds=0.1)
+    gate = qa.QaCapabilityGate(
+        process_enabled=True,
+        capability=CAPABILITY,
+        scenario_handler=lambda _scenario: {"accepted": True},
+        stage_gate=stage_gate,
+    )
+    with pytest.raises(qa.QaAccessDenied):
+        gate.dispatch(_Request(capability=None), {"action": "release", "stage": "source"})
+    with pytest.raises(qa.QaAccessDenied):
+        gate.dispatch(_Request(), {"action": "release", "stage": "../source"})
+
+    completed: list[str] = []
+    worker = threading.Thread(
+        target=lambda: (stage_gate.arrive("source"), completed.append("source"))
+    )
+    worker.start()
+    held = gate.dispatch(_Request(), {"action": "hold", "stage": "source"})
+    assert held == {"stage": "source", "completed_stages": []}
+    assert completed == []
+    assert gate.dispatch(_Request(), {"action": "release", "stage": "source"}) == {
+        "released": "source"
+    }
+    worker.join(timeout=1.0)
+    assert completed == ["source"]
 
 
 @pytest.mark.parametrize(
