@@ -65,6 +65,31 @@ def test_stage_gate_is_ordered_bounded_and_has_no_percentage() -> None:
         qa.QaStageGate().arrive("report")
 
 
+def test_stage_gate_rejects_wrong_release_duplicates_and_use_after_completion() -> None:
+    qa = _qa()
+    gate = qa.QaStageGate()
+
+    with pytest.raises((RuntimeError, ValueError)):
+        gate.release("source")
+    gate.arrive("source")
+    with pytest.raises((RuntimeError, ValueError)):
+        gate.arrive("source")
+    with pytest.raises((RuntimeError, ValueError)):
+        gate.release("report")
+    gate.release("source")
+    with pytest.raises((RuntimeError, ValueError)):
+        gate.release("source")
+
+    for stage in EXPECTED_STAGES[1:]:
+        gate.arrive(stage)
+        gate.release(stage)
+    assert gate.finished is True
+    with pytest.raises((RuntimeError, ValueError)):
+        gate.arrive("source")
+    with pytest.raises((RuntimeError, ValueError)):
+        gate.release("publish")
+
+
 def test_truth_state_specs_preserve_replay_partial_failed_and_fallback_semantics() -> None:
     qa = _qa()
     specs = {scenario: qa.build_qa_scenario(scenario) for scenario in qa.QaScenario}

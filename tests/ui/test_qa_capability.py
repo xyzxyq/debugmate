@@ -5,14 +5,18 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import socket
 from dataclasses import dataclass
 
 import pytest
+from fastapi.testclient import TestClient
 
+from debugmate.ui import serve as serve_module
 from debugmate.ui.app import build_app
 
 CAPABILITY = "qa_" + "a" * 64
 HEADER = "x-debugmate-qa-capability"
+QA_ROUTE = "/_debugmate/qa"
 
 
 def _qa():
@@ -41,9 +45,13 @@ class _Request:
 class _ScenarioCalls:
     def __init__(self) -> None:
         self.calls: list[object] = []
+        self.evidence: list[dict[str, str]] = []
 
     def __call__(self, scenario):
         self.calls.append(scenario)
+        record = {"event": "qa_scenario_accepted", "scenario": scenario.value}
+        self.evidence.append(record)
+        logging.getLogger("debugmate.qa.audit").info("qa scenario accepted: %s", scenario.value)
         return {"accepted": True}
 
 
@@ -117,7 +125,9 @@ def test_invalid_scenario_payloads_cross_the_gate_and_have_zero_side_effects(
     }
 
 
-def test_dual_gate_accepts_only_enabled_literal_loopback_with_exact_header() -> None:
+def test_real_http_qa_route_accepts_exact_capability_and_records_safe_audit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     qa = _qa()
     calls = _ScenarioCalls()
     gate = qa.QaCapabilityGate(
@@ -126,36 +136,62 @@ def test_dual_gate_accepts_only_enabled_literal_loopback_with_exact_header() -> 
         scenario_handler=calls,
     )
 
-    response = gate.dispatch(_Request(), {"scenario": "vq-02-replay"})
+    app = build_app(object())
+    qa.mount_qa_endpoint(app.app, gate)
+    caplog.set_level(logging.INFO, logger="debugmate.qa.audit")
+    response = TestClient(app.app, client=("127.0.0.1", 50000)).post(
+        QA_ROUTE,
+        headers={HEADER: CAPABILITY},
+        json={"scenario": "vq-02-replay"},
+    )
 
-    assert response == {"accepted": True}
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True}
     assert calls.calls == [qa.QaScenario.VQ_02_REPLAY]
+    serialized_evidence = json.dumps(calls.evidence, sort_keys=True)
+    assert "qa_scenario_accepted" in serialized_evidence
+    assert "qa scenario accepted" in caplog.text
+    for surface in (response.text, serialized_evidence, caplog.text):
+        assert CAPABILITY not in surface
+        assert HEADER not in surface.lower()
 
 
-def test_capability_never_serializes_or_reaches_config_dom_url_log_or_evidence(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize(
+    "client_host,headers,wrong_token",
+    [
+        ("127.0.0.1", {}, None),
+        ("127.0.0.1", {HEADER: "qa_" + "b" * 64}, "qa_" + "b" * 64),
+        ("192.0.2.10", {HEADER: CAPABILITY}, None),
+    ],
+)
+def test_real_http_qa_route_denies_missing_wrong_or_nonloopback_without_side_effects(
+    client_host: str,
+    headers: dict[str, str],
+    wrong_token: str | None,
 ) -> None:
     qa = _qa()
+    calls = _ScenarioCalls()
     gate = qa.QaCapabilityGate(
         process_enabled=True,
         capability=CAPABILITY,
-        scenario_handler=lambda _scenario: {"status": "accepted"},
+        scenario_handler=calls,
     )
-    caplog.set_level(logging.DEBUG)
+    app = build_app(object())
+    qa.mount_qa_endpoint(app.app, gate)
 
-    response = gate.dispatch(_Request(), {"scenario": "vq-09-fallback"})
-    surfaces = (
-        repr(gate.public_config()),
-        repr(gate.component_values()),
-        gate.dom_payload(),
-        gate.public_url,
-        caplog.text,
-        json.dumps(gate.evidence_record(response), sort_keys=True),
-        repr(gate),
+    response = TestClient(app.app, client=(client_host, 50000)).post(
+        QA_ROUTE,
+        headers=headers,
+        json={"scenario": "vq-02-replay"},
     )
 
-    assert all(CAPABILITY not in surface for surface in surfaces)
-    assert all(HEADER not in surface.lower() for surface in surfaces)
+    assert response.status_code == 404
+    assert calls.calls == []
+    assert calls.evidence == []
+    assert CAPABILITY not in response.text
+    assert HEADER not in response.text.lower()
+    if wrong_token is not None:
+        assert wrong_token not in response.text
 
 
 def test_enabled_qa_handler_on_real_app_keeps_capability_out_of_every_public_surface() -> None:
@@ -187,6 +223,59 @@ def test_enabled_qa_handler_on_real_app_keeps_capability_out_of_every_public_sur
     assert any("qa" in path.lower() for path, _name, _endpoint in route_surfaces)
     assert all(CAPABILITY not in surface for surface in public_surfaces)
     assert all(HEADER not in surface.lower() for surface in public_surfaces)
+
+
+def test_ordinary_serve_assembly_ignores_residual_qa_environment_without_explicit_enablement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _qa()
+    monkeypatch.setenv("DEBUGMATE_QA_ENABLED", "1")
+    monkeypatch.setenv("DEBUGMATE_QA_CAPABILITY", CAPABILITY)
+    monkeypatch.setattr(serve_module, "_local_service", lambda **_kwargs: object())
+    captured: dict[str, object] = {}
+
+    class _LaunchProbe:
+        def __init__(self, app) -> None:
+            self.app = app
+
+        def launch(self, **kwargs) -> None:
+            captured["launch"] = kwargs
+
+    def capture_build(service, **kwargs):
+        app = build_app(service, **kwargs)
+        captured["app"] = app
+        return _LaunchProbe(app)
+
+    monkeypatch.setattr(serve_module, "build_app", capture_build)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = int(listener.getsockname()[1])
+
+    assert serve_module.main(["--host", "127.0.0.1", "--port", str(port)]) == 0
+    app = captured["app"]
+    route_surfaces = repr(
+        [
+            (
+                getattr(route, "path", ""),
+                getattr(route, "name", ""),
+                getattr(getattr(route, "endpoint", None), "__qualname__", ""),
+            )
+            for route in app.app.routes
+        ]
+    ).lower()
+    callback_surfaces = repr(
+        [
+            (
+                getattr(block_fn.fn, "__module__", ""),
+                getattr(block_fn.fn, "__qualname__", ""),
+            )
+            for block_fn in app.fns.values()
+        ]
+    ).lower()
+
+    assert "qa_scenarios" not in route_surfaces + callback_surfaces
+    assert QA_ROUTE not in route_surfaces
+    assert CAPABILITY not in route_surfaces + callback_surfaces
 
 
 def test_runner_environment_restores_preexisting_and_missing_values() -> None:
