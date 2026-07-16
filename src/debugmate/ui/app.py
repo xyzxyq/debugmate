@@ -586,8 +586,6 @@ def correction_draft_from_fields(
 def _status_text(view: ComponentViewModel) -> str:
     status_badge = view.status_badge
     rows = [f"### {status_badge}", view.mode_badge]
-    if view.result_metadata:
-        rows.append(view.result_metadata)
     if view.fallback_badge:
         rows.append(view.fallback_badge)
     if view.running_copy:
@@ -738,6 +736,7 @@ def build_app(
                     with gr.Tab("诊断卡"):
                         card = gr.Image(
                             label="诊断卡",
+                            elem_id="diagnostic-card",
                             type="filepath",
                             interactive=False,
                             sources=None,
@@ -829,8 +828,14 @@ def build_app(
                 gr.update(value=payload.redacted_input),
                 gr.update(),
                 gr.update(value=f"类别：{payload.category}\n\n置信度：{payload.confidence}"),
-                gr.update(value=list(payload.fact_rows)),
-                gr.update(value=list(payload.citation_rows)),
+                gr.update(
+                    value=fact_table.postprocess(list(payload.fact_rows)).model_dump()
+                ),
+                gr.update(
+                    value=citation_table.postprocess(
+                        list(payload.citation_rows)
+                    ).model_dump()
+                ),
                 gr.update(value=payload.recap_text),
             )
 

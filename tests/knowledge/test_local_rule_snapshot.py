@@ -114,6 +114,53 @@ def test_local_rule_loader_binds_build_id_to_actual_payload_sha256(tmp_path: Pat
         load_local_rule_snapshot(root)
 
 
+def test_local_rule_loader_hashes_and_parses_the_same_payload_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _copy_valid_snapshot_tree(tmp_path)
+    payload_path = _payload_path(root)
+    original_payload = payload_path.read_bytes()
+    replacement = json.loads(original_payload.decode("utf-8"))
+    replacement["response"]["diagnosis"] = "replacement payload must not be parsed"
+    replacement_payload = (
+        json.dumps(replacement, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    original_open = Path.open
+    replaced = False
+
+    class _ReplaceAfterClose:
+        def __init__(self, handle: object) -> None:
+            self._handle = handle
+
+        def __enter__(self) -> _ReplaceAfterClose:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            nonlocal replaced
+            self._handle.close()  # type: ignore[attr-defined]
+            if not replaced:
+                replaced = True
+                payload_path.write_bytes(replacement_payload)
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._handle, name)
+
+    def replacing_open(path: Path, *args: object, **kwargs: object) -> object:
+        handle = original_open(path, *args, **kwargs)
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if path == payload_path and mode == "rb" and not replaced:
+            return _ReplaceAfterClose(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", replacing_open)
+
+    snapshot = load_local_rule_snapshot(root)
+
+    expected = json.loads(original_payload.decode("utf-8"))["response"]["diagnosis"]
+    assert replaced is True
+    assert snapshot.rule.response.diagnosis == expected
+
+
 def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool) -> None:
     try:
         link.symlink_to(target, target_is_directory=target_is_directory)

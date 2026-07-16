@@ -130,8 +130,18 @@ class _Service:
         assert state.identity is not None and state.result_id is not None
         assert (case_id, result_id) == (state.identity.case_id, state.result_id)
         contents = {
+            "diagnosis": (
+                (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_bytes(),
+                "diagnosis.json",
+                "application/json",
+            ),
             "report": (b"# DebugMate", "report.md", "text/markdown"),
             "card": (b"verified-card", "card.png", "image/png"),
+            "recap_text": (
+                b"ModuleNotFoundError recap",
+                "recap.txt",
+                "text/plain",
+            ),
             "audio": (b"verified-audio", "recap.mp3", "audio/mpeg"),
             "bundle": (b"verified-zip", "debugmate-result.zip", "application/zip"),
         }
@@ -348,6 +358,45 @@ def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None
     )
     assert download["props"]["visible"] is True
     assert download["props"]["interactive"] is False
+
+
+def test_live_callback_sends_postprocessed_dataframe_cells_and_one_metadata_row() -> None:
+    app = build_app(_Service())
+    callback = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "approve_and_diagnose_stream"
+    )
+    prepare = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "prepare_local_preview"
+    )
+    request = _Request("dataframe-session")
+    token = prepare(request)[0]
+
+    frame = list(callback(token, request))[-1]
+
+    assert "run_" not in frame[0]
+    assert frame[1].count("run_") == 1
+    fact_value = frame[28]["value"]
+    citation_value = frame[29]["value"]
+    assert fact_value["headers"] == [
+        "事实 ID",
+        "观察或结论",
+        "证据 ID",
+        "来源",
+        "支持关系",
+    ]
+    assert any("ModuleNotFoundError" in cell for row in fact_value["data"] for cell in row)
+    assert any(cell.startswith("evidence_") for row in fact_value["data"] for cell in row)
+    assert citation_value["headers"] == ["证据 ID", "标题", "官方来源", "版本范围"]
+    assert any(
+        cell == "https://docs.python.org/3/library/exceptions.html"
+        for row in citation_value["data"]
+        for cell in row
+    )
+    assert any(cell == "ModuleNotFoundError" for row in citation_value["data"] for cell in row)
 
 
 def test_gap_01_archive_preserves_the_original_browser_failure() -> None:

@@ -18,8 +18,8 @@ released the reservation, started exactly one captured hidden
 `.venv\Scripts\python.exe -m debugmate.ui.serve --host 127.0.0.1 --port N`
 process, required the root `/config` object with a `components` list, injected
 the base URL and screenshot path, and ran only the VQ-01 live browser test. Its
-formal re-review run passed `1 passed in 36.99s`; only the captured process was stopped
-and port `54855` was proved closed. The runner uses no fixture path, public
+final broad-review run passed `1 passed in 36.16s`; only the captured process was stopped
+and port `56977` was proved closed. The runner uses no fixture path, public
 host, owner takeover, or shell redirection.
 
 The real Microsoft Edge screenshot is exactly `1366 x 768`. Visual inspection
@@ -31,8 +31,8 @@ metrics were `scrollWidth=1366`, `clientWidth=1366`, so
 
 | Evidence | SHA-256 |
 |---|---|
-| `evidence/ui/phase4/VQ-01-live-local.png` | `875813f5cdd332dc99ff1a017c389c47f31638a8f6514b4b97631a27e42976aa` |
-| `evidence/ui/phase4/local-live-vq01.json` | `8a50fd7adba23408b24ecdf0fb3ba31a745994ef7b0080b6944f1299132ed8e0` |
+| `evidence/ui/phase4/VQ-01-live-local.png` | `a09fec9d23db14f31af646e0c834df2c401846c267521e8fcbdb49ce02124142` |
+| `evidence/ui/phase4/local-live-vq01.json` | `f9e8a5a78b46d7311c71c586cb411d5e66e6012fc50f219682bda23654aaed36` |
 
 The machine ledger has exactly the approved 14-field allowlist. It records
 `completed`, `live`, null fixture fields, `local-rule-v1`, zero overflow, the
@@ -101,6 +101,25 @@ RED was `6 failed, 24 deselected`; GREEN was
 `6 passed, 24 deselected in 6.93s`. The final combined transaction, ledger, and
 source-manifest focus passed `10 passed, 20 deselected in 8.59s`.
 
+Broad review then closed two additional truth-boundary defects with strict
+RED/GREEN tests. A controlled close-time payload replacement first proved that
+the old snapshot loader could hash bytes A and parse bytes B. The loader now
+performs one `read_bytes()` and applies SHA-256, UTF-8 decoding, JSON parsing,
+strict Pydantic validation and official-URL validation to that same immutable
+byte string. Its focused RED was `1 failed, 16 deselected`; GREEN was
+`1 passed, 16 deselected in 0.34s`.
+
+The UI RED proved that `postprocess=False` events sent raw two-dimensional
+lists to Gradio Dataframes and rendered the complete live metadata row twice.
+The callback now invokes each real Dataframe component's `postprocess()` and
+sends its `{headers,data,metadata}` value, while status and result metadata have
+one owner each. Focused GREEN was `1 passed, 16 deselected in 4.22s`; the
+snapshot/retrieval/diagnosis/UI callback regression was `62 passed, 1 warning
+in 25.00s`. The final Edge run opened the report, diagnostic-card and citation
+tabs and asserted a real card image plus browser-visible `ModuleNotFoundError`,
+an `evidence_*` ID, locator, and the exact official Python URL. It also asserted
+the complete fresh-live metadata line occurs once in visible body text.
+
 Focused non-network and fresh-identity proof:
 
 ```text
@@ -125,7 +144,7 @@ cross-session preview tokens do not invoke the workflow:
 
 ```text
 .venv\Scripts\python.exe -m pytest
-769 passed, 57 deselected, 1 warning in 222.78s; exit 0
+771 passed, 57 deselected, 1 warning in 217.15s; exit 0
 
 .venv\Scripts\python.exe -m ruff check src tests
 All checks passed; exit 0

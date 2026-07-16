@@ -14,7 +14,7 @@ from debugmate.contracts import CommandStep, ErrorCategory, EvidenceAnchor
 from debugmate.diagnosis.evidence_binding import bind_retrieval_evidence
 from debugmate.diagnosis.extraction import CaseFacts, FieldId
 from debugmate.diagnosis.routing import RoutingDecision
-from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
+from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.knowledge.models import StrictKnowledgeModel
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 
@@ -120,6 +120,17 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise LocalRuleSnapshotError(f"{label} must be a JSON object")
     return value
+
+
+def _load_json_object_bytes(value: bytes, *, label: str) -> dict[str, Any]:
+    try:
+        decoded = value.decode("utf-8")
+        loaded: Any = json.loads(decoded)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise LocalRuleSnapshotError(f"invalid {label} JSON: {error}") from error
+    if not isinstance(loaded, dict):
+        raise LocalRuleSnapshotError(f"{label} must be a JSON object")
+    return loaded
 
 
 def _require_exact_keys(value: dict[str, Any], expected: set[str], *, label: str) -> None:
@@ -233,9 +244,10 @@ def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
 
     expected_sha256 = raw_files[0].get("sha256")
     try:
-        actual_sha256 = sha256_file(payload_path)
+        payload_bytes = payload_path.read_bytes()
     except OSError as error:
-        raise LocalRuleSnapshotError("unable to read local-rule payload for sha256") from error
+        raise LocalRuleSnapshotError("unable to read local-rule payload") from error
+    actual_sha256 = sha256_bytes(payload_bytes)
     if actual_sha256 != expected_sha256:
         raise LocalRuleSnapshotError("local-rule payload sha256 mismatch")
     if raw_manifest.get("knowledge_build_id") != actual_sha256:
@@ -243,7 +255,7 @@ def load_local_rule_snapshot(project_root: Path) -> LocalRuleSnapshot:
             "manifest knowledge_build_id must equal the payload sha256"
         )
 
-    raw_payload = _load_json_object(payload_path, label="payload")
+    raw_payload = _load_json_object_bytes(payload_bytes, label="payload")
     _require_exact_keys(
         raw_payload,
         {"rule_version", "match", "retrieval", "response"},

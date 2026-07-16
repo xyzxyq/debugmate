@@ -845,6 +845,9 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             report_panel = page.locator(".report-panel").first
             report_text = report_panel.inner_text()
             report_visible = report_panel.is_visible()
+            page.get_by_role("tab", name="诊断卡", exact=True).click()
+            card_image = page.locator("#diagnostic-card img").first
+            card_image.wait_for(state="visible", timeout=10_000)
             page.get_by_role("tab", name="引用与下载", exact=True).click()
             download_button = page.locator("text=下载完整证据包").first
             body_text = page.locator("body").inner_text()
@@ -869,11 +872,20 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             assert "fixture_id=null" in result_metadata
             assert "fixture_name=null" in result_metadata
             assert "回放" not in result_metadata
+            assert body_text.count(result_metadata.strip()) == 1
             assert "module-not-found" not in result_metadata
             assert "ModuleNotFoundError：缺少虚构依赖包" not in result_metadata
             assert report_visible
             assert "DebugMate" in report_text
             assert citations_visible
+            assert page.get_by_text("ModuleNotFoundError", exact=True).first.is_visible()
+            assert re.search(r"evidence_[0-9a-f]{32}", body_text) is not None
+            assert "https://docs.python.org/3/library/exceptions.html" in body_text
+            assert page.get_by_role(
+                "button",
+                name="https://docs.python.org/3/library/exceptions.html",
+                exact=True,
+            ).is_visible()
             assert download_enabled
             assert body_horizontal_overflow is False
 
