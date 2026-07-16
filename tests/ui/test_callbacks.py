@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,6 +15,7 @@ from debugmate.results.contracts import (
     ResultMode,
     ResultStatus,
     ResultViewState,
+    SafeFailure,
 )
 from debugmate.results.service import ResultServiceError
 from debugmate.results.verifier import VerifiedDownload
@@ -43,6 +46,8 @@ def _state() -> ResultViewState:
         schema_version="1.1.0",
         generation_version="gen_" + "4" * 32,
     )
+
+
     audio = AudioResult(
         identity=identity,
         available=True,
@@ -71,12 +76,53 @@ def _state() -> ResultViewState:
     )
 
 
+def _partial_state(failed_stage: str) -> ResultViewState:
+    completed = _state()
+    assert completed.identity is not None
+    if failed_stage == "audio":
+        failure = SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts")
+        audio = AudioResult(
+            identity=completed.identity,
+            available=False,
+            attempts=(
+                AudioAttempt(
+                    backend="dify",
+                    rate_profile="normal",
+                    succeeded=False,
+                    safe_error_code="tts_failed",
+                ),
+            ),
+            failure=failure,
+        )
+        availability = ArtifactAvailability(
+            report=True, card=True, recap_text=True, audio=False
+        )
+    else:
+        failure = SafeFailure(
+            code="png_layout_failed", failed_stage="card", retry_scope="card"
+        )
+        audio = completed.audio
+        availability = ArtifactAvailability(
+            report=True, card=False, recap_text=True, audio=True
+        )
+    return completed.model_copy(
+        update={
+            "status": ResultStatus.PARTIAL,
+            "result_id": "result_" + "7" * 32,
+            "availability": availability,
+            "failure": failure,
+            "audio": audio,
+        }
+    )
+
+
 class _Service:
     def __init__(self) -> None:
         self.state = _state()
         self.reject_member = False
         self.replay_calls: list[str] = []
         self.correction_calls: list[tuple[object, ...]] = []
+        self.retry_calls: list[tuple[str, str]] = []
 
     def load_replay(self, fixture_id: str) -> ResultViewState:
         self.replay_calls.append(fixture_id)
@@ -90,8 +136,17 @@ class _Service:
 
             raise ResultServiceError("download_invalid")
         contents = {
+            "diagnosis": (
+                (
+                    Path(__file__).resolve().parents[2]
+                    / "fixtures/cases/module_not_found/diagnosis.json"
+                ).read_bytes(),
+                "diagnosis.json",
+                "application/json",
+            ),
             "report": (b"# DebugMate\n\nverified report", "report.md", "text/markdown"),
             "card": (b"verified-card", "card.png", "image/png"),
+            "recap_text": (b"verified recap", "recap.txt", "text/plain"),
             "audio": (b"verified-audio", "recap.mp3", "audio/mpeg"),
             "bundle": (b"verified-zip", "debugmate-result.zip", "application/zip"),
         }
@@ -123,6 +178,12 @@ class _Service:
     def correct_and_compose(self, previous_run_id, draft, confirmed):
         self.correction_calls.append((previous_run_id, draft, confirmed))
         return self.state
+
+    def retry_stage(self, case_id: str, result_id: str) -> ResultViewState:
+        self.retry_calls.append((case_id, result_id))
+        completed = _state().model_copy(update={"result_id": "result_" + "8" * 32})
+        self.state = completed
+        return completed
 
 
 class _LoopbackRequest:
@@ -263,3 +324,60 @@ def test_field_edit_creates_only_a_local_old_to_new_draft_until_explicit_confirm
 
     callbacks.correct(service.state.identity.source_run_id, draft, confirmed=True)
     assert service.correction_calls[-1][2] is True
+
+
+@pytest.mark.parametrize("failed_stage", ["audio", "card"])
+def test_partial_payload_preserves_verified_members_and_retry_uses_only_server_scope(
+    failed_stage: str,
+) -> None:
+    service = _Service()
+    service.state = _partial_state(failed_stage)
+    callbacks = UiCallbacks(service)
+
+    partial = callbacks._render(service.state)
+
+    assert partial.state.status is ResultStatus.PARTIAL
+    assert partial.report_markdown == "# DebugMate\n\nverified report"
+    assert partial.recap_text == "verified recap"
+    if failed_stage == "audio":
+        assert partial.card_url is not None
+        assert partial.audio_url is None
+    else:
+        assert partial.card_url is None
+        assert partial.audio_url is not None
+    assert partial.view.retry_label is not None
+    old_result_id = partial.state.result_id
+    assert partial.state.identity is not None and old_result_id is not None
+
+    retried = callbacks.retry(partial.state.identity.case_id, old_result_id)
+
+    assert service.retry_calls == [(partial.state.identity.case_id, old_result_id)]
+    assert retried.state.status is ResultStatus.COMPLETED
+    assert retried.state.result_id != old_result_id
+    assert retried.card_url is not None
+    assert retried.audio_url is not None
+
+
+@pytest.mark.parametrize(
+    ("case_id", "result_id"),
+    [
+        ("case_" + "1" * 31, "result_" + "7" * 32),
+        ("case_" + "1" * 32, "result_" + "7" * 31),
+        ("C:/private/case", "result_" + "7" * 32),
+        ("case_" + "1" * 32, "../result_" + "7" * 32),
+    ],
+)
+def test_retry_rejects_tampered_ids_before_any_service_call(
+    case_id: object, result_id: object
+) -> None:
+    service = _Service()
+    service.state = _partial_state("audio")
+    callbacks = UiCallbacks(service)
+
+    payload = callbacks.retry(case_id, result_id)
+
+    assert payload.state.status is ResultStatus.FAILED
+    assert payload.state.failure is not None
+    assert payload.state.failure.code == "result_bundle_invalid"
+    assert service.retry_calls == []
+    assert "private" not in repr(payload)

@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
+import debugmate.ui.app as app_module
 from fastapi.testclient import TestClient
 from gradio.state_holder import SessionState
 
@@ -23,11 +24,13 @@ from debugmate.results.contracts import (
     ResultMode,
     ResultStatus,
     ResultViewState,
+    SafeFailure,
 )
 from debugmate.results.service import ServiceStageEvent
 from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui import serve as serve_module
-from debugmate.ui.app import build_app
+from debugmate.ui.app import CallbackPayload, build_app
+from debugmate.ui.presentation import render_view_state
 from debugmate.ui.serve import _local_service
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -78,6 +81,7 @@ class _Service:
 
     def __init__(self) -> None:
         self.diagnose_calls: list[ApprovedRedactedInput] = []
+        self.retry_calls: list[tuple[str, str]] = []
 
     def diagnose_and_compose_events(self, approved: ApprovedRedactedInput):
         assert isinstance(approved, ApprovedRedactedInput)
@@ -153,6 +157,50 @@ class _Service:
             mime_type=mime_type,
             identity=state.identity,
         )
+
+    def retry_stage(self, case_id: str, result_id: str) -> ResultViewState:
+        self.retry_calls.append((case_id, result_id))
+        return _completed_state().model_copy(update={"result_id": "result_" + "8" * 32})
+
+
+def _partial_state_for_app(failed_stage: str) -> ResultViewState:
+    completed = _completed_state()
+    assert completed.identity is not None
+    if failed_stage == "audio":
+        failure = SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts")
+        audio = AudioResult(
+            identity=completed.identity,
+            available=False,
+            attempts=(
+                AudioAttempt(
+                    backend="dify",
+                    rate_profile="normal",
+                    succeeded=False,
+                    safe_error_code="tts_failed",
+                ),
+            ),
+            failure=failure,
+        )
+        availability = ArtifactAvailability(
+            report=True, card=True, recap_text=True, audio=False
+        )
+    else:
+        failure = SafeFailure(
+            code="png_layout_failed", failed_stage="card", retry_scope="card"
+        )
+        audio = completed.audio
+        availability = ArtifactAvailability(
+            report=True, card=False, recap_text=True, audio=True
+        )
+    return completed.model_copy(
+        update={
+            "status": ResultStatus.PARTIAL,
+            "result_id": "result_" + "7" * 32,
+            "availability": availability,
+            "failure": failure,
+            "audio": audio,
+        }
+    )
 
 
 def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() -> None:
@@ -402,6 +450,92 @@ def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None
     )
     assert download["props"]["visible"] is True
     assert download["props"]["interactive"] is False
+
+
+def test_partial_retry_has_one_initially_disabled_server_labeled_control() -> None:
+    app = build_app(_Service())
+    config = app.get_config_file()
+    retry_controls = [
+        component
+        for component in config["components"]
+        if component["props"].get("elem_id") == "partial-retry"
+    ]
+
+    assert len(retry_controls) == 1
+    assert retry_controls[0]["type"] == "button"
+    assert retry_controls[0]["props"]["interactive"] is False
+    assert retry_controls[0]["props"]["value"] == "安全重试"
+    callbacks = [
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "retry_verified_partial"
+    ]
+    assert len(callbacks) == 1
+    assert callbacks[0].queue is True
+    assert callbacks[0].concurrency_id == "debugmate-case"
+
+
+@pytest.mark.parametrize("failed_stage", ["audio", "card"])
+def test_partial_retry_label_is_derived_from_verified_result_view_state(
+    failed_stage: str,
+) -> None:
+    state = _partial_state_for_app(failed_stage)
+    view = render_view_state(state)
+    retry_updates = getattr(app_module, "_retry_control_updates", None)
+
+    assert callable(retry_updates)
+    update, case_id, result_id = retry_updates(
+        CallbackPayload(
+            state=state,
+            view=view,
+            report_markdown="# verified",
+            card_url=None,
+            audio_url=None,
+            download_url=None,
+            field_values=("", "", "", "", "", ""),
+        )
+    )
+    assert update["label"] == view.retry_label
+    assert update["interactive"] is True
+    assert state.identity is not None
+    assert (case_id, result_id) == (state.identity.case_id, state.result_id)
+
+
+@pytest.mark.parametrize("status", [ResultStatus.IDLE, ResultStatus.RUNNING, ResultStatus.COMPLETED])
+def test_retry_control_is_disabled_outside_verified_partial_terminal_state(
+    status: ResultStatus,
+) -> None:
+    if status is ResultStatus.COMPLETED:
+        state = _completed_state()
+    elif status is ResultStatus.RUNNING:
+        state = ResultViewState(
+            mode=ResultMode.LIVE,
+            status=status,
+            availability=ArtifactAvailability(),
+            current_stage="report",
+        )
+    else:
+        state = ResultViewState(
+            mode=ResultMode.LIVE,
+            status=status,
+            availability=ArtifactAvailability(),
+        )
+    retry_updates = getattr(app_module, "_retry_control_updates", None)
+
+    assert callable(retry_updates)
+    update, case_id, result_id = retry_updates(
+        CallbackPayload(
+            state=state,
+            view=render_view_state(state),
+            report_markdown=None,
+            card_url=None,
+            audio_url=None,
+            download_url=None,
+            field_values=("", "", "", "", "", ""),
+        )
+    )
+    assert update["interactive"] is False
+    assert (case_id, result_id) == (None, None)
 
 
 def test_live_callback_sends_postprocessed_dataframe_cells_and_one_metadata_row() -> None:
