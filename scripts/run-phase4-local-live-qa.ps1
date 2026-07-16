@@ -77,46 +77,129 @@ function Stop-CapturedServer {
 
 function Restore-EvidencePairTransaction {
     param([Parameter(Mandatory)]$Transaction)
-    foreach ($path in @(
-            $Transaction.StagingScreenshot, $Transaction.StagingLedger,
-            $Transaction.ScreenshotPath, $Transaction.LedgerPath
-        )) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    foreach ($file in @($Transaction.Screenshot, $Transaction.Ledger)) {
+        if (Test-Path -LiteralPath $file.StagingPath) {
+            & $Transaction.RemoveFile $file.StagingPath
+        }
+        if ($file.Promoted) {
+            if (Test-Path -LiteralPath $file.FinalPath) {
+                & $Transaction.RemoveFile $file.FinalPath
+            }
+            $file.Promoted = $false
+        }
+        if ($file.BackedUp) {
+            if (-not (Test-Path -LiteralPath $file.BackupPath -PathType Leaf)) {
+                throw "Recorded evidence backup is missing: $($file.BackupPath)"
+            }
+            & $Transaction.MoveFile $file.BackupPath $file.FinalPath
+            $file.BackedUp = $false
+        }
     }
-    if (Test-Path -LiteralPath $Transaction.BackupScreenshot) {
-        Move-Item -LiteralPath $Transaction.BackupScreenshot -Destination $Transaction.ScreenshotPath
-    }
-    if (Test-Path -LiteralPath $Transaction.BackupLedger) {
-        Move-Item -LiteralPath $Transaction.BackupLedger -Destination $Transaction.LedgerPath
-    }
-    $Transaction.Promoted = $false
+    $Transaction.FormalCommitted = $false
+    $Transaction.CleanupComplete = $true
 }
 
-function New-EvidencePairTransaction {
+function Reconcile-EvidencePairResidue {
     param(
         [Parameter(Mandatory)][string]$ScreenshotPath,
-        [Parameter(Mandatory)][string]$LedgerPath
+        [Parameter(Mandatory)][string]$LedgerPath,
+        [scriptblock]$RemoveFile = {
+            param($Path)
+            Remove-Item -LiteralPath $Path -Force
+        }
     )
     $screenshotParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScreenshotPath))
     $ledgerParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $LedgerPath))
     if ($screenshotParent -ne $ledgerParent) { throw 'Evidence pair must share one directory and volume.' }
     [System.IO.Directory]::CreateDirectory($screenshotParent) | Out-Null
+    $residue = @(
+        Get-ChildItem -LiteralPath $screenshotParent -File -Force |
+            Where-Object {
+                $_.Name -match '^\.(VQ-01-live-local|local-live-vq01)\.(staging|backup)\.'
+            }
+    )
+    if ($residue.Count -eq 0) { return }
+    if (-not (Test-Path -LiteralPath $ScreenshotPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) {
+        throw 'Unresolved evidence transaction residue requires manual recovery.'
+    }
+    $formalPair = [pscustomobject]@{
+        StagingScreenshot = [System.IO.Path]::GetFullPath($ScreenshotPath)
+        StagingLedger = [System.IO.Path]::GetFullPath($LedgerPath)
+    }
+    Assert-StagedEvidencePair -Transaction $formalPair
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $residue) {
+        try { & $RemoveFile $item.FullName }
+        catch { [void]$errors.Add("$($item.Name): $($_.Exception.Message)") }
+    }
+    if ($errors.Count -gt 0) {
+        throw "Evidence transaction residue cleanup incomplete: $($errors -join '; ')"
+    }
+}
+
+function New-EvidencePairTransaction {
+    param(
+        [Parameter(Mandatory)][string]$ScreenshotPath,
+        [Parameter(Mandatory)][string]$LedgerPath,
+        [scriptblock]$MoveFile = {
+            param($Source, $Destination)
+            Move-Item -LiteralPath $Source -Destination $Destination
+        },
+        [scriptblock]$RemoveFile = {
+            param($Path)
+            Remove-Item -LiteralPath $Path -Force
+        }
+    )
+    $screenshotParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScreenshotPath))
+    $ledgerParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $LedgerPath))
+    if ($screenshotParent -ne $ledgerParent) { throw 'Evidence pair must share one directory and volume.' }
+    [System.IO.Directory]::CreateDirectory($screenshotParent) | Out-Null
+    Reconcile-EvidencePairResidue `
+        -ScreenshotPath $ScreenshotPath `
+        -LedgerPath $LedgerPath `
+        -RemoveFile $RemoveFile
     $token = [Guid]::NewGuid().ToString('N')
-    $transaction = [pscustomobject]@{
-        ScreenshotPath = [System.IO.Path]::GetFullPath($ScreenshotPath)
-        LedgerPath = [System.IO.Path]::GetFullPath($LedgerPath)
-        StagingScreenshot = Join-Path $screenshotParent ".VQ-01-live-local.staging.$token.png"
-        StagingLedger = Join-Path $ledgerParent ".local-live-vq01.staging.$token.json"
-        BackupScreenshot = Join-Path $screenshotParent ".VQ-01-live-local.backup.$token.png"
-        BackupLedger = Join-Path $ledgerParent ".local-live-vq01.backup.$token.json"
+    $screenshotState = [pscustomobject]@{
+        FinalPath = [System.IO.Path]::GetFullPath($ScreenshotPath)
+        StagingPath = Join-Path $screenshotParent ".VQ-01-live-local.staging.$token.png"
+        BackupPath = Join-Path $screenshotParent ".VQ-01-live-local.backup.$token.png"
+        HadOriginal = Test-Path -LiteralPath $ScreenshotPath -PathType Leaf
+        BackedUp = $false
         Promoted = $false
+        BackupCleaned = $false
+    }
+    $ledgerState = [pscustomobject]@{
+        FinalPath = [System.IO.Path]::GetFullPath($LedgerPath)
+        StagingPath = Join-Path $ledgerParent ".local-live-vq01.staging.$token.json"
+        BackupPath = Join-Path $ledgerParent ".local-live-vq01.backup.$token.json"
+        HadOriginal = Test-Path -LiteralPath $LedgerPath -PathType Leaf
+        BackedUp = $false
+        Promoted = $false
+        BackupCleaned = $false
+    }
+    $transaction = [pscustomobject]@{
+        Screenshot = $screenshotState
+        Ledger = $ledgerState
+        ScreenshotPath = $screenshotState.FinalPath
+        LedgerPath = $ledgerState.FinalPath
+        StagingScreenshot = $screenshotState.StagingPath
+        StagingLedger = $ledgerState.StagingPath
+        BackupScreenshot = $screenshotState.BackupPath
+        BackupLedger = $ledgerState.BackupPath
+        MoveFile = $MoveFile
+        RemoveFile = $RemoveFile
+        FormalCommitted = $false
+        CleanupComplete = $false
     }
     try {
-        if (Test-Path -LiteralPath $transaction.ScreenshotPath) {
-            Move-Item -LiteralPath $transaction.ScreenshotPath -Destination $transaction.BackupScreenshot
+        if ($screenshotState.HadOriginal) {
+            & $MoveFile $screenshotState.FinalPath $screenshotState.BackupPath
+            $screenshotState.BackedUp = $true
         }
-        if (Test-Path -LiteralPath $transaction.LedgerPath) {
-            Move-Item -LiteralPath $transaction.LedgerPath -Destination $transaction.BackupLedger
+        if ($ledgerState.HadOriginal) {
+            & $MoveFile $ledgerState.FinalPath $ledgerState.BackupPath
+            $ledgerState.BackedUp = $true
         }
         return $transaction
     }
@@ -187,9 +270,10 @@ function Complete-EvidencePairTransaction {
     param([Parameter(Mandatory)]$Transaction)
     Assert-StagedEvidencePair -Transaction $Transaction
     try {
-        Move-Item -LiteralPath $Transaction.StagingScreenshot -Destination $Transaction.ScreenshotPath
-        Move-Item -LiteralPath $Transaction.StagingLedger -Destination $Transaction.LedgerPath
-        $Transaction.Promoted = $true
+        & $Transaction.MoveFile $Transaction.Screenshot.StagingPath $Transaction.Screenshot.FinalPath
+        $Transaction.Screenshot.Promoted = $true
+        & $Transaction.MoveFile $Transaction.Ledger.StagingPath $Transaction.Ledger.FinalPath
+        $Transaction.Ledger.Promoted = $true
     }
     catch {
         Restore-EvidencePairTransaction -Transaction $Transaction
@@ -199,9 +283,25 @@ function Complete-EvidencePairTransaction {
 
 function Commit-EvidencePairTransaction {
     param([Parameter(Mandatory)]$Transaction)
-    if (-not $Transaction.Promoted) { throw 'Evidence pair was not promoted.' }
-    foreach ($path in @($Transaction.BackupScreenshot, $Transaction.BackupLedger)) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    if (-not $Transaction.Screenshot.Promoted -or -not $Transaction.Ledger.Promoted) {
+        throw 'Evidence pair was not fully promoted.'
+    }
+    $Transaction.FormalCommitted = $true
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($file in @($Transaction.Screenshot, $Transaction.Ledger)) {
+        if ($file.BackedUp) {
+            try {
+                & $Transaction.RemoveFile $file.BackupPath
+                $file.BackedUp = $false
+                $file.BackupCleaned = $true
+            }
+            catch { [void]$errors.Add("$($file.BackupPath): $($_.Exception.Message)") }
+        }
+        else { $file.BackupCleaned = $true }
+    }
+    $Transaction.CleanupComplete = $errors.Count -eq 0
+    if ($errors.Count -gt 0) {
+        throw "Evidence backup cleanup incomplete; formal pair remains committed: $($errors -join '; ')"
     }
 }
 

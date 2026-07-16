@@ -98,7 +98,7 @@ Three hardening failures demonstrated real rollback: a browser-local variable
 error, an over-strict optional lineage assertion, and a PowerShell UTC format
 error. Each run restored the prior formal hashes, left no staging files, stopped
 only its captured process, and proved ports `51022`, `50263`, and `53129` closed.
-The final runner passed `1 passed in 38.60s`, proved port `57328` closed, and left
+The prior review-fix runner passed `1 passed in 38.60s`, proved port `57328` closed, and left
 zero staging/backup files and zero `debugmate.ui.serve` processes.
 
 ### Observed backend and ledger strictness
@@ -115,8 +115,8 @@ timestamp, and records overflow directly from
 
 ### Formal evidence and verification
 
-- Screenshot SHA-256: `ac1a0af845a6c292f1fa304755d76968f56604b0a1c2fac8d88a21680b706d84`.
-- Ledger SHA-256: `00fe952e1f06736fa9b83f61dbbef1457ea53ffa5b5aa3682713a3987a96f861`.
+- Screenshot SHA-256 at that review stage: `ac1a0af845a6c292f1fa304755d76968f56604b0a1c2fac8d88a21680b706d84`.
+- Ledger SHA-256 at that review stage: `00fe952e1f06736fa9b83f61dbbef1457ea53ffa5b5aa3682713a3987a96f861`.
 - Source backend, case hash, source-run hash, and screenshot hash all match the ledger.
 - Original-resolution viewer confirms completed/live state, three workbench
   headings, citation/download tab, enabled download CTA, visible
@@ -126,7 +126,7 @@ timestamp, and records overflow directly from
 - Full pytest: `769 passed, 51 deselected, 1 warning in 229.18s`.
 - Ruff, pip check, and diff check: exit `0`; secret scan: expected clean exit `1`.
 - TTS marker: `3 passed, 2 skipped in 12.90s`; machine checks pass and human
-  listening remains exactly `human_needed`.
+listening remains exactly `human_needed`.
 
 ### Truth boundary and remaining concerns
 
@@ -135,3 +135,50 @@ Phase 4 is not complete. The 04-07 Dify/edge-TTS external outcomes remain
 unchanged. Dify credentials are absent, network TTS was not approved, the
 existing Starlette/httpx deprecation warning remains, and a human still must
 listen before course recording.
+
+## Re-review per-file transaction fix (2026-07-16)
+
+The next review found that rollback state was still pair-wide. Deterministic
+fault injection first produced RED `6 failed, 24 deselected`: the runner had no
+per-operation injection boundary or per-file state. GREEN was
+`6 passed, 24 deselected in 6.93s`; the final combined transaction/ledger/source
+focus passed `10 passed, 20 deselected in 8.59s`.
+
+Each screenshot/ledger member now records `HadOriginal`, `BackedUp`,
+`Promoted`, and `BackupCleaned`. Restore removes only a member actually
+promoted and restores only a member actually backed up. The matrix proves:
+
+- screenshot backup failure before any backup leaves both old formal bytes untouched;
+- ledger backup failure after screenshot backup restores both original files;
+- first/second promotion failures restore both old files without residue;
+- first/second backup-cleanup failures keep the complete validated new formal
+  pair, return an explicit cleanup error, and retain recognizable residue;
+- the next-start reconcile validates the formal PNG/ledger first and then
+  idempotently clears that residue.
+
+The mandatory final real run passed `1 passed in 36.99s`, closed captured port
+`54855`, and left zero staging/backup files and zero server processes. Its
+current unique formal hashes are:
+
+- PNG: `875813f5cdd332dc99ff1a017c389c47f31638a8f6514b4b97631a27e42976aa`;
+- ledger: `8a50fd7adba23408b24ecdf0fb3ba31a745994ef7b0080b6944f1299132ed8e0`.
+
+The original `35d9aa50...` / `82543144...` pair and intermediate
+`8637e619...` / `9993c4b9...` pair are explicitly superseded. The later
+`ac1a0af8...` / `00fe952e...` review pair is also superseded only because the
+required final real runner generated a fresh identity-bound screenshot and
+ledger. The two full hashes immediately above are the only current formal
+evidence hashes.
+
+Final verification on the re-review code reported:
+
+- combined focused fault/source/ledger matrix: `10 passed, 20 deselected in 8.59s`;
+- full pytest: `769 passed, 57 deselected, 1 warning in 222.78s`;
+- Ruff, pip check, and diff check: exit `0`;
+- product secret scan: expected clean exit `1`;
+- TTS marker: `3 passed, 2 skipped in 12.89s`, with human listening still
+  exactly `human_needed`.
+
+Truth boundaries remain unchanged: only VQ-01 is closed, VQ-02 through VQ-15
+remain open, Dify and network TTS gates remain external, and human listening is
+still `human_needed`.

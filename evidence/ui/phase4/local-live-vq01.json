@@ -9,11 +9,11 @@
   "fixture_id": null,
   "fixture_name": null,
   "backend": "local-rule-v1",
-  "case_id_sha256": "61ff6be474a7866df26d8757681a69968ac8a93956f81fd5a3f1b3e7fea6c35e",
-  "source_run_id_sha256": "94c7a33429c7dbcb9afe4166a05241d87ed27c8f76423c0ea027ac45704c1594",
-  "result_id_sha256": "339c9dc0e118d41de42bd1d8c9c8e72fb870df2f9157921d897c655a2048ba65",
-  "screenshot_sha256": "ac1a0af845a6c292f1fa304755d76968f56604b0a1c2fac8d88a21680b706d84",
+  "case_id_sha256": "a4dcc12f6c5d20ff4569c1f2f80dc74e2ee7c3ef10b54157998451c4f6caed35",
+  "source_run_id_sha256": "90eaa7862ea87c9332230227f8b1f53f847d49f7ccfd9580cd85ea3288fe2061",
+  "result_id_sha256": "3db997a7c665923694377bdcddad0b1e3dab821b310b6cc7e5fdf4b21fe7ed7e",
+  "screenshot_sha256": "875813f5cdd332dc99ff1a017c389c47f31638a8f6514b4b97631a27e42976aa",
   "body_horizontal_overflow": false,
   "server_owner": "run-phase4-local-live-qa.ps1",
-  "verified_at_utc": "2026-07-16T07:38:38.110807Z"
+  "verified_at_utc": "2026-07-16T07:54:18.575032Z"
 }

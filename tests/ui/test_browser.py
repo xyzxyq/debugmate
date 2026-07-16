@@ -8,6 +8,7 @@ acceptance.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -123,7 +124,7 @@ def test_local_live_runner_failure_restores_old_pair_and_clears_staging(tmp_path
     runner = str(_LOCAL_LIVE_RUNNER).replace("'", "''")
     screenshot_arg = str(screenshot).replace("'", "''")
     ledger_arg = str(ledger).replace("'", "''")
-    command = f"""
+    command = rf"""
 $ErrorActionPreference = 'Stop'
 . '{runner}'
 $transaction = New-EvidencePairTransaction `
@@ -151,6 +152,167 @@ catch {{
     assert screenshot.read_bytes() == b"old-png-bytes"
     assert ledger.read_bytes() == b"old-ledger-bytes"
     assert sorted(path.name for path in evidence_dir.iterdir()) == ["formal.json", "formal.png"]
+
+
+def _run_transaction_fault(tmp_path: Path, fault: str) -> dict[str, object]:
+    evidence_dir = tmp_path / fault
+    evidence_dir.mkdir()
+    screenshot = evidence_dir / "formal.png"
+    ledger = evidence_dir / "formal.json"
+    screenshot.write_bytes(b"old-png-bytes")
+    ledger.write_bytes(b"old-ledger-bytes")
+    staged_png = evidence_dir / "new.png"
+    staged_png.write_bytes((_EVIDENCE / "VQ-01-live-local.png").read_bytes())
+    staged_ledger = evidence_dir / "new.json"
+    staged_ledger.write_text(
+        json.dumps(
+            {
+                "evidence_version": 1,
+                "viewport": {"width": 1366, "height": 768},
+                "status": "completed",
+                "mode": "live",
+                "fixture_id": None,
+                "fixture_name": None,
+                "backend": "local-rule-v1",
+                "case_id_sha256": "1" * 64,
+                "source_run_id_sha256": "2" * 64,
+                "result_id_sha256": "3" * 64,
+                "screenshot_sha256": hashlib.sha256(staged_png.read_bytes()).hexdigest(),
+                "body_horizontal_overflow": False,
+                "server_owner": "run-phase4-local-live-qa.ps1",
+                "verified_at_utc": "2026-07-16T08:00:00.000000Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    def quote(value: object) -> str:
+        return str(value).replace("'", "''")
+
+    command = rf"""
+$ErrorActionPreference = 'Stop'
+. '{quote(_LOCAL_LIVE_RUNNER)}'
+$fault = '{fault}'
+$move = {{
+    param($Source, $Destination)
+    $sourceName = [IO.Path]::GetFileName([string]$Source)
+    $destinationName = [IO.Path]::GetFileName([string]$Destination)
+    $backupScreenshot = $fault -eq 'backup_screenshot' -and `
+        $sourceName -eq 'formal.png' -and $destinationName -match 'backup'
+    $backupLedger = $fault -eq 'backup_ledger' -and `
+        $sourceName -eq 'formal.json' -and $destinationName -match 'backup'
+    $promoteScreenshot = $fault -eq 'promote_screenshot' -and `
+        $sourceName -match 'staging.*png' -and $destinationName -eq 'formal.png'
+    $promoteLedger = $fault -eq 'promote_ledger' -and `
+        $sourceName -match 'staging.*json' -and $destinationName -eq 'formal.json'
+    if ($backupScreenshot -or $backupLedger -or $promoteScreenshot -or $promoteLedger) {{
+        throw "injected move failure: $fault"
+    }}
+    Microsoft.PowerShell.Management\Move-Item -LiteralPath $Source -Destination $Destination
+}}
+$remove = {{
+    param($Path)
+    $name = [IO.Path]::GetFileName([string]$Path)
+    if (($fault -eq 'cleanup_screenshot' -and $name -match '^\.VQ-01.*backup') -or
+        ($fault -eq 'cleanup_ledger' -and $name -match '^\.local-live.*backup')) {{
+        throw "injected cleanup failure: $fault"
+    }}
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $Path -Force
+}}
+$transaction = $null
+$errorText = $null
+try {{
+    $transaction = New-EvidencePairTransaction `
+        -ScreenshotPath '{quote(screenshot)}' `
+        -LedgerPath '{quote(ledger)}' `
+        -MoveFile $move `
+        -RemoveFile $remove
+    [IO.File]::Copy('{quote(staged_png)}', $transaction.StagingScreenshot, $true)
+    [IO.File]::Copy('{quote(staged_ledger)}', $transaction.StagingLedger, $true)
+    Complete-EvidencePairTransaction -Transaction $transaction
+    Commit-EvidencePairTransaction -Transaction $transaction
+}}
+catch {{ $errorText = $_.Exception.Message }}
+$filesBeforeReconcile = @((Get-ChildItem -LiteralPath '{quote(evidence_dir)}').Name | Sort-Object)
+if ($fault -match '^cleanup_') {{
+    Reconcile-EvidencePairResidue `
+        -ScreenshotPath '{quote(screenshot)}' `
+        -LedgerPath '{quote(ledger)}'
+}}
+$summary = [ordered]@{{
+    error = $errorText
+    screenshot = if (Test-Path -LiteralPath '{quote(screenshot)}') {{
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes('{quote(screenshot)}'))
+    }} else {{ $null }}
+    ledger = if (Test-Path -LiteralPath '{quote(ledger)}') {{
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes('{quote(ledger)}'))
+    }} else {{ $null }}
+    files = @((Get-ChildItem -LiteralPath '{quote(evidence_dir)}').Name | Sort-Object)
+    files_before_reconcile = $filesBeforeReconcile
+    screenshot_backed_up = if ($null -ne $transaction) {{
+        $transaction.Screenshot.BackedUp
+    }} else {{ $null }}
+    ledger_backed_up = if ($null -ne $transaction) {{
+        $transaction.Ledger.BackedUp
+    }} else {{ $null }}
+    screenshot_promoted = if ($null -ne $transaction) {{
+        $transaction.Screenshot.Promoted
+    }} else {{ $null }}
+    ledger_promoted = if ($null -ne $transaction) {{
+        $transaction.Ledger.Promoted
+    }} else {{ $null }}
+    formal_committed = if ($null -ne $transaction) {{
+        $transaction.FormalCommitted
+    }} else {{ $null }}
+    cleanup_complete = if ($null -ne $transaction) {{
+        $transaction.CleanupComplete
+    }} else {{ $null }}
+}}
+$summary | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    json_line = next(
+        line for line in reversed(completed.stdout.splitlines()) if line.startswith("{")
+    )
+    return json.loads(json_line)
+
+
+@pytest.mark.parametrize(
+    "fault", ["backup_screenshot", "backup_ledger", "promote_screenshot", "promote_ledger"]
+)
+def test_evidence_transaction_move_failures_restore_old_pair(
+    tmp_path: Path, fault: str
+) -> None:
+    result = _run_transaction_fault(tmp_path, fault)
+
+    assert "injected move failure" in str(result["error"])
+    assert base64.b64decode(result["screenshot"]) == b"old-png-bytes"
+    assert base64.b64decode(result["ledger"]) == b"old-ledger-bytes"
+    assert not any("staging" in name or "backup" in name for name in result["files"])
+
+
+@pytest.mark.parametrize("fault", ["cleanup_screenshot", "cleanup_ledger"])
+def test_evidence_transaction_cleanup_failure_keeps_new_pair_and_explicit_residue(
+    tmp_path: Path, fault: str
+) -> None:
+    result = _run_transaction_fault(tmp_path, fault)
+
+    assert "injected cleanup failure" in str(result["error"])
+    assert base64.b64decode(result["screenshot"]) != b"old-png-bytes"
+    assert base64.b64decode(result["ledger"]) != b"old-ledger-bytes"
+    assert result["formal_committed"] is True
+    assert result["cleanup_complete"] is False
+    assert result["screenshot_promoted"] is True
+    assert result["ledger_promoted"] is True
+    assert any("backup" in name for name in result["files_before_reconcile"])
+    assert not any("staging" in name or "backup" in name for name in result["files"])
 
 
 def test_source_manifest_backend_is_strictly_observed_and_identity_bound(tmp_path: Path) -> None:

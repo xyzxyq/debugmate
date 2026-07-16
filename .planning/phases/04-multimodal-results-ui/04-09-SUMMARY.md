@@ -18,8 +18,8 @@ released the reservation, started exactly one captured hidden
 `.venv\Scripts\python.exe -m debugmate.ui.serve --host 127.0.0.1 --port N`
 process, required the root `/config` object with a `components` list, injected
 the base URL and screenshot path, and ran only the VQ-01 live browser test. Its
-formal review-fix run passed `1 passed in 38.60s`; only the captured process was stopped
-and port `57328` was proved closed. The runner uses no fixture path, public
+formal re-review run passed `1 passed in 36.99s`; only the captured process was stopped
+and port `54855` was proved closed. The runner uses no fixture path, public
 host, owner takeover, or shell redirection.
 
 The real Microsoft Edge screenshot is exactly `1366 x 768`. Visual inspection
@@ -31,8 +31,8 @@ metrics were `scrollWidth=1366`, `clientWidth=1366`, so
 
 | Evidence | SHA-256 |
 |---|---|
-| `evidence/ui/phase4/VQ-01-live-local.png` | `ac1a0af845a6c292f1fa304755d76968f56604b0a1c2fac8d88a21680b706d84` |
-| `evidence/ui/phase4/local-live-vq01.json` | `00fe952e1f06736fa9b83f61dbbef1457ea53ffa5b5aa3682713a3987a96f861` |
+| `evidence/ui/phase4/VQ-01-live-local.png` | `875813f5cdd332dc99ff1a017c389c47f31638a8f6514b4b97631a27e42976aa` |
+| `evidence/ui/phase4/local-live-vq01.json` | `8a50fd7adba23408b24ecdf0fb3ba31a745994ef7b0080b6944f1299132ed8e0` |
 
 The machine ledger has exactly the approved 14-field allowlist. It records
 `completed`, `live`, null fixture fields, `local-rule-v1`, zero overflow, the
@@ -56,6 +56,16 @@ the ledger screenshot hash. Promotion is pair-aware and rollback restores the
 old bytes if pytest, validation, promotion, or captured-owner cleanup fails.
 The final successful run left zero staging/backup files and zero
 `debugmate.ui.serve` processes.
+
+Each file now has independent `HadOriginal`, `BackedUp`, `Promoted`, and
+`BackupCleaned` state. Restore deletes a formal file only when that exact file
+was promoted and restores an old file only when that exact file was backed up;
+an untouched formal file is never removed. Once both validated files are
+promoted, the new formal pair is the committed fact. Backup deletion is
+independent and idempotent: a deletion failure returns an explicit cleanup
+error without rolling back or mixing the valid new pair. A later start first
+validates the complete formal pair, then reconciles recognizable staging/backup
+residue before opening a new transaction.
 
 ## TDD and focused safety proof
 
@@ -85,6 +95,12 @@ or backup residue. During real-run hardening, browser/assertion and staging UTC
 validation failures also restored the prior formal pair and closed only ports
 `51022`, `50263`, and `53129` before the final successful publication.
 
+The re-review deterministic fault matrix covered screenshot/ledger failure at
+both backup and promotion, plus screenshot/ledger backup-cleanup failure:
+RED was `6 failed, 24 deselected`; GREEN was
+`6 passed, 24 deselected in 6.93s`. The final combined transaction, ledger, and
+source-manifest focus passed `10 passed, 20 deselected in 8.59s`.
+
 Focused non-network and fresh-identity proof:
 
 ```text
@@ -109,7 +125,7 @@ cross-session preview tokens do not invoke the workflow:
 
 ```text
 .venv\Scripts\python.exe -m pytest
-769 passed, 51 deselected, 1 warning in 229.18s; exit 0
+769 passed, 57 deselected, 1 warning in 222.78s; exit 0
 
 .venv\Scripts\python.exe -m ruff check src tests
 All checks passed; exit 0
@@ -131,7 +147,7 @@ The required current-code audio marker was rerun:
 
 ```text
 .venv\Scripts\python.exe -m pytest -q -m tts tests\results\test_tts_live.py
-3 passed, 2 skipped in 12.90s; exit 0
+3 passed, 2 skipped in 12.89s; exit 0
 ```
 
 The retained SAPI record remains mono MP3, 45,144 ms, 180,576 bytes, decode
