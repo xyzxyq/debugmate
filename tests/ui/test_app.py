@@ -194,6 +194,23 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "overflow-x: hidden" not in app.css
 
 
+def test_production_app_has_no_qa_handler_route_selector_or_capability_surface() -> None:
+    app = build_app(_Service())
+    config = app.get_config_file()
+    rendered = repr(config).lower()
+    routes = {getattr(route, "path", "") for route in app.app.routes}
+
+    assert not any("qa" in route.lower() for route in routes)
+    assert "debugmate_qa" not in rendered
+    assert "qa scenario" not in rendered
+    assert "x-debugmate-qa-capability" not in rendered
+    assert not any(
+        component["type"] in {"dropdown", "textbox"}
+        and "qa" in str(component.get("props", {}).get("label", "")).lower()
+        for component in config["components"]
+    )
+
+
 class _Request:
     def __init__(self, session_hash: str) -> None:
         self.session_hash = session_hash
