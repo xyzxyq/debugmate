@@ -214,6 +214,26 @@ def test_real_http_qa_route_denies_missing_wrong_or_nonloopback_without_side_eff
         assert wrong_token not in caplog.text
 
 
+@pytest.mark.parametrize(
+    "enabled,capability",
+    [(False, CAPABILITY), (True, "not-a-fresh-capability")],
+)
+def test_qa_route_is_not_installed_without_both_server_side_gates(
+    enabled: bool, capability: str
+) -> None:
+    qa = _qa()
+    gate = qa.QaCapabilityGate(
+        process_enabled=enabled,
+        capability=capability,
+        scenario_handler=lambda _scenario: {"accepted": True},
+    )
+    app = build_app(object())
+
+    qa.mount_qa_endpoint(app.app, gate)
+
+    assert QA_ROUTE not in {getattr(route, "path", "") for route in app.app.routes}
+
+
 def test_enabled_qa_handler_on_real_app_keeps_capability_out_of_every_public_surface() -> None:
     qa = _qa()
     gate = qa.QaCapabilityGate(
