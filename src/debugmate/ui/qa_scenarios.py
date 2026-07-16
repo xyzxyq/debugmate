@@ -21,8 +21,6 @@ from starlette.responses import JSONResponse
 
 from debugmate.results.contracts import (
     ArtifactAvailability,
-    AudioAttempt,
-    AudioResult,
     ResultMode,
     ResultStatus,
     ResultViewState,
@@ -99,6 +97,7 @@ class VerifiedQaBaseline:
     """Opaque result state returned only after the real replay service verifies it."""
 
     state: ResultViewState
+    service: ResultApplicationService
     source_hashes: tuple[tuple[str, str], ...]
     category: str
     recap_text: str
@@ -319,12 +318,12 @@ def _verified_baseline_state(value: ResultViewState) -> ResultViewState:
     baseline = ResultViewState.model_validate_json(value.model_dump_json(), strict=True)
     if (
         baseline.mode is not ResultMode.REPLAY
-        or baseline.status is not ResultStatus.COMPLETED
+        or baseline.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
         or baseline.fixture_id != "module-not-found"
         or baseline.identity is None
         or baseline.result_id is None
         or baseline.audio is None
-        or not baseline.audio.available
+        or (baseline.status is ResultStatus.COMPLETED and not baseline.audio.available)
     ):
         raise ValueError("QA baseline must be a verified module-not-found replay")
     return baseline
@@ -347,32 +346,10 @@ def load_verified_qa_baseline(service: ResultApplicationService) -> VerifiedQaBa
         raise ValueError("QA fixture source and result identities differ")
     return VerifiedQaBaseline(
         state=state,
+        service=service,
         source_hashes=tuple(sorted(outcome.extraction.source_hashes.items())),
         category=outcome.diagnosis.category,
         recap_text=outcome.diagnosis.recap_text,
-    )
-
-
-def _fallback_audio_from_baseline(baseline: AudioResult) -> AudioResult:
-    """Add only a safe failed attempt while preserving verified media facts."""
-
-    final = baseline.attempts[-1]
-    return AudioResult(
-        identity=baseline.identity,
-        available=True,
-        backend=baseline.backend,
-        fallback_used=True,
-        attempts=(
-            AudioAttempt(
-                backend="dify",
-                rate_profile="normal",
-                succeeded=False,
-                safe_error_code="tts_backend_failed",
-            ),
-            final,
-        ),
-        duration_ms=baseline.duration_ms,
-        sha256=baseline.sha256,
     )
 
 
@@ -380,20 +357,10 @@ def _spec(scenario: QaScenario, verified: VerifiedQaBaseline) -> QaScenarioSpec:
     if not isinstance(verified, VerifiedQaBaseline):
         raise TypeError("QA scenarios require a verified baseline handle")
     baseline = _verified_baseline_state(verified.state)
-    identity = baseline.identity
-    result_id = baseline.result_id
-    complete = ArtifactAvailability(report=True, card=True, recap_text=True, audio=True)
     if scenario is QaScenario.VQ_02_REPLAY:
-        state = ResultViewState(
-            mode=ResultMode.REPLAY,
-            status=ResultStatus.COMPLETED,
-            fixture_id=baseline.fixture_id,
-            fixture_name=baseline.fixture_name,
-            identity=identity,
-            result_id=result_id,
-            availability=complete,
-            audio=baseline.audio,
-        )
+        if baseline.status is not ResultStatus.COMPLETED or baseline.failure is not None:
+            raise ValueError("VQ-02 requires a published completed replay")
+        state = baseline
     elif scenario is QaScenario.VQ_03_RUNNING:
         state = ResultViewState(
             mode=ResultMode.LIVE,
@@ -402,39 +369,31 @@ def _spec(scenario: QaScenario, verified: VerifiedQaBaseline) -> QaScenarioSpec:
             current_stage=QA_STAGE_ORDER[0],
         )
     elif scenario is QaScenario.VQ_06_TTS_FAILED:
-        failure = SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts")
-        state = ResultViewState(
-            mode=ResultMode.LIVE,
-            status=ResultStatus.PARTIAL,
-            identity=identity,
-            result_id=result_id,
-            availability=ArtifactAvailability(report=True, card=True, recap_text=True),
-            failure=failure,
-            audio=AudioResult(
-                identity=identity,
-                available=False,
-                attempts=(
-                    AudioAttempt(
-                        backend="dify",
-                        rate_profile="normal",
-                        succeeded=False,
-                        safe_error_code="tts_failed",
-                    ),
-                ),
-                failure=failure,
-            ),
-        )
+        if (
+            baseline.status is not ResultStatus.PARTIAL
+            or baseline.failure is None
+            or (
+                baseline.failure.code,
+                baseline.failure.failed_stage,
+                baseline.failure.retry_scope,
+            )
+            != ("tts_failed", "audio", "tts")
+        ):
+            raise ValueError("VQ-06 requires a published TTS partial")
+        state = baseline
     elif scenario is QaScenario.VQ_07_PNG_FAILED:
-        failure = SafeFailure(code="png_layout_failed", failed_stage="card", retry_scope="card")
-        state = ResultViewState(
-            mode=ResultMode.LIVE,
-            status=ResultStatus.PARTIAL,
-            identity=identity,
-            result_id=result_id,
-            availability=ArtifactAvailability(report=True, recap_text=True, audio=True),
-            failure=failure,
-            audio=baseline.audio,
-        )
+        if (
+            baseline.status is not ResultStatus.PARTIAL
+            or baseline.failure is None
+            or (
+                baseline.failure.code,
+                baseline.failure.failed_stage,
+                baseline.failure.retry_scope,
+            )
+            != ("png_layout_failed", "card", "card")
+        ):
+            raise ValueError("VQ-07 requires a published PNG partial")
+        state = baseline
     elif scenario is QaScenario.VQ_08_SOURCE_INVALID:
         state = ResultViewState(
             mode=ResultMode.LIVE,
@@ -445,14 +404,14 @@ def _spec(scenario: QaScenario, verified: VerifiedQaBaseline) -> QaScenarioSpec:
             ),
         )
     else:
-        state = ResultViewState(
-            mode=ResultMode.LIVE,
-            status=ResultStatus.COMPLETED,
-            identity=identity,
-            result_id=result_id,
-            availability=complete,
-            audio=_fallback_audio_from_baseline(baseline.audio),
-        )
+        if (
+            baseline.status is not ResultStatus.COMPLETED
+            or baseline.audio is None
+            or not baseline.audio.fallback_used
+            or baseline.audio.backend not in {"edge_tts", "sapi"}
+        ):
+            raise ValueError("VQ-09 requires a published local fallback result")
+        state = baseline
 
     failure = state.failure
     available = tuple(

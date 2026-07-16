@@ -80,15 +80,32 @@ def _local_composer(
     runtime_root: Path,
     results_root: TrustedResultRoot,
     replay_local_only: bool = False,
+    qa_result_mode: str | None = None,
 ):
     """Build the real Phase 4 chain used by fixed replay demonstrations."""
 
     context = prepare_generation_context(project_root=project_root)
     candidate_root = TrustedCandidateRoot.for_testing(runtime_root / "tts-candidates")
     card_root = runtime_root / "cards"
+    compose_calls = 0
 
     def compose(source, *, mode, fixture_id, fixture_name, stage_callback=None):
-        if mode is ResultMode.LIVE or replay_local_only:
+        nonlocal compose_calls
+        compose_calls += 1
+        active_qa_mode = qa_result_mode if compose_calls == 1 else None
+        if active_qa_mode == "tts_failed":
+            tts = TtsFallbackChain(
+                tuple(_UnavailableTtsAdapter(backend) for backend in ("dify", "edge_tts", "sapi"))
+            )
+        elif active_qa_mode == "fallback":
+            tts = TtsFallbackChain(
+                (
+                    _UnavailableTtsAdapter("dify"),
+                    _UnavailableTtsAdapter("edge_tts"),
+                    SapiTtsAdapter(project_root=project_root),
+                )
+            )
+        elif mode is ResultMode.LIVE or replay_local_only:
             tts = TtsFallbackChain((SapiTtsAdapter(project_root=project_root),), local_only=True)
         else:
             settings = DebugMateSettings.from_env()
@@ -111,10 +128,13 @@ def _local_composer(
         recap = compose_recap(presentation)
         target = card_root / f"{source.source_run_id}-{secrets.token_hex(16)}.png"
         try:
-            try:
-                card = render_card(presentation, context, target=target)
-            except CardRenderFailure as failure:
-                card = failure
+            if active_qa_mode == "png_failed":
+                card = CardRenderFailure("png_layout_failed")
+            else:
+                try:
+                    card = render_card(presentation, context, target=target)
+                except CardRenderFailure as failure:
+                    card = failure
             if stage_callback is not None:
                 stage_callback("card")
             audio = tts.synthesize(
@@ -157,11 +177,14 @@ def _local_service(
     runtime_root: Path | None = None,
     approval_key: bytes | None = None,
     replay_local_only: bool = False,
+    qa_result_mode: str | None = None,
 ) -> ResultApplicationService:
     project_root = Path(__file__).resolve().parents[3]
     runtime_root = runtime_root or project_root / ".debugmate-runtime"
     runtime_root = Path(runtime_root).absolute()
     runtime_root.mkdir(exist_ok=True)
+    if qa_result_mode not in {None, "tts_failed", "png_failed", "fallback"}:
+        raise ValueError("invalid QA result mode")
     results_root = TrustedResultRoot.for_testing(runtime_root / "results")
     approval_key = approval_key or secrets.token_bytes(32)
     snapshot = load_local_rule_snapshot(project_root)
@@ -185,6 +208,7 @@ def _local_service(
             runtime_root=runtime_root,
             results_root=results_root,
             replay_local_only=replay_local_only,
+            qa_result_mode=qa_result_mode,
         ),
     )
 

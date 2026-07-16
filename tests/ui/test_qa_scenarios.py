@@ -77,10 +77,22 @@ def test_stage_gate_rejects_wrong_release_duplicates_and_use_after_completion() 
 @pytest.fixture(scope="module")
 def verified_replay(tmp_path_factory: pytest.TempPathFactory):
     qa = _qa()
-    runtime = tmp_path_factory.mktemp("qa-verified-replay")
-    baseline = qa.load_verified_qa_baseline(
-        _local_service(runtime_root=Path(runtime), replay_local_only=True)
-    )
+    root = tmp_path_factory.mktemp("qa-verified-replay")
+    modes = {
+        qa.QaScenario.VQ_02_REPLAY: None,
+        qa.QaScenario.VQ_06_TTS_FAILED: "tts_failed",
+        qa.QaScenario.VQ_07_PNG_FAILED: "png_failed",
+        qa.QaScenario.VQ_09_FALLBACK: "fallback",
+    }
+    baselines = {}
+    for scenario, mode in modes.items():
+        service = _local_service(
+            runtime_root=Path(root) / scenario.value,
+            replay_local_only=True,
+            qa_result_mode=mode,
+        )
+        baselines[scenario] = qa.load_verified_qa_baseline(service)
+    baseline = baselines[qa.QaScenario.VQ_02_REPLAY]
     state = baseline.state
     assert state.status is ResultStatus.COMPLETED
     assert state.identity is not None and state.audio is not None
@@ -91,16 +103,20 @@ def verified_replay(tmp_path_factory: pytest.TempPathFactory):
             "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d",
         ),
     )
-    return baseline
+    return baselines
 
 
 def test_truth_state_specs_preserve_replay_partial_failed_and_fallback_semantics(
     verified_replay,
 ) -> None:
     qa = _qa()
-    state = verified_replay.state
+    baseline = verified_replay[qa.QaScenario.VQ_02_REPLAY]
+    state = baseline.state
     specs = {
-        scenario: qa.build_qa_scenario(scenario, baseline=verified_replay)
+        scenario: qa.build_qa_scenario(
+            scenario,
+            baseline=verified_replay.get(scenario, baseline),
+        )
         for scenario in qa.QaScenario
     }
 
@@ -124,6 +140,7 @@ def test_truth_state_specs_preserve_replay_partial_failed_and_fallback_semantics
     failed = specs[qa.QaScenario.VQ_08_SOURCE_INVALID]
     assert failed.status == "failed" and failed.failure_code == "source_bundle_invalid"
     assert failed.available == () and failed.download is False
+    assert failed.view_state.identity is None and failed.view_state.result_id is None
     fallback = specs[qa.QaScenario.VQ_09_FALLBACK]
     assert fallback.status == "completed" and fallback.fallback_backend in {
         "edge_tts",
@@ -132,18 +149,58 @@ def test_truth_state_specs_preserve_replay_partial_failed_and_fallback_semantics
     for spec in specs.values():
         if spec.view_state.identity is not None:
             assert spec.view_state.identity == state.identity
-            assert spec.view_state.result_id == state.result_id
+    terminal_ids = {
+        specs[scenario].view_state.result_id
+        for scenario in (
+            qa.QaScenario.VQ_02_REPLAY,
+            qa.QaScenario.VQ_06_TTS_FAILED,
+            qa.QaScenario.VQ_07_PNG_FAILED,
+            qa.QaScenario.VQ_09_FALLBACK,
+        )
+    }
+    assert None not in terminal_ids and len(terminal_ids) == 4
     assert replay.fixture_name == state.fixture_name
-    assert specs[qa.QaScenario.VQ_07_PNG_FAILED].view_state.audio == state.audio
     assert fallback.view_state.audio is not None
-    assert fallback.view_state.audio.identity == state.audio.identity
-    assert fallback.view_state.audio.sha256 == state.audio.sha256
-    assert fallback.view_state.audio.duration_ms == state.audio.duration_ms
-    assert fallback.view_state.audio.attempts[-1] == state.audio.attempts[-1]
-    assert replay.source_hashes == verified_replay.source_hashes
+    assert fallback.view_state.audio.fallback_used is True
+    assert tuple(
+        (attempt.backend, attempt.succeeded, attempt.safe_error_code)
+        for attempt in fallback.view_state.audio.attempts
+    ) == (
+        ("dify", False, "tts_backend_failed"),
+        ("edge_tts", False, "tts_backend_failed"),
+        ("sapi", True, None),
+    )
+    assert replay.source_hashes == baseline.source_hashes
     assert replay.category == "dependency_environment"
-    assert replay.recap_text == verified_replay.recap_text
+    assert replay.recap_text == baseline.recap_text
     assert failed.source_hashes == () and failed.recap_text is None
+
+    for scenario in (
+        qa.QaScenario.VQ_02_REPLAY,
+        qa.QaScenario.VQ_06_TTS_FAILED,
+        qa.QaScenario.VQ_07_PNG_FAILED,
+        qa.QaScenario.VQ_09_FALLBACK,
+    ):
+        handle = verified_replay[scenario]
+        published = specs[scenario].view_state
+        assert published == handle.state
+        assert published.identity is not None and published.result_id is not None
+        assert (
+            handle.service.restore_result(published.identity.case_id, published.result_id)
+            == published
+        )
+
+    for scenario in (
+        qa.QaScenario.VQ_06_TTS_FAILED,
+        qa.QaScenario.VQ_07_PNG_FAILED,
+    ):
+        handle = verified_replay[scenario]
+        partial_state = specs[scenario].view_state
+        retried = handle.service.retry_stage(
+            partial_state.identity.case_id, partial_state.result_id
+        )
+        assert retried.status is ResultStatus.COMPLETED
+        assert retried.result_id != partial_state.result_id
 
 
 def test_stage_gate_rendezvous_blocks_worker_until_ordered_runner_release() -> None:
