@@ -11,10 +11,10 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
-import debugmate.ui.app as app_module
 from fastapi.testclient import TestClient
 from gradio.state_holder import SessionState
 
+import debugmate.ui.app as app_module
 from debugmate.privacy.models import ApprovedRedactedInput
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -495,13 +495,15 @@ def test_partial_retry_label_is_derived_from_verified_result_view_state(
             field_values=("", "", "", "", "", ""),
         )
     )
-    assert update["label"] == view.retry_label
+    assert update["value"] == view.retry_label
     assert update["interactive"] is True
     assert state.identity is not None
     assert (case_id, result_id) == (state.identity.case_id, state.result_id)
 
 
-@pytest.mark.parametrize("status", [ResultStatus.IDLE, ResultStatus.RUNNING, ResultStatus.COMPLETED])
+@pytest.mark.parametrize(
+    "status", [ResultStatus.IDLE, ResultStatus.RUNNING, ResultStatus.COMPLETED]
+)
 def test_retry_control_is_disabled_outside_verified_partial_terminal_state(
     status: ResultStatus,
 ) -> None:

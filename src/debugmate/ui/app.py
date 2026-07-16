@@ -634,6 +634,25 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
     )
 
 
+def _retry_control_updates(payload: CallbackPayload) -> tuple[object, str | None, str | None]:
+    """Expose retry authority only for a verified partial terminal result."""
+
+    state = payload.state
+    view = payload.view
+    if (
+        state.status is ResultStatus.PARTIAL
+        and state.identity is not None
+        and state.result_id is not None
+        and view.retry_label is not None
+    ):
+        return (
+            gr.update(value=view.retry_label, interactive=True),
+            state.identity.case_id,
+            state.result_id,
+        )
+    return gr.update(value="安全重试", interactive=False), None, None
+
+
 def build_app(
     service: ResultApplicationService,
     *,
@@ -652,6 +671,8 @@ def build_app(
         correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
         correction_run = gr.State(value=None)
         correction_draft = gr.State(value=None)
+        retry_case = gr.State(value=None)
+        retry_result = gr.State(value=None)
         with gr.Group(elem_classes="status-bar"):
             gr.Markdown("# DebugMate 诊断工作台")
             status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
@@ -727,6 +748,12 @@ def build_app(
                 with gr.Accordion("命令说明（仅供查看）", open=False):
                     gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
                 failure = gr.Markdown("", elem_id="failure-details")
+                retry_button = gr.Button(
+                    "安全重试",
+                    variant="secondary",
+                    interactive=False,
+                    elem_id="partial-retry",
+                )
 
             with gr.Column(elem_classes=["region", "results-region"]):
                 gr.Markdown("## 三模态结果")
@@ -800,6 +827,9 @@ def build_app(
             fact_table,
             citation_table,
             recap,
+            retry_button,
+            retry_case,
+            retry_result,
         ]
 
         def apply_payload(payload: CallbackPayload) -> tuple[object, ...]:
@@ -812,6 +842,7 @@ def build_app(
                 else None
             )
             values = payload.field_values if source_run_id is not None else _EMPTY_FIELD_VALUES
+            retry_update, retry_case_id, retry_result_id = _retry_control_updates(payload)
             return (
                 *_component_updates(payload),
                 *(gr.update(value=value) for value in values),
@@ -837,6 +868,9 @@ def build_app(
                     ).model_dump()
                 ),
                 gr.update(value=payload.recap_text),
+                retry_update,
+                retry_case_id,
+                retry_result_id,
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
@@ -942,6 +976,13 @@ def build_app(
                 callbacks.correct(previous_run_id, draft, confirmed=True, request=request)
             )
 
+        def retry_verified_partial(
+            case_id: object, result_id: object, request: gr.Request
+        ) -> tuple[object, ...]:
+            """Retry the server-verified failed stage without a browser stage/path input."""
+
+            return apply_payload(callbacks.retry(case_id, result_id, request=request))
+
         replay_button.click(
             load_replay_stream,
             inputs=[replay],
@@ -1014,6 +1055,17 @@ def build_app(
         create_button.click(
             create_new_run,
             inputs=[correction_run, correction_draft],
+            outputs=result_outputs,
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+            postprocess=False,
+        )
+        retry_button.click(
+            retry_verified_partial,
+            inputs=[retry_case, retry_result],
             outputs=result_outputs,
             api_name=False,
             queue=True,
