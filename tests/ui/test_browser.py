@@ -26,6 +26,8 @@ import httpx
 import pytest
 from playwright.sync_api import sync_playwright
 
+from debugmate.evidence import RunManifest, RunStatus
+
 pytestmark = pytest.mark.browser
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -37,8 +39,10 @@ _STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z
 _RUNNER = _ROOT / "scripts" / "run-phase4-browser-layout-qa.ps1"
 _LOCAL_LIVE_RUNNER = _ROOT / "scripts" / "run-phase4-local-live-qa.ps1"
 _LOCAL_LIVE_SCREENSHOT_ENV = "DEBUGMATE_UI_SCREENSHOT_PATH"
+_LOCAL_LIVE_LEDGER_ENV = "DEBUGMATE_UI_LEDGER_PATH"
 _LOCAL_LIVE_LEDGER = _EVIDENCE / "local-live-vq01.json"
 _LOCAL_LIVE_RESULTS = _ROOT / ".debugmate-runtime" / "results"
+_LOCAL_LIVE_EVIDENCE = _ROOT / ".debugmate-runtime" / "evidence"
 _LOCAL_LIVE_LEDGER_KEYS = {
     "evidence_version",
     "viewport",
@@ -67,6 +71,10 @@ def test_local_live_runner_has_single_owner_and_evidence_contract() -> None:
     assert "--host', '127.0.0.1'" in source
     assert "DEBUGMATE_UI_BASE_URL" in source
     assert _LOCAL_LIVE_SCREENSHOT_ENV in source
+    assert _LOCAL_LIVE_LEDGER_ENV in source
+    assert "New-EvidencePairTransaction" in source
+    assert "Complete-EvidencePairTransaction" in source
+    assert "Restore-EvidencePairTransaction" in source
     assert "test_vq_01_real_loopback_local_approval_produces_completed_live_result" in source
     assert "Wait-ForLoopbackPortClosed -Port $port" in source
     assert "Stop-Process -InputObject $Process" in source
@@ -87,6 +95,12 @@ def test_local_live_ledger_has_exact_redacted_allowlist() -> None:
     assert payload["backend"] == "local-rule-v1"
     assert payload["body_horizontal_overflow"] is False
     assert payload["server_owner"] == "run-phase4-local-live-qa.ps1"
+    assert payload["screenshot_sha256"] == hashlib.sha256(
+        (_EVIDENCE / "VQ-01-live-local.png").read_bytes()
+    ).hexdigest()
+    verified_at = datetime.fromisoformat(payload["verified_at_utc"].replace("Z", "+00:00"))
+    assert payload["verified_at_utc"].endswith("Z")
+    assert verified_at.tzinfo is UTC
     for key in (
         "case_id_sha256",
         "source_run_id_sha256",
@@ -94,6 +108,123 @@ def test_local_live_ledger_has_exact_redacted_allowlist() -> None:
         "screenshot_sha256",
     ):
         assert re.fullmatch(r"[0-9a-f]{64}", payload[key])
+
+
+def test_local_live_runner_failure_restores_old_pair_and_clears_staging(tmp_path: Path) -> None:
+    source = _LOCAL_LIVE_RUNNER.read_text(encoding="utf-8")
+    assert "if ($MyInvocation.InvocationName -eq '.')" in source
+
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    screenshot = evidence_dir / "formal.png"
+    ledger = evidence_dir / "formal.json"
+    screenshot.write_bytes(b"old-png-bytes")
+    ledger.write_bytes(b"old-ledger-bytes")
+    runner = str(_LOCAL_LIVE_RUNNER).replace("'", "''")
+    screenshot_arg = str(screenshot).replace("'", "''")
+    ledger_arg = str(ledger).replace("'", "''")
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. '{runner}'
+$transaction = New-EvidencePairTransaction `
+    -ScreenshotPath '{screenshot_arg}' `
+    -LedgerPath '{ledger_arg}'
+try {{
+    [System.IO.File]::WriteAllBytes($transaction.StagingScreenshot, [byte[]](1, 2, 3))
+    [System.IO.File]::WriteAllBytes($transaction.StagingLedger, [byte[]](4, 5, 6))
+    throw 'controlled validation failure'
+}}
+catch {{
+    Restore-EvidencePairTransaction -Transaction $transaction
+}}
+"""
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert screenshot.read_bytes() == b"old-png-bytes"
+    assert ledger.read_bytes() == b"old-ledger-bytes"
+    assert sorted(path.name for path in evidence_dir.iterdir()) == ["formal.json", "formal.png"]
+
+
+def test_source_manifest_backend_is_strictly_observed_and_identity_bound(tmp_path: Path) -> None:
+    case_id = "case_" + "1" * 32
+    source_run_id = "run_" + "2" * 32
+    result_id = "result_" + "3" * 32
+    manifest_path = tmp_path / case_id / source_run_id / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    now = datetime.now(UTC)
+    manifest = RunManifest(
+        manifest_version="1.0.0",
+        case_id=case_id,
+        status=RunStatus.PASSED,
+        created_at_utc=now,
+        completed_at_utc=now,
+        backend="local-rule-v1",
+        workflow_version="test-v1",
+        prompt_version="test-v1",
+        schema_version="1.1.0",
+        knowledge_version="local-rule-v1",
+        input_sha256="4" * 64,
+        run_id=source_run_id,
+        node_states={},
+        latency_ms=0,
+        token_usage={},
+        estimated_cost=0.0,
+        artifacts=[],
+        probe_capabilities=[],
+        source_run_id=None,
+    )
+    manifest_path.write_text(manifest.model_dump_json(), encoding="utf-8")
+    result_manifest = {
+        "identity": {"case_id": case_id, "source_run_id": source_run_id},
+        "result_id": result_id,
+    }
+
+    assert (
+        _validated_source_backend(
+            evidence_root=tmp_path,
+            result_manifest=result_manifest,
+            dom_source_run_id=source_run_id,
+        )
+        == "local-rule-v1"
+    )
+    tampered_case_id = "case_" + "9" * 32
+    tampered_path = tmp_path / tampered_case_id / source_run_id / "manifest.json"
+    tampered_path.parent.mkdir(parents=True)
+    tampered_path.write_bytes(manifest_path.read_bytes())
+    result_manifest["identity"]["case_id"] = tampered_case_id
+    with pytest.raises(AssertionError):
+        _validated_source_backend(
+            evidence_root=tmp_path,
+            result_manifest=result_manifest,
+            dom_source_run_id=source_run_id,
+        )
+
+
+def _validated_source_backend(
+    *, evidence_root: Path, result_manifest: dict[str, object], dom_source_run_id: str
+) -> str:
+    identity = result_manifest["identity"]
+    assert isinstance(identity, dict)
+    case_id = identity["case_id"]
+    source_run_id = identity["source_run_id"]
+    assert isinstance(case_id, str) and re.fullmatch(r"case_[0-9a-f]{32}", case_id)
+    assert isinstance(source_run_id, str) and re.fullmatch(r"run_[0-9a-f]{32}", source_run_id)
+    assert source_run_id == dom_source_run_id
+    manifest_path = evidence_root / case_id / source_run_id / "manifest.json"
+    source_manifest = RunManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    assert source_manifest.case_id == case_id
+    assert source_manifest.run_id == source_run_id
+    observed_backend = source_manifest.backend
+    assert observed_backend == "local-rule-v1"
+    return observed_backend
 
 
 def _reserve_loopback_port() -> int:
@@ -566,6 +697,7 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
                     clientWidth: document.documentElement.clientWidth,
                 })"""
             )
+            body_horizontal_overflow = metrics["scrollWidth"] > metrics["clientWidth"]
 
             assert "✓ 已完成" in status_text
             assert "后端：local-rule-v1（本地规则，无云端调用）" in body_text
@@ -581,7 +713,7 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             assert "DebugMate" in report_text
             assert citations_visible
             assert download_enabled
-            assert metrics["scrollWidth"] == metrics["clientWidth"]
+            assert body_horizontal_overflow is False
 
             manifests_after = set(
                 _LOCAL_LIVE_RESULTS.glob("case_*/result_*/result-manifest.json")
@@ -599,12 +731,22 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             assert re.fullmatch(r"case_[0-9a-f]{32}", identity["case_id"])
             assert identity["source_run_id"] == source_run_match.group(0)
             assert re.fullmatch(r"result_[0-9a-f]{32}", result_manifest["result_id"])
+            observed_backend = _validated_source_backend(
+                evidence_root=_LOCAL_LIVE_EVIDENCE,
+                result_manifest=result_manifest,
+                dom_source_run_id=source_run_match.group(0),
+            )
 
             screenshot_value = os.environ.get(_LOCAL_LIVE_SCREENSHOT_ENV)
-            if screenshot_value is not None:
+            ledger_value = os.environ.get(_LOCAL_LIVE_LEDGER_ENV)
+            assert (screenshot_value is None) is (ledger_value is None)
+            if screenshot_value is not None and ledger_value is not None:
                 screenshot_path = Path(screenshot_value).resolve()
-                expected_path = (_EVIDENCE / "VQ-01-live-local.png").resolve()
-                assert screenshot_path == expected_path
+                ledger_path = Path(ledger_value).resolve()
+                assert screenshot_path.parent == _EVIDENCE.resolve()
+                assert ledger_path.parent == _EVIDENCE.resolve()
+                assert ".staging." in screenshot_path.name
+                assert ".staging." in ledger_path.name
                 screenshot_path.parent.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(screenshot_path))
                 screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
@@ -615,7 +757,7 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
                     "mode": "live",
                     "fixture_id": None,
                     "fixture_name": None,
-                    "backend": "local-rule-v1",
+                    "backend": observed_backend,
                     "case_id_sha256": hashlib.sha256(
                         identity["case_id"].encode("utf-8")
                     ).hexdigest(),
@@ -626,12 +768,16 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
                         result_manifest["result_id"].encode("utf-8")
                     ).hexdigest(),
                     "screenshot_sha256": screenshot_sha256,
-                    "body_horizontal_overflow": False,
+                    "body_horizontal_overflow": body_horizontal_overflow,
                     "server_owner": "run-phase4-local-live-qa.ps1",
                     "verified_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
                 assert set(ledger) == _LOCAL_LIVE_LEDGER_KEYS
-                _LOCAL_LIVE_LEDGER.write_text(
+                assert ledger["screenshot_sha256"] == hashlib.sha256(
+                    screenshot_path.read_bytes()
+                ).hexdigest()
+                assert ledger["backend"] == "local-rule-v1"
+                ledger_path.write_text(
                     json.dumps(ledger, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8",
                 )
