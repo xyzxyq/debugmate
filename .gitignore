@@ -2,6 +2,7 @@
 .venv/
 .env
 .artifacts/
+/.superpowers/sdd/
 evidence/*
 !evidence/.gitkeep
 __pycache__/
