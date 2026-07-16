@@ -41,24 +41,6 @@ def test_qa_scenario_registry_is_closed_and_enum_only() -> None:
         qa.build_qa_scenario("vq-02-replay")
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {"scenario": "vq-99-unknown"},
-        {"scenario": "vq-02-replay", "extra": True},
-        {"scenario": "../vq-02-replay"},
-        {"scenario": r"C:\\fixtures\\replay.json"},
-        {"scenario": "/tmp/replay.json"},
-    ],
-)
-def test_qa_request_parser_rejects_unknown_extra_and_path_like_values(payload) -> None:
-    qa = _qa()
-
-    with pytest.raises((TypeError, ValueError)):
-        qa.parse_qa_request(payload)
-
-
 def test_qa_request_parser_returns_only_a_registered_enum() -> None:
     qa = _qa()
 

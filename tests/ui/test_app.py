@@ -185,9 +185,7 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert "subprocess" not in Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
     assert "gr.HTML" not in Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
     assert "#workbench-grid:has(> #workbench-grid)" in app.css
-    assert (
-        "minmax(280px, 3fr) minmax(360px, 4fr) minmax(440px, 5fr)" in app.css
-    )
+    assert "minmax(280px, 3fr) minmax(360px, 4fr) minmax(440px, 5fr)" in app.css
     assert "gap: 16px;" in app.css
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
@@ -198,9 +196,43 @@ def test_production_app_has_no_qa_handler_route_selector_or_capability_surface()
     app = build_app(_Service())
     config = app.get_config_file()
     rendered = repr(config).lower()
-    routes = {getattr(route, "path", "") for route in app.app.routes}
+    callbacks = tuple(block_fn.fn for block_fn in app.fns.values())
+    callback_surfaces = tuple(
+        (
+            getattr(callback, "__module__", ""),
+            getattr(callback, "__qualname__", ""),
+        )
+        for callback in callbacks
+    )
+    route_surfaces = tuple(
+        (
+            getattr(route, "path", ""),
+            getattr(route, "name", ""),
+            getattr(getattr(route, "endpoint", None), "__module__", ""),
+            getattr(getattr(route, "endpoint", None), "__qualname__", ""),
+        )
+        for route in app.app.routes
+    )
+    dependency_surfaces = repr(config.get("dependencies", ())).lower()
 
-    assert not any("qa" in route.lower() for route in routes)
+    assert not any(
+        "qa_scenarios" in module or "qa" in name.lower() for module, name in callback_surfaces
+    )
+    assert not any(
+        "qa_scenarios" in module
+        or "qa" in name.lower()
+        or "qa" in endpoint.lower()
+        or "qa" in path.lower()
+        for path, name, module, endpoint in route_surfaces
+    )
+    assert "qa_scenarios" not in dependency_surfaces
+    assert "debugmate_qa" not in dependency_surfaces
+    assert not any(
+        "qa" in str(dependency.get("api_name", "")).lower()
+        or "scenario" in str(dependency.get("api_name", "")).lower()
+        or "capability" in str(dependency.get("api_name", "")).lower()
+        for dependency in config["dependencies"]
+    )
     assert "debugmate_qa" not in rendered
     assert "qa scenario" not in rendered
     assert "x-debugmate-qa-capability" not in rendered
@@ -219,9 +251,7 @@ class _Request:
 
 def _callback(app, name: str):
     return next(
-        block_fn.fn
-        for block_fn in app.fns.values()
-        if getattr(block_fn.fn, "__name__", "") == name
+        block_fn.fn for block_fn in app.fns.values() if getattr(block_fn.fn, "__name__", "") == name
     )
 
 
@@ -315,8 +345,7 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
     assert buttons["确认预览并开始本地诊断"]["props"]["interactive"] is False
     assert any(
         component["type"] == "markdown"
-        and component["props"].get("value")
-        == "后端：local-rule-v1（本地规则，无云端调用）"
+        and component["props"].get("value") == "后端：local-rule-v1（本地规则，无云端调用）"
         for component in config["components"]
     )
     assert "approved_payload = gr.State" not in source
@@ -356,9 +385,7 @@ def test_local_live_events_share_the_bounded_diagnosis_queue_lane() -> None:
 
 def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None:
     config = build_app(_Service()).get_config_file()
-    elem_ids = {
-        component["props"].get("elem_id") for component in config["components"]
-    }
+    elem_ids = {component["props"].get("elem_id") for component in config["components"]}
 
     assert {
         "diagnostic-status",
@@ -427,14 +454,12 @@ def test_replay_default_is_allowlisted_and_only_enables_its_control() -> None:
     replay = next(
         component
         for component in config["components"]
-        if component["type"] == "dropdown"
-        and component["props"].get("label") == "固定回放案例"
+        if component["type"] == "dropdown" and component["props"].get("label") == "固定回放案例"
     )
     replay_button = next(
         component
         for component in config["components"]
-        if component["type"] == "button"
-        and component["props"].get("value") == "加载回放案例"
+        if component["type"] == "button" and component["props"].get("value") == "加载回放案例"
     )
     enabled = next(
         block_fn.fn
