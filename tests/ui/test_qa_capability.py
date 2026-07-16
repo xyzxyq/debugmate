@@ -100,10 +100,10 @@ def test_denied_qa_requests_have_zero_scenario_workflow_result_or_download_side_
 
 
 @pytest.mark.parametrize("payload", INVALID_PAYLOADS)
-def test_invalid_scenario_payloads_cross_the_gate_and_have_zero_side_effects(
+def test_invalid_scenario_payloads_cross_real_http_endpoint_with_zero_side_effects(
     payload: object,
 ) -> None:
-    """Parsing is inside dispatch so malformed input cannot reach any effect port."""
+    """The mounted endpoint cannot bypass the strict parser before effect ports."""
 
     qa = _qa()
     calls = _ScenarioCalls()
@@ -112,11 +112,18 @@ def test_invalid_scenario_payloads_cross_the_gate_and_have_zero_side_effects(
         capability=CAPABILITY,
         scenario_handler=calls,
     )
+    app = build_app(object())
+    qa.mount_qa_endpoint(app.app, gate)
 
-    with pytest.raises(qa.QaAccessDenied):
-        gate.dispatch(_Request(), payload)
+    response = TestClient(app.app, client=("127.0.0.1", 50000)).post(
+        QA_ROUTE,
+        headers={HEADER: CAPABILITY},
+        json=payload,
+    )
 
+    assert response.status_code == 404
     assert calls.calls == []
+    assert calls.evidence == []
     assert gate.side_effect_counts == {
         "scenario": 0,
         "workflow": 0,
@@ -157,27 +164,31 @@ def test_real_http_qa_route_accepts_exact_capability_and_records_safe_audit(
 
 
 @pytest.mark.parametrize(
-    "client_host,headers,wrong_token",
+    "process_enabled,client_host,headers,wrong_token",
     [
-        ("127.0.0.1", {}, None),
-        ("127.0.0.1", {HEADER: "qa_" + "b" * 64}, "qa_" + "b" * 64),
-        ("192.0.2.10", {HEADER: CAPABILITY}, None),
+        (True, "127.0.0.1", {}, None),
+        (True, "127.0.0.1", {HEADER: "qa_" + "b" * 64}, "qa_" + "b" * 64),
+        (True, "192.0.2.10", {HEADER: CAPABILITY}, None),
+        (False, "127.0.0.1", {HEADER: CAPABILITY}, None),
     ],
 )
 def test_real_http_qa_route_denies_missing_wrong_or_nonloopback_without_side_effects(
+    process_enabled: bool,
     client_host: str,
     headers: dict[str, str],
     wrong_token: str | None,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     qa = _qa()
     calls = _ScenarioCalls()
     gate = qa.QaCapabilityGate(
-        process_enabled=True,
+        process_enabled=process_enabled,
         capability=CAPABILITY,
         scenario_handler=calls,
     )
     app = build_app(object())
     qa.mount_qa_endpoint(app.app, gate)
+    caplog.set_level(logging.DEBUG)
 
     response = TestClient(app.app, client=(client_host, 50000)).post(
         QA_ROUTE,
@@ -188,10 +199,19 @@ def test_real_http_qa_route_denies_missing_wrong_or_nonloopback_without_side_eff
     assert response.status_code == 404
     assert calls.calls == []
     assert calls.evidence == []
+    assert gate.side_effect_counts == {
+        "scenario": 0,
+        "workflow": 0,
+        "result": 0,
+        "download": 0,
+    }
     assert CAPABILITY not in response.text
     assert HEADER not in response.text.lower()
+    assert CAPABILITY not in caplog.text
+    assert HEADER not in caplog.text.lower()
     if wrong_token is not None:
         assert wrong_token not in response.text
+        assert wrong_token not in caplog.text
 
 
 def test_enabled_qa_handler_on_real_app_keeps_capability_out_of_every_public_surface() -> None:
