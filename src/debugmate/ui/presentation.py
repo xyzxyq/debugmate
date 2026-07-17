@@ -75,8 +75,7 @@ _RETRY_COPY = {
     "workflow": ("诊断工作流", "确认诊断工作流配置后重试。"),
 }
 _EMPTY_BODY = (
-    "提交已脱敏输入，或从固定案例中选择一个回放案例。"
-    "结果会在此显示文字报告、诊断卡和语音复盘。"
+    "提交已脱敏输入，或从固定案例中选择一个回放案例。结果会在此显示文字报告、诊断卡和语音复盘。"
 )
 
 
@@ -120,11 +119,7 @@ def _result_metadata(state: ResultViewState) -> str:
     source = "" if state.identity is None else f"；来源运行：{state.identity.source_run_id}"
     if state.mode is ResultMode.REPLAY:
         return f"离线回放：{state.fixture_name}{source}"
-    return (
-        ""
-        if not source
-        else f"实时诊断{source}；fixture_id=null；fixture_name=null"
-    )
+    return "" if not source else f"实时诊断{source}；fixture_id=null；fixture_name=null"
 
 
 def _audio_metadata(state: ResultViewState) -> tuple[str | None, str | None]:
@@ -316,8 +311,8 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
     assert state.failure is not None
     return ComponentViewModel(
         **common,
-        status_badge="✕ 失败",
-        accessible_status="状态：失败",
+        status_badge="✕ 诊断失败",
+        accessible_status="状态：诊断失败",
         primary_action=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
         retry_label=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
         actions_enabled=True,
@@ -326,9 +321,7 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
         failure_detail_labels=_FAILURE_DETAIL_LABELS,
         failure_details=_failure_details(state, available),
         failure_code=state.failure.code,
-        safe_failure_copy=_SAFE_FAILURE_COPY_BY_CODE.get(
-            state.failure.code, _SAFE_FAILURE_COPY
-        ),
+        safe_failure_copy=_SAFE_FAILURE_COPY_BY_CODE.get(state.failure.code, _SAFE_FAILURE_COPY),
         stage_label=None,
         running_copy=None,
         empty_heading=None,

@@ -18,6 +18,8 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,7 +27,7 @@ from threading import Thread
 
 import httpx
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from debugmate.evidence import RunManifest, RunStatus
 
@@ -36,6 +38,18 @@ _EVIDENCE = _ROOT / "evidence" / "ui" / "phase4"
 _FAILURE_SCREENSHOT_ENV = "DEBUGMATE_UI_FAILURE_SCREENSHOT"
 _FAILURE_SCREENSHOT = _EVIDENCE / "tmp" / "GAP-01-layout-red.png"
 _UI_BASE_URL_ENV = "DEBUGMATE_UI_BASE_URL"
+_QA_CAPABILITY_ENV = "DEBUGMATE_QA_CAPABILITY"
+_QA_HEADER = "x-debugmate-qa-capability"
+_QA_ROUTE = "/_debugmate/qa"
+_QA_STAGING_ENV = "DEBUGMATE_QA_STAGING_DIR"
+_QA_STAGING_ROW_KEYS = {
+    "schema_version",
+    "scenario",
+    "viewport",
+    "status_sha256",
+    "metadata_sha256",
+    "screenshot_sha256",
+}
 _STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z")
 _RUNNER = _ROOT / "scripts" / "run-phase4-browser-layout-qa.ps1"
 _LOCAL_LIVE_RUNNER = _ROOT / "scripts" / "run-phase4-local-live-qa.ps1"
@@ -96,9 +110,10 @@ def test_local_live_ledger_has_exact_redacted_allowlist() -> None:
     assert payload["backend"] == "local-rule-v1"
     assert payload["body_horizontal_overflow"] is False
     assert payload["server_owner"] == "run-phase4-local-live-qa.ps1"
-    assert payload["screenshot_sha256"] == hashlib.sha256(
-        (_EVIDENCE / "VQ-01-live-local.png").read_bytes()
-    ).hexdigest()
+    assert (
+        payload["screenshot_sha256"]
+        == hashlib.sha256((_EVIDENCE / "VQ-01-live-local.png").read_bytes()).hexdigest()
+    )
     verified_at = datetime.fromisoformat(payload["verified_at_utc"].replace("Z", "+00:00"))
     assert payload["verified_at_utc"].endswith("Z")
     assert verified_at.tzinfo is UTC
@@ -185,6 +200,7 @@ def _run_transaction_fault(tmp_path: Path, fault: str) -> dict[str, object]:
         ),
         encoding="utf-8",
     )
+
     def quote(value: object) -> str:
         return str(value).replace("'", "''")
 
@@ -287,9 +303,7 @@ $summary | ConvertTo-Json -Compress
 @pytest.mark.parametrize(
     "fault", ["backup_screenshot", "backup_ledger", "promote_screenshot", "promote_ledger"]
 )
-def test_evidence_transaction_move_failures_restore_old_pair(
-    tmp_path: Path, fault: str
-) -> None:
+def test_evidence_transaction_move_failures_restore_old_pair(tmp_path: Path, fault: str) -> None:
     result = _run_transaction_fault(tmp_path, fault)
 
     assert "injected move failure" in str(result["error"])
@@ -498,6 +512,380 @@ def _capture_failure_screenshot(page) -> Path | None:
     _FAILURE_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(_FAILURE_SCREENSHOT), full_page=True)
     return _FAILURE_SCREENSHOT
+
+
+def _qa_context(browser, browser_base_url: str):
+    capability = os.environ.get(_QA_CAPABILITY_ENV)
+    if capability is None:
+        pytest.skip("runner-owned truth-state QA server is not active")
+    assert re.fullmatch(r"qa_[0-9a-f]{64}", capability)
+    context = browser.new_context(
+        viewport={"width": 1366, "height": 768},
+        extra_http_headers={_QA_HEADER: capability},
+    )
+    return context, capability
+
+
+def _activate_qa(context, browser_base_url: str, scenario: str) -> None:
+    response = context.request.post(f"{browser_base_url}{_QA_ROUTE}", data={"scenario": scenario})
+    assert response.status == 200
+    assert response.json() == {"accepted": scenario}
+
+
+def _qa_stage_command(
+    browser_base_url: str, capability: str, action: str, stage: str
+) -> dict[str, object]:
+    """Use a separately owned APIRequestContext so a held UI stream cannot deadlock it."""
+
+    with sync_playwright() as worker_playwright:
+        request = worker_playwright.request.new_context(extra_http_headers={_QA_HEADER: capability})
+        try:
+            response = request.post(
+                f"{browser_base_url}{_QA_ROUTE}",
+                data={"action": action, "stage": stage},
+                timeout=40_000,
+            )
+            assert response.status == 200
+            payload = response.json()
+            assert isinstance(payload, dict)
+            return payload
+        finally:
+            request.dispose()
+
+
+def _release_qa_stage(context, browser_base_url: str, stage: str) -> dict[str, object]:
+    response = context.request.post(
+        f"{browser_base_url}{_QA_ROUTE}",
+        data={"action": "release", "stage": stage},
+        timeout=10_000,
+    )
+    assert response.status == 200
+    payload = response.json()
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _write_qa_staging(page, scenario: str) -> None:
+    """Write runner-owned staging only; all captured identity-bearing text is hashed."""
+
+    configured = os.environ.get(_QA_STAGING_ENV)
+    assert configured is not None
+    root = Path(configured).resolve()
+    allowed_root = (_EVIDENCE / "staging").resolve()
+    assert root.is_relative_to(allowed_root)
+    root.mkdir(parents=True, exist_ok=True)
+    screenshot = root / f"{scenario}.png"
+    row_path = root / f"{scenario}.row.json"
+    page.screenshot(path=str(screenshot), full_page=True)
+    status = page.locator("#diagnostic-status").inner_text()
+    metadata = page.locator("#result-metadata").inner_text()
+    row = {
+        "schema_version": "phase4-qa-staging-v1",
+        "scenario": scenario,
+        "viewport": "1366x768",
+        "status_sha256": hashlib.sha256(status.encode("utf-8")).hexdigest(),
+        "metadata_sha256": hashlib.sha256(metadata.encode("utf-8")).hexdigest(),
+        "screenshot_sha256": hashlib.sha256(screenshot.read_bytes()).hexdigest(),
+    }
+    assert set(row) == _QA_STAGING_ROW_KEYS
+    row_path.write_text(json.dumps(row, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+    capability = os.environ[_QA_CAPABILITY_ENV]
+    resource_urls = page.evaluate(
+        "() => performance.getEntries().map(entry => entry.name).join('\\n')"
+    )
+    surfaces = (
+        page.locator("html").inner_text(),
+        page.url,
+        resource_urls,
+        json.dumps(row, sort_keys=True),
+        row_path.read_text(encoding="utf-8"),
+    )
+    assert all(capability not in surface for surface in surfaces)
+    assert capability.encode("utf-8") not in screenshot.read_bytes()
+
+
+def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, _capability = _qa_context(browser, browser_base_url)
+            _activate_qa(context, browser_base_url, "vq-02-replay")
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.get_by_role("button", name="加载回放案例", exact=True).click()
+            status = page.locator("#diagnostic-status").first
+            status.get_by_text("✓ 已完成", exact=False).wait_for(timeout=90_000)
+            assert "离线回放" in status.inner_text()
+            metadata = page.locator("#result-metadata").first.inner_text()
+            page.get_by_role("tab", name="引用与下载", exact=True).click()
+            download_metadata = page.locator("#download-metadata").first.inner_text()
+            body = page.locator("body").inner_text()
+            assert "离线回放" in metadata
+            assert "ModuleNotFoundError：缺少虚构依赖包" in metadata
+            assert "来源运行" in metadata
+            assert "实时诊断" not in metadata
+            assert "离线回放" in download_metadata
+            assert "云端运行成功" not in body
+            assert page.get_by_text("下载完整证据包", exact=True).is_visible()
+            _write_qa_staging(page, "vq-02")
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def test_vq_03_running_queue_stages_are_truthful_and_conflict_safe_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    stage_labels = {
+        "source": "验证来源",
+        "presentation": "整理诊断",
+        "report": "生成报告",
+        "card": "绘制诊断卡",
+        "audio": "生成语音",
+        "consistency": "一致性校验",
+        "publish": "发布结果包",
+    }
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        held_stage: str | None = None
+        try:
+            context, capability = _qa_context(browser, browser_base_url)
+            _activate_qa(context, browser_base_url, "vq-03-running")
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                for index, (stage, label) in enumerate(stage_labels.items()):
+                    future = executor.submit(
+                        _qa_stage_command,
+                        browser_base_url,
+                        capability,
+                        "hold",
+                        stage,
+                    )
+                    snapshot = future.result(timeout=45)
+                    held_stage = stage
+                    assert snapshot == {
+                        "stage": stage,
+                        "completed_stages": list(stage_labels)[:index],
+                    }
+                    status = page.locator("#diagnostic-status").first
+                    expect(status).to_contain_text(label, timeout=30_000)
+                    assert page.locator("#replay-action").is_disabled()
+                    assert page.locator("#local-preview").is_disabled()
+                    assert page.locator("#local-approve").is_disabled()
+                    assert page.locator("#partial-retry").is_disabled()
+                    assert not re.search(r"\b\d+(?:\.\d+)?\s*%", status.inner_text())
+                    if stage == "publish":
+                        _write_qa_staging(page, "vq-03")
+                    assert _release_qa_stage(context, browser_base_url, stage) == {
+                        "released": stage
+                    }
+                    held_stage = None
+            page.locator("#diagnostic-status").get_by_text("✓ 已完成", exact=False).wait_for(
+                timeout=90_000
+            )
+        finally:
+            if held_stage is not None and context is not None:
+                with suppress(Exception):
+                    _release_qa_stage(context, browser_base_url, held_stage)
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def _wait_for_terminal_status(page, copy: str) -> None:
+    page.locator("#diagnostic-status").get_by_text(copy, exact=False).wait_for(timeout=90_000)
+
+
+def test_vq_06_vq_07_partial_recovery_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            for scenario, failed_stage in (
+                ("vq-06-tts-failed", "生成语音"),
+                ("vq-07-png-failed", "绘制诊断卡"),
+            ):
+                context, _capability = _qa_context(browser, browser_base_url)
+                try:
+                    _activate_qa(context, browser_base_url, scenario)
+                    page = context.new_page()
+                    page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+                    page.locator(".gradio-container").wait_for(timeout=30_000)
+                    page.locator("#replay-action").click()
+                    _wait_for_terminal_status(page, "⚠ 部分完成")
+                    details = page.locator("#failure-details").inner_text()
+                    for label in (
+                        "失败节点",
+                        "安全错误码",
+                        "已完成阶段",
+                        "继承阶段",
+                        "仍可使用的结果",
+                        "可重试范围",
+                        "建议操作",
+                    ):
+                        assert label in details
+                    assert failed_stage in details
+                    assert page.locator("#partial-retry").is_enabled()
+                    page.get_by_role("tab", name="引用与下载", exact=True).click()
+                    expect(page.locator("#download-result")).to_contain_text("下载部分结果包")
+                    if scenario == "vq-06-tts-failed":
+                        page.get_by_role("tab", name="诊断卡", exact=True).click()
+                        page.locator("#diagnostic-card img").wait_for(timeout=30_000)
+                        page.get_by_role("tab", name="语音复盘", exact=True).click()
+                        expect(page.locator("#diagnostic-audio")).to_be_hidden()
+                        assert "tts_failed" in page.locator("#audio-metadata").inner_text()
+                    else:
+                        page.get_by_role("tab", name="诊断卡", exact=True).click()
+                        assert page.locator("#diagnostic-card img[src]").count() == 0
+                        page.get_by_role("tab", name="语音复盘", exact=True).click()
+                        expect(page.locator("#audio-metadata")).to_contain_text(
+                            "语音后端", timeout=30_000
+                        )
+                        expect(page.locator("#diagnostic-audio")).to_be_visible()
+                    _write_qa_staging(page, "-".join(scenario.split("-")[:2]))
+                    page.locator("#partial-retry").click()
+                    _wait_for_terminal_status(page, "✓ 已完成")
+                    assert page.locator("#partial-retry").is_disabled()
+                finally:
+                    context.close()
+
+        finally:
+            browser.close()
+
+
+def test_vq_08_safe_failure_and_vq_09_fallback_truth_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            context, _capability = _qa_context(browser, browser_base_url)
+            try:
+                _activate_qa(context, browser_base_url, "vq-08-source-invalid")
+                page = context.new_page()
+                page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+                page.locator(".gradio-container").wait_for(timeout=30_000)
+                page.locator("#replay-action").click()
+                expect(page.locator("#diagnostic-status")).to_contain_text(
+                    "诊断失败", timeout=90_000
+                )
+                details = page.locator("#failure-details").inner_text()
+                for label in (
+                    "失败节点",
+                    "安全错误码",
+                    "已完成阶段",
+                    "继承阶段",
+                    "仍可使用的结果",
+                    "可重试范围",
+                    "建议操作",
+                ):
+                    assert label in details
+                assert "source_bundle_invalid" in details
+                assert not re.search(r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)", details)
+                assert page.locator("#diagnostic-card img[src]").count() == 0
+                expect(page.locator("#diagnostic-audio")).to_be_hidden()
+                page.get_by_role("tab", name="引用与下载", exact=True).click()
+                expect(page.locator("#download-result")).to_be_hidden()
+                _write_qa_staging(page, "vq-08")
+            finally:
+                context.close()
+
+            context, _capability = _qa_context(browser, browser_base_url)
+            try:
+                _activate_qa(context, browser_base_url, "vq-09-fallback")
+                page = context.new_page()
+                page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+                page.locator(".gradio-container").wait_for(timeout=30_000)
+                page.locator("#replay-action").click()
+                _wait_for_terminal_status(page, "✓ 已完成")
+                status = page.locator("#diagnostic-status").inner_text()
+                assert "语音已降级" in status
+                assert "sapi" in status
+                page.get_by_role("tab", name="语音复盘", exact=True).click()
+                audio_metadata = page.locator("#audio-metadata").inner_text()
+                assert "语音后端：sapi" in audio_metadata
+                assert "是否降级：是" in audio_metadata
+                assert "降级原因：无" not in audio_metadata
+                expect(page.locator("#diagnostic-audio")).to_be_visible()
+                page.get_by_role("tab", name="引用与下载", exact=True).click()
+                expect(page.locator("#download-result")).to_contain_text("下载完整证据包")
+                _write_qa_staging(page, "vq-09")
+            finally:
+                context.close()
+        finally:
+            browser.close()
+
+
+def test_vq_10_single_field_correction_creates_new_identity_and_preserves_old_run(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, _capability = _qa_context(browser, browser_base_url)
+            _activate_qa(context, browser_base_url, "vq-02-replay")
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+            metadata = page.locator("#result-metadata")
+            old_identity = metadata.inner_text()
+
+            field = page.get_by_label("包/模块", exact=True)
+            old_value = field.input_value()
+            new_value = f"{old_value}x"
+            field.click()
+            field.press("End")
+            field.type("x")
+            pending = page.get_by_label("修改草稿", exact=True)
+            expect(pending).to_have_value(re.compile(re.escape(new_value)), timeout=30_000)
+            pending_copy = pending.input_value()
+            assert "有 1 项未确认修改" in pending_copy
+            assert old_value in pending_copy and new_value in pending_copy and "→" in pending_copy
+            assert metadata.inner_text() == old_identity
+
+            confirm = page.get_by_role("button", name="确认修改并重新诊断", exact=True)
+            assert confirm.is_enabled()
+            confirm.click()
+            create = page.get_by_role("button", name="创建新运行", exact=True)
+            create.wait_for(timeout=30_000)
+            assert create.is_enabled()
+            assert metadata.inner_text() == old_identity
+            create.click()
+            page.wait_for_function(
+                "([selector, oldValue]) => "
+                "document.querySelector(selector)?.innerText !== oldValue",
+                arg=["#result-metadata", old_identity],
+                timeout=90_000,
+            )
+            new_identity = metadata.inner_text()
+            assert new_identity != old_identity
+            assert "来源运行" in new_identity
+            _write_qa_staging(page, "vq-10")
+
+            _activate_qa(context, browser_base_url, "vq-02-replay")
+            recovery = context.new_page()
+            recovery.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            recovery.locator(".gradio-container").wait_for(timeout=30_000)
+            recovery.locator("#replay-action").click()
+            _wait_for_terminal_status(recovery, "✓ 已完成")
+            assert recovery.locator("#result-metadata").inner_text() == old_identity
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
 
 
 @pytest.fixture
@@ -822,9 +1210,7 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
             preview = page.get_by_role("button", name="生成本地脱敏预览", exact=True)
-            approve = page.get_by_role(
-                "button", name="确认预览并开始本地诊断", exact=True
-            )
+            approve = page.get_by_role("button", name="确认预览并开始本地诊断", exact=True)
             preview.wait_for(timeout=30_000)
             assert approve.is_disabled()
             preview.click()
@@ -889,14 +1275,10 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             assert download_enabled
             assert body_horizontal_overflow is False
 
-            manifests_after = set(
-                _LOCAL_LIVE_RESULTS.glob("case_*/result_*/result-manifest.json")
-            )
+            manifests_after = set(_LOCAL_LIVE_RESULTS.glob("case_*/result_*/result-manifest.json"))
             fresh_manifests = manifests_after - manifests_before
             assert len(fresh_manifests) == 1
-            result_manifest = json.loads(
-                fresh_manifests.pop().read_text(encoding="utf-8")
-            )
+            result_manifest = json.loads(fresh_manifests.pop().read_text(encoding="utf-8"))
             identity = result_manifest["identity"]
             assert result_manifest["status"] == "completed"
             assert result_manifest["mode"] == "live"
@@ -947,9 +1329,10 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
                     "verified_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
                 assert set(ledger) == _LOCAL_LIVE_LEDGER_KEYS
-                assert ledger["screenshot_sha256"] == hashlib.sha256(
-                    screenshot_path.read_bytes()
-                ).hexdigest()
+                assert (
+                    ledger["screenshot_sha256"]
+                    == hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+                )
                 assert ledger["backend"] == "local-rule-v1"
                 ledger_path.write_text(
                     json.dumps(ledger, ensure_ascii=False, indent=2) + "\n",
@@ -993,10 +1376,13 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
     assert results_region["y"] > input_region["y"]
     assert results_region["y"] > evidence_region["y"]
     assert abs(results_region["x"] - input_region["x"]) <= 1
-    assert abs(
-        (results_region["x"] + results_region["width"])
-        - (evidence_region["x"] + evidence_region["width"])
-    ) <= 1
+    assert (
+        abs(
+            (results_region["x"] + results_region["width"])
+            - (evidence_region["x"] + evidence_region["width"])
+        )
+        <= 1
+    )
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 

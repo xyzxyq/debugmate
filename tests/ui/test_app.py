@@ -181,17 +181,11 @@ def _partial_state_for_app(failed_stage: str) -> ResultViewState:
             ),
             failure=failure,
         )
-        availability = ArtifactAvailability(
-            report=True, card=True, recap_text=True, audio=False
-        )
+        availability = ArtifactAvailability(report=True, card=True, recap_text=True, audio=False)
     else:
-        failure = SafeFailure(
-            code="png_layout_failed", failed_stage="card", retry_scope="card"
-        )
+        failure = SafeFailure(code="png_layout_failed", failed_stage="card", retry_scope="card")
         audio = completed.audio
-        availability = ArtifactAvailability(
-            report=True, card=False, recap_text=True, audio=True
-        )
+        availability = ArtifactAvailability(report=True, card=False, recap_text=True, audio=True)
     return completed.model_copy(
         update={
             "status": ResultStatus.PARTIAL,
@@ -438,6 +432,9 @@ def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None
     assert {
         "diagnostic-status",
         "result-metadata",
+        "download-metadata",
+        "audio-metadata",
+        "diagnostic-audio",
         "local-preview",
         "local-approve",
         "replay-action",
@@ -448,8 +445,44 @@ def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None
         for component in config["components"]
         if component["props"].get("elem_id") == "download-result"
     )
-    assert download["props"]["visible"] is True
+    assert download["props"]["visible"] is False
     assert download["props"]["interactive"] is False
+
+
+def test_replay_payload_exposes_download_metadata_next_to_native_download() -> None:
+    app = build_app(_Service())
+    config = app.get_config_file()
+    metadata = next(
+        component
+        for component in config["components"]
+        if component["props"].get("elem_id") == "download-metadata"
+    )
+    download = next(
+        component
+        for component in config["components"]
+        if component["props"].get("elem_id") == "download-result"
+    )
+    callback = _callback(app, "load_replay_stream")
+
+    assert metadata["type"] == "markdown"
+    assert metadata["id"] < download["id"]
+    frame = list(callback("module-not-found", None))[-1]
+    assert frame[-2]["value"] == render_view_state(frame[8]).download_metadata
+    assert "离线回放" in frame[-2]["value"]
+
+
+def test_native_audio_has_server_derived_metadata_surface() -> None:
+    config = build_app(_Service()).get_config_file()
+    metadata = next(
+        component
+        for component in config["components"]
+        if component["props"].get("elem_id") == "audio-metadata"
+    )
+    audio = next(component for component in config["components"] if component["type"] == "audio")
+
+    assert metadata["type"] == "markdown"
+    assert metadata["id"] > audio["id"]
+    assert audio["props"]["visible"] is False
 
 
 def test_partial_retry_has_one_initially_disabled_server_labeled_control() -> None:

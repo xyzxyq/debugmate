@@ -9,6 +9,7 @@ import logging
 import socket
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +20,7 @@ from debugmate.ui.app import build_app
 CAPABILITY = "qa_" + "a" * 64
 HEADER = "x-debugmate-qa-capability"
 QA_ROUTE = "/_debugmate/qa"
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _qa():
@@ -404,3 +406,35 @@ def test_runner_environment_restores_preexisting_and_missing_values() -> None:
     with pytest.raises(RunnerBodyFailed), qa.runner_qa_environment(clean, CAPABILITY):
         raise RunnerBodyFailed
     assert clean == {"KEEP": "untouched"}
+
+
+def test_truth_state_runner_and_qa_serve_keep_capability_private_and_cleanup_owned_state() -> None:
+    runner = (ROOT / "scripts/run-phase4-truth-state-qa.ps1").read_text(encoding="utf-8")
+    qa_serve = (ROOT / "src/debugmate/ui/qa_serve.py").read_text(encoding="utf-8")
+    ordinary_serve = (ROOT / "src/debugmate/ui/serve.py").read_text(encoding="utf-8")
+
+    for name in (
+        "DEBUGMATE_UI_BASE_URL",
+        "DEBUGMATE_QA_ENABLED",
+        "DEBUGMATE_QA_CAPABILITY",
+        "DEBUGMATE_QA_STAGING_DIR",
+    ):
+        assert name in runner
+    assert "$prior[$name]" in runner
+    assert "finally {" in runner
+    assert "Stop-Process -InputObject $process" in runner
+    assert "Get-NetTCPConnection -State Listen -LocalPort $port" in runner
+    assert "[IO.Path]::GetFullPath($runtimeRoot)" in runner
+    assert "Remove-Item -LiteralPath $runtimeRoot -Recurse -Force" in runner
+    assert 'Remove-Item -LiteralPath "Env:$name"' in runner
+    assert 'Set-Item -LiteralPath "Env:$name" -Value $prior[$name]' in runner
+    assert "Write-Output $capability" not in runner
+    assert "Write-Host $capability" not in runner
+    assert "mount_qa_endpoint(app.app, gate)" in qa_serve
+    assert (
+        qa_serve.index("prevent_thread_lock=True")
+        < qa_serve.index("mount_qa_endpoint(app.app, gate)")
+        < qa_serve.index("app.block_thread()")
+    )
+    assert "qa_serve" not in ordinary_serve
+    assert "qa_scenarios" not in ordinary_serve

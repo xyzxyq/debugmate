@@ -116,7 +116,7 @@ def test_idle_completed_partial_and_failed_have_exact_safe_visibility() -> None:
     )
 
     failed = render_view_state(_state(ResultStatus.FAILED))
-    assert failed.status_badge == "✕ 失败"
+    assert failed.status_badge == "✕ 诊断失败"
     assert failed.tabs_enabled is False
     assert failed.download_label is None
     assert failed.failure_code == "source_bundle_invalid"

@@ -296,13 +296,9 @@ class UiCallbacks:
     def _member(self, state: ResultViewState, member_id: str):
         if state.identity is None or state.result_id is None:
             raise ResultServiceError("download_invalid")
-        return self._service.resolve_download(
-            state.identity.case_id, state.result_id, member_id
-        )
+        return self._service.resolve_download(state.identity.case_id, state.result_id, member_id)
 
-    def _correction_fields(
-        self, state: ResultViewState
-    ) -> tuple[str, str, str, str, str, str]:
+    def _correction_fields(self, state: ResultViewState) -> tuple[str, str, str, str, str, str]:
         """Read six values only from the verified server-side run record."""
 
         if state.identity is None or state.status not in {
@@ -368,6 +364,7 @@ class UiCallbacks:
             )
         except (KeyError, ResultServiceError, TypeError, ValueError, UnicodeError):
             return "", "等待诊断", "暂无", (), (), ""
+
     def _render(self, state: ResultViewState) -> CallbackPayload:
         if state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}:
             return CallbackPayload(
@@ -485,7 +482,8 @@ class UiCallbacks:
         except Exception:
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
 
-    def retry(self, case_id: object, result_id: object, *, request: object | None = None
+    def retry(
+        self, case_id: object, result_id: object, *, request: object | None = None
     ) -> CallbackPayload:
         if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
             return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
@@ -562,8 +560,7 @@ def correction_draft_from_fields(
     count = len(changed)
     summary_lines = [f"有 {count} 项未确认修改。"]
     summary_lines.extend(
-        f"{_FIELD_LABELS[index]}：{before} → {after}"
-        for index, before, after in changed
+        f"{_FIELD_LABELS[index]}：{before} → {after}" for index, before, after in changed
     )
     if count != 1:
         summary_lines.append("请一次确认一项修改，避免混合多个字段的证据变更。")
@@ -676,9 +673,7 @@ def build_app(
         with gr.Group(elem_classes="status-bar"):
             gr.Markdown("# DebugMate 诊断工作台")
             status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
-            result_metadata = gr.Markdown(
-                "", elem_id="result-metadata", elem_classes="metadata"
-            )
+            result_metadata = gr.Markdown("", elem_id="result-metadata", elem_classes="metadata")
         with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes="region"):
                 gr.Markdown("## 输入与抽取")
@@ -704,9 +699,7 @@ def build_app(
                     interactive=False,
                     elem_id="local-approve",
                 )
-                gr.Markdown(
-                    "后端：local-rule-v1（本地规则，无云端调用）"
-                )
+                gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
                 replay = gr.Dropdown(
                     choices=[("ModuleNotFoundError：缺少虚构依赖包", "module-not-found")],
                     label="固定回放案例",
@@ -766,17 +759,23 @@ def build_app(
                             elem_id="diagnostic-card",
                             type="filepath",
                             interactive=False,
+                            visible=False,
                             sources=None,
                             buttons=[],
                         )
                     with gr.Tab("语音复盘"):
                         audio = gr.Audio(
                             label="语音复盘",
+                            elem_id="diagnostic-audio",
                             type="filepath",
                             interactive=False,
+                            visible=False,
                             sources=None,
                             recording=False,
                             buttons=[],
+                        )
+                        audio_metadata = gr.Markdown(
+                            "", elem_id="audio-metadata", elem_classes="metadata"
                         )
                         recap = gr.Textbox(
                             label="已验证复盘稿",
@@ -792,9 +791,12 @@ def build_app(
                             label="引用",
                         )
                         gr.File(label="已验证单个产物", interactive=False, visible=False)
+                        download_metadata = gr.Markdown(
+                            "", elem_id="download-metadata", elem_classes="metadata"
+                        )
                         download = gr.DownloadButton(
                             "下载结果包",
-                            visible=True,
+                            visible=False,
                             interactive=False,
                             elem_id="download-result",
                         )
@@ -830,6 +832,8 @@ def build_app(
             retry_button,
             retry_case,
             retry_result,
+            download_metadata,
+            audio_metadata,
         ]
 
         def apply_payload(payload: CallbackPayload) -> tuple[object, ...]:
@@ -859,18 +863,16 @@ def build_app(
                 gr.update(value=payload.redacted_input),
                 gr.update(),
                 gr.update(value=f"类别：{payload.category}\n\n置信度：{payload.confidence}"),
+                gr.update(value=fact_table.postprocess(list(payload.fact_rows)).model_dump()),
                 gr.update(
-                    value=fact_table.postprocess(list(payload.fact_rows)).model_dump()
-                ),
-                gr.update(
-                    value=citation_table.postprocess(
-                        list(payload.citation_rows)
-                    ).model_dump()
+                    value=citation_table.postprocess(list(payload.citation_rows)).model_dump()
                 ),
                 gr.update(value=payload.recap_text),
                 retry_update,
                 retry_case_id,
                 retry_result_id,
+                gr.update(value=payload.view.download_metadata),
+                gr.update(value=payload.view.audio_metadata or ""),
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
@@ -903,21 +905,15 @@ def build_app(
                 prepared.audit_display,
             )
 
-        def approve_and_diagnose_stream(
-            preview_token: str | None, request: gr.Request
-        ):
+        def approve_and_diagnose_stream(preview_token: str | None, request: gr.Request):
             try:
-                record = local_previews.consume(
-                    preview_token, _request_session(request)
-                )
+                record = local_previews.consume(preview_token, _request_session(request))
                 if record is None:
                     raise ResultServiceError("result_bundle_invalid")
                 approved = approve_preview(record.preview, local_approval_key)
             except (TypeError, ValueError, ResultServiceError):
                 yield apply_payload(
-                    callbacks._render(
-                        callbacks._failure(_idle_view(), "result_bundle_invalid")
-                    )
+                    callbacks._render(callbacks._failure(_idle_view(), "result_bundle_invalid"))
                 )
                 return
             for payload in callbacks.diagnose_events(approved, request=request):
@@ -926,9 +922,7 @@ def build_app(
         def update_correction_draft(
             original: object, previous_run_id: object, *values: object
         ) -> tuple[object, ...]:
-            draft, summary = correction_draft_from_fields(
-                original, values, previous_run_id
-            )
+            draft, summary = correction_draft_from_fields(original, values, previous_run_id)
             return (
                 draft,
                 gr.update(value=summary),
@@ -938,9 +932,7 @@ def build_app(
                 gr.update(interactive=False),
             )
 
-        def open_correction_confirmation(
-            draft: object, summary: object
-        ) -> tuple[object, ...]:
+        def open_correction_confirmation(draft: object, summary: object) -> tuple[object, ...]:
             if not isinstance(draft, CorrectionDraft) or not isinstance(summary, str):
                 return (
                     gr.update(open=False),
@@ -950,10 +942,7 @@ def build_app(
             return (
                 gr.update(open=True),
                 gr.update(
-                    value=(
-                        f"{summary}\n\n"
-                        "确认后将创建新的运行和结果；当前证据与结果不会被覆盖。"
-                    )
+                    value=(f"{summary}\n\n确认后将创建新的运行和结果；当前证据与结果不会被覆盖。")
                 ),
                 gr.update(interactive=True),
             )
