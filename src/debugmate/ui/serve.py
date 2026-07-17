@@ -31,7 +31,7 @@ from debugmate.results.tts.dify import DifyTtsAdapter
 from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
 from debugmate.settings import DebugMateSettings
-from debugmate.ui.app import WORKBENCH_CSS, build_app
+from debugmate.ui.app import WORKBENCH_CSS, build_app, ensure_content_endpoint
 
 
 class _NoopOcr:
@@ -233,8 +233,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         inbrowser=False,
         quiet=True,
         show_error=False,
+        prevent_thread_lock=True,
         css=WORKBENCH_CSS,
     )
+    ensure_content_endpoint(app)
+    app.block_thread()
     return 0
 
 

@@ -211,11 +211,13 @@ class QaCapabilityGate:
         capability: str,
         scenario_handler: Callable[[QaScenario], object],
         stage_gate: QaStageGate | None = None,
+        audit_handler: Callable[[], object] | None = None,
     ) -> None:
         self._enabled = process_enabled is True
         self._capability = capability if _CAPABILITY_PATTERN.fullmatch(capability) else ""
         self._handler = scenario_handler
         self._stage_gate = stage_gate
+        self._audit_handler = audit_handler
         self._counts = {"scenario": 0, "workflow": 0, "result": 0, "download": 0}
 
     @property
@@ -243,6 +245,10 @@ class QaCapabilityGate:
             raise QaAccessDenied()
 
     def dispatch_authorized(self, payload: object) -> object:
+        if payload == {"action": "audit"}:
+            if self._audit_handler is None:
+                raise QaAccessDenied()
+            return self._audit_handler()
         if isinstance(payload, dict) and set(payload) == {"action", "stage"}:
             if self._stage_gate is None:
                 raise QaAccessDenied()

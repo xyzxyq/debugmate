@@ -29,7 +29,7 @@ from debugmate.results.contracts import (
 from debugmate.results.service import ServiceStageEvent
 from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui import serve as serve_module
-from debugmate.ui.app import CallbackPayload, build_app
+from debugmate.ui.app import CallbackPayload, _UiSessionStateStore, build_app
 from debugmate.ui.presentation import render_view_state
 from debugmate.ui.serve import _local_service
 
@@ -297,6 +297,57 @@ def _callback(app, name: str):
     )
 
 
+def test_server_session_state_registry_isolated_strict_bounded_and_clearable() -> None:
+    store = _UiSessionStateStore(max_sessions=2)
+    first = _Request("session-registry-a")
+    second = _Request("session-registry-b")
+    third = _Request("session-registry-c")
+
+    assert store.publish(first, {"status": "completed"}) is False
+    assert store.publish(_Request("bad/session"), _completed_state()) is False
+    assert store.read(second) is None
+
+    expected = _completed_state()
+    first_lease = store.issue_lease(first)
+    second_lease = store.issue_lease(second)
+    assert isinstance(first_lease, str) and first_lease != second_lease
+    source_run_id = expected.identity.source_run_id
+    assert store.publish_lease(first_lease + "tampered", expected, source_run_id) is False
+
+    assert store.publish(first, expected) is True
+    recovered = store.read(first)
+    assert recovered == expected
+    assert recovered is not expected
+    assert len(store) == 1
+    revised = expected.model_copy(update={"result_id": "result_" + "9" * 32})
+    assert store.publish_lease(second_lease, revised, source_run_id) is False
+    assert store.publish_lease(first_lease, revised, source_run_id) is True
+    assert store.read(first) == revised
+    assert store.read(second) is None
+
+    assert store.publish(second, expected) is True
+    assert store.publish(third, expected) is True
+    assert len(store) == 2
+    assert store.read(first) is None
+    assert store.read(second) == expected
+    assert store.read(third) == expected
+    assert "/debugmate-content/" not in repr(store._values)
+    snapshot = store.audit_snapshot()
+    assert len(snapshot) == 2
+    assert all(
+        set(item) == {"session_sha256_prefix", "status", "source_run_id"}
+        and len(item["session_sha256_prefix"] or "") == 12
+        for item in snapshot
+    )
+    assert "session-registry" not in repr(snapshot)
+
+    assert store.clear(second) is True
+    assert store.clear(second) is False
+    assert store.publish_lease(second_lease, expected, source_run_id) is False
+    assert store.clear(third) is True
+    assert len(store) == 0
+
+
 def test_local_live_requires_preview_then_same_session_approval() -> None:
     service = _Service()
     app = build_app(service)
@@ -435,6 +486,10 @@ def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None
         "download-metadata",
         "audio-metadata",
         "diagnostic-audio",
+        "diagnostic-report",
+        "recap-text",
+        "citation-table",
+        "individual-artifacts",
         "local-preview",
         "local-approve",
         "replay-action",
@@ -448,8 +503,18 @@ def test_local_live_controls_and_terminal_outputs_have_stable_elem_ids() -> None
     assert download["props"]["visible"] is False
     assert download["props"]["interactive"] is False
 
+    correction_fields = [
+        component
+        for component in config["components"]
+        if component["type"] == "textbox"
+        and component["props"].get("label")
+        in {"异常类型", "关键回溯行", "包/模块", "版本", "设备", "路径"}
+    ]
+    assert len(correction_fields) == 6
+    assert all(component["props"]["interactive"] is False for component in correction_fields)
 
-def test_replay_payload_exposes_download_metadata_next_to_native_download() -> None:
+
+def test_main_payload_clears_download_surfaces_until_verified_resync() -> None:
     app = build_app(_Service())
     config = app.get_config_file()
     metadata = next(
@@ -467,8 +532,120 @@ def test_replay_payload_exposes_download_metadata_next_to_native_download() -> N
     assert metadata["type"] == "markdown"
     assert metadata["id"] < download["id"]
     frame = list(callback("module-not-found", None))[-1]
-    assert frame[-2]["value"] == render_view_state(frame[8]).download_metadata
-    assert "离线回放" in frame[-2]["value"]
+    assert frame[6]["value"] is None
+    assert frame[6]["visible"] is False
+    assert frame[6]["interactive"] is False
+    assert frame[34]["value"] == ""
+
+
+def test_download_surfaces_resync_from_server_session_state_and_fail_closed() -> None:
+    app = build_app(_Service())
+    block = next(
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "sync_download_surfaces"
+    )
+
+    assert len(block.inputs) == 0
+    assert [output.elem_id for output in block.outputs] == [
+        "download-metadata",
+        "download-result",
+    ]
+    assert block.queue is True
+    assert block.concurrency_id == "debugmate-case"
+
+    request = _Request("download-resync")
+    replay = _callback(app, "load_replay_stream")("module-not-found", request)
+    next(replay)
+    metadata, download = block.fn(request)
+    assert metadata["value"] == ""
+    assert download["value"] is None
+    assert download["visible"] is False
+    assert download["interactive"] is False
+
+    list(replay)
+    metadata, download = block.fn(request)
+    assert _completed_state().identity is not None
+    assert _completed_state().identity.source_run_id in metadata["value"]
+    assert download["visible"] is True
+    assert download["interactive"] is True
+    assert download["value"]["url"].startswith("http://127.0.0.1:7860/debugmate-content/")
+    response = TestClient(app.app).get(download["value"]["url"])
+    assert response.status_code == 200
+    assert response.content == b"verified-zip"
+
+    failed_request = _Request("download-resync-failed")
+    list(_callback(app, "load_replay_stream")("not-allowlisted", failed_request))
+    metadata, download = block.fn(failed_request)
+    assert metadata["value"] == ""
+    assert download["value"] is None
+    assert download["visible"] is False
+    assert download["interactive"] is False
+
+
+def test_correction_chain_preserves_only_strict_run_and_draft_while_downloads_resync() -> None:
+    from debugmate.diagnosis.extraction import FieldId
+    from debugmate.results.service import CorrectionDraft
+
+    app = build_app(_Service())
+    block = next(
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "create_new_run_stream"
+    )
+    replay_block = next(
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
+    )
+    run_id = _completed_state().identity.source_run_id
+    draft = CorrectionDraft(
+        field_id=FieldId.PACKAGE,
+        replacement="replacement_pkg",
+        reason="用户确认更正",
+    )
+
+    request = _Request("correction-chain")
+    replay_frames = list(replay_block.fn("module-not-found", request))
+    lease = replay_frames[-1][-1]
+    assert isinstance(lease, str) and len(lease) == 38 and lease.startswith("lease_")
+    assert all(character in "0123456789abcdef" for character in lease[6:])
+    assert replay_block.outputs[-1].get_block_name() == "state"
+    assert not any(
+        getattr(block_fn.fn, "__name__", "") == "issue_session_lease"
+        for block_fn in app.fns.values()
+    )
+    assert lease not in repr(app.get_config_file())
+    stream = block.fn(run_id, draft, lease, request)
+    frame = next(stream)
+    stream.close()
+
+    assert frame[8].status is ResultStatus.RUNNING
+    assert frame[16] == run_id
+    assert frame[17] == draft
+    assert frame[6]["value"] is None
+    assert frame[6]["visible"] is False
+    assert frame[6]["interactive"] is False
+    assert frame[34]["value"] == ""
+    assert app._debugmate_content_callbacks.session_audit_snapshot() == (
+        {
+            "session_sha256_prefix": hashlib.sha256(b"correction-chain").hexdigest()[:12],
+            "status": "running",
+            "source_run_id": None,
+        },
+    )
+    assert not any(
+        getattr(block_fn.fn, "__name__", "") in {"begin_new_run", "complete_new_run"}
+        for block_fn in app.fns.values()
+    )
+    block_index = next(index for index, candidate in app.fns.items() if candidate is block)
+    resyncs = [
+        candidate
+        for candidate in app.fns.values()
+        if getattr(candidate.fn, "__name__", "") == "sync_download_surfaces"
+        and candidate.trigger_after == block_index
+    ]
+    assert len(resyncs) == 1
 
 
 def test_native_audio_has_server_derived_metadata_surface() -> None:
@@ -665,19 +842,28 @@ def test_replay_button_callback_streams_running_states_and_disables_repeat_actio
     ]
     assert [len(frame[8].completed_stages) for frame in frames[:-1]] == list(range(7))
     assert all(frame[8].mode is ResultMode.REPLAY for frame in frames[:-1])
+    assert all(
+        all(update["interactive"] is False for update in frame[9:15]) for frame in frames[:-1]
+    )
     assert all(frame[22]["interactive"] is False for frame in frames[:-1])
     assert frames[-1][8].status is ResultStatus.COMPLETED
+    assert all(update["interactive"] is True for update in frames[-1][9:15])
 
 
 def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls() -> None:
     """The actual Gradio stream must not rebuild media as a local server path."""
 
     app = build_app(_Service())
+    replay_index = next(
+        index
+        for index, block_fn in app.fns.items()
+        if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
+    )
 
     async def stream_replay() -> list[dict[str, object]]:
         state = SessionState(app)
         response = await app.process_api(
-            0,
+            replay_index,
             ["module-not-found"],
             state=state,
             session_hash="replay-process-api",
@@ -686,7 +872,7 @@ def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls(
         frames = [response]
         while response["is_generating"]:
             response = await app.process_api(
-                0,
+                replay_index,
                 [],
                 state=state,
                 iterator=response["iterator"],
@@ -706,7 +892,7 @@ def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls(
     terminal = frames[-1]
     assert terminal["is_generating"] is False
     urls = []
-    for index in (4, 5, 6):
+    for index in (4, 5):
         value = terminal["data"][index]["value"]
         assert value["path"] == value["url"]
         parsed = urlsplit(value["url"])
@@ -717,7 +903,9 @@ def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls(
         assert "/gradio_api/file=" not in value["path"]
         urls.append(value["url"])
 
-    expected = (b"verified-card", b"verified-audio", b"verified-zip")
+    assert terminal["data"][6]["value"] is None
+
+    expected = (b"verified-card", b"verified-audio")
     client = TestClient(app.app)
     for url, payload in zip(urls, expected, strict=True):
         response = client.get(url)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import socket
 import subprocess
 import sys
 import time
+import zipfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -27,6 +29,7 @@ from threading import Thread
 
 import httpx
 import pytest
+from PIL import Image
 from playwright.sync_api import expect, sync_playwright
 
 from debugmate.evidence import RunManifest, RunStatus
@@ -519,15 +522,16 @@ def _qa_context(browser, browser_base_url: str):
     if capability is None:
         pytest.skip("runner-owned truth-state QA server is not active")
     assert re.fullmatch(r"qa_[0-9a-f]{64}", capability)
-    context = browser.new_context(
-        viewport={"width": 1366, "height": 768},
-        extra_http_headers={_QA_HEADER: capability},
-    )
+    context = browser.new_context(viewport={"width": 1366, "height": 768})
     return context, capability
 
 
 def _activate_qa(context, browser_base_url: str, scenario: str) -> None:
-    response = context.request.post(f"{browser_base_url}{_QA_ROUTE}", data={"scenario": scenario})
+    response = context.request.post(
+        f"{browser_base_url}{_QA_ROUTE}",
+        data={"scenario": scenario},
+        headers={_QA_HEADER: os.environ[_QA_CAPABILITY_ENV]},
+    )
     assert response.status == 200
     assert response.json() == {"accepted": scenario}
 
@@ -557,6 +561,7 @@ def _release_qa_stage(context, browser_base_url: str, stage: str) -> dict[str, o
     response = context.request.post(
         f"{browser_base_url}{_QA_ROUTE}",
         data={"action": "release", "stage": stage},
+        headers={_QA_HEADER: os.environ[_QA_CAPABILITY_ENV]},
         timeout=10_000,
     )
     assert response.status == 200
@@ -565,7 +570,169 @@ def _release_qa_stage(context, browser_base_url: str, stage: str) -> dict[str, o
     return payload
 
 
-def _write_qa_staging(page, scenario: str) -> None:
+def _qa_audit_counts(context, browser_base_url: str) -> dict[str, int]:
+    response = context.request.post(
+        f"{browser_base_url}{_QA_ROUTE}",
+        data={"action": "audit"},
+        headers={_QA_HEADER: os.environ[_QA_CAPABILITY_ENV]},
+        timeout=10_000,
+    )
+    assert response.status == 200
+    payload = response.json()
+    assert isinstance(payload, dict) and {"run_count", "result_count"} <= set(payload)
+    counts = {name: payload[name] for name in ("run_count", "result_count")}
+    assert all(isinstance(value, int) and value >= 0 for value in counts.values())
+    return counts
+
+
+def _qa_session_states(context, browser_base_url: str) -> list[dict[str, object]]:
+    response = context.request.post(
+        f"{browser_base_url}{_QA_ROUTE}",
+        data={"action": "audit"},
+        headers={_QA_HEADER: os.environ[_QA_CAPABILITY_ENV]},
+        timeout=10_000,
+    )
+    assert response.status == 200
+    payload = response.json()
+    assert isinstance(payload, dict)
+    states = payload.get("session_states")
+    assert isinstance(states, list)
+    assert all(
+        isinstance(item, dict) and set(item) == {"session_sha256_prefix", "status", "source_run_id"}
+        for item in states
+    )
+    return states
+
+
+def _qa_session_events(context, browser_base_url: str) -> list[dict[str, object]]:
+    response = context.request.post(
+        f"{browser_base_url}{_QA_ROUTE}",
+        data={"action": "audit"},
+        headers={_QA_HEADER: os.environ[_QA_CAPABILITY_ENV]},
+        timeout=10_000,
+    )
+    assert response.status == 200
+    payload = response.json()
+    assert isinstance(payload, dict)
+    events = payload.get("session_events")
+    assert isinstance(events, list)
+    return events
+
+
+def _latest_issued_session_prefix(context, browser_base_url: str) -> str:
+    for event in reversed(_qa_session_events(context, browser_base_url)):
+        prefix = event.get("session_sha256_prefix")
+        if event.get("operation") == "issue_lease" and isinstance(prefix, str):
+            return prefix
+    raise AssertionError("no issued UI session lease was audited")
+
+
+def _session_state_for_prefix(
+    context, browser_base_url: str, session_prefix: str
+) -> dict[str, object]:
+    matches = [
+        state
+        for state in _qa_session_states(context, browser_base_url)
+        if state.get("session_sha256_prefix") == session_prefix
+    ]
+    assert len(matches) == 1, (session_prefix, matches)
+    return matches[0]
+
+
+def _wait_for_created_result_counts(
+    context, browser_base_url: str, initial: dict[str, int]
+) -> dict[str, int]:
+    deadline = time.monotonic() + 30
+    latest = initial
+    while time.monotonic() < deadline:
+        latest = _qa_audit_counts(context, browser_base_url)
+        if (
+            latest["run_count"] > initial["run_count"]
+            and latest["result_count"] == initial["result_count"] + 1
+        ):
+            return latest
+        time.sleep(0.1)
+    raise AssertionError(("created result was not persisted", initial, latest))
+
+
+def _wait_for_new_session_source_run(
+    context, browser_base_url: str, session_prefix: str, old_run_id: str
+) -> str:
+    deadline = time.monotonic() + 30
+    latest: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        latest = _session_state_for_prefix(context, browser_base_url, session_prefix)
+        candidate = latest.get("source_run_id")
+        if (
+            latest.get("status") == "completed"
+            and isinstance(candidate, str)
+            and re.fullmatch(r"run_[0-9a-f]{32}", candidate)
+            and candidate != old_run_id
+        ):
+            return candidate
+        time.sleep(0.1)
+    raise AssertionError(("new session source run was not published", old_run_id, latest))
+
+
+def _download_verified_bundle(page, context, *, partial: bool) -> dict[str, object]:
+    """Download the served archive and validate its self-contained allowlist."""
+
+    button = page.locator("#download-result")
+    expected_name = "debugmate-result-partial.zip" if partial else "debugmate-result.zip"
+    with page.expect_download(timeout=30_000) as pending:
+        button.click()
+    download = pending.value
+    assert download.suggested_filename == expected_name
+    response = context.request.get(download.url, timeout=30_000)
+    assert download.failure() is None, (
+        download.url,
+        download.failure(),
+        response.status,
+        response.headers,
+        response.text()[:200],
+    )
+    downloaded_path = download.path()
+    assert downloaded_path is not None
+    payload = Path(downloaded_path).read_bytes()
+    archive_sha256 = hashlib.sha256(payload).hexdigest()
+    assert re.fullmatch(r"[0-9a-f]{64}", archive_sha256)
+
+    assert response.status == 200
+    assert response.headers["content-type"].split(";", 1)[0] == "application/zip"
+    assert expected_name in response.headers.get("content-disposition", "")
+    assert hashlib.sha256(response.body()).hexdigest() == archive_sha256
+
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        names = archive.namelist()
+        assert names == sorted(names) and len(names) == len(set(names))
+        manifest_bytes = archive.read("result-manifest.json")
+        manifest = json.loads(manifest_bytes)
+        assert isinstance(manifest, dict)
+        artifacts = manifest.get("artifacts")
+        assert isinstance(artifacts, list)
+        allowed = {"result-manifest.json", "checksums.sha256"}
+        for record in artifacts:
+            assert isinstance(record, dict)
+            name = record.get("path")
+            digest = record.get("sha256")
+            assert isinstance(name, str) and isinstance(digest, str)
+            assert hashlib.sha256(archive.read(name)).hexdigest() == digest
+            allowed.add(name)
+        assert set(names) == allowed
+        checksums = {}
+        for line in archive.read("checksums.sha256").decode("ascii").splitlines():
+            digest, name = line.split("  ", 1)
+            checksums[name] = digest
+        assert set(checksums) == allowed - {"checksums.sha256"}
+        assert all(
+            hashlib.sha256(archive.read(name)).hexdigest() == digest
+            for name, digest in checksums.items()
+        )
+    assert manifest.get("status") == ("partial" if partial else "completed")
+    return manifest
+
+
+def _write_qa_staging(page, context, browser_base_url: str, scenario: str) -> None:
     """Write runner-owned staging only; all captured identity-bearing text is hashed."""
 
     configured = os.environ.get(_QA_STAGING_ENV)
@@ -590,18 +757,33 @@ def _write_qa_staging(page, scenario: str) -> None:
     assert set(row) == _QA_STAGING_ROW_KEYS
     row_path.write_text(json.dumps(row, ensure_ascii=True, sort_keys=True), encoding="utf-8")
     capability = os.environ[_QA_CAPABILITY_ENV]
-    resource_urls = page.evaluate(
-        "() => performance.getEntries().map(entry => entry.name).join('\\n')"
+    browser_surfaces = page.evaluate(
+        r"""() => ({
+            outer_html: document.documentElement.outerHTML,
+            hidden_inputs: [...document.querySelectorAll('input[type=hidden]')]
+                .map(element => element.value).join('\n'),
+            local_storage: JSON.stringify({...localStorage}),
+            session_storage: JSON.stringify({...sessionStorage}),
+            resource_urls: performance.getEntries().map(entry => entry.name).join('\n'),
+        })"""
     )
+    config_response = context.request.get(f"{browser_base_url}/config", timeout=10_000)
+    assert config_response.status == 200
+    with Image.open(screenshot) as captured:
+        assert captured.format == "PNG"
+        image_metadata = json.dumps(captured.info, ensure_ascii=True, sort_keys=True, default=str)
     surfaces = (
+        page.content(),
         page.locator("html").inner_text(),
+        page.locator("body").inner_text(),
         page.url,
-        resource_urls,
+        config_response.text(),
+        image_metadata,
         json.dumps(row, sort_keys=True),
         row_path.read_text(encoding="utf-8"),
+        *(str(value) for value in browser_surfaces.values()),
     )
     assert all(capability not in surface for surface in surfaces)
-    assert capability.encode("utf-8") not in screenshot.read_bytes()
 
 
 def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
@@ -622,7 +804,9 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
             assert "离线回放" in status.inner_text()
             metadata = page.locator("#result-metadata").first.inner_text()
             page.get_by_role("tab", name="引用与下载", exact=True).click()
-            download_metadata = page.locator("#download-metadata").first.inner_text()
+            download_surface = page.locator("#download-metadata").first
+            expect(download_surface).to_contain_text("离线回放", timeout=30_000)
+            download_metadata = download_surface.inner_text()
             body = page.locator("body").inner_text()
             assert "离线回放" in metadata
             assert "ModuleNotFoundError：缺少虚构依赖包" in metadata
@@ -631,7 +815,10 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
             assert "离线回放" in download_metadata
             assert "云端运行成功" not in body
             assert page.get_by_text("下载完整证据包", exact=True).is_visible()
-            _write_qa_staging(page, "vq-02")
+            manifest = _download_verified_bundle(page, context, partial=False)
+            assert manifest["mode"] == "replay"
+            assert manifest["fixture_name"] == "ModuleNotFoundError：缺少虚构依赖包"
+            _write_qa_staging(page, context, browser_base_url, "vq-02")
         finally:
             if context is not None:
                 context.close()
@@ -682,9 +869,18 @@ def test_vq_03_running_queue_stages_are_truthful_and_conflict_safe_in_real_edge(
                     assert page.locator("#local-preview").is_disabled()
                     assert page.locator("#local-approve").is_disabled()
                     assert page.locator("#partial-retry").is_disabled()
+                    for field_label in (
+                        "异常类型",
+                        "关键回溯行",
+                        "包/模块",
+                        "版本",
+                        "设备",
+                        "路径",
+                    ):
+                        assert page.get_by_label(field_label, exact=True).is_disabled()
                     assert not re.search(r"\b\d+(?:\.\d+)?\s*%", status.inner_text())
                     if stage == "publish":
-                        _write_qa_staging(page, "vq-03")
+                        _write_qa_staging(page, context, browser_base_url, "vq-03")
                     assert _release_qa_stage(context, browser_base_url, stage) == {
                         "released": stage
                     }
@@ -736,14 +932,22 @@ def test_vq_06_vq_07_partial_recovery_in_real_edge(
                         assert label in details
                     assert failed_stage in details
                     assert page.locator("#partial-retry").is_enabled()
+                    expect(page.locator("#diagnostic-report")).to_contain_text(
+                        "DebugMate", timeout=30_000
+                    )
                     page.get_by_role("tab", name="引用与下载", exact=True).click()
                     expect(page.locator("#download-result")).to_contain_text("下载部分结果包")
+                    partial_manifest = _download_verified_bundle(page, context, partial=True)
                     if scenario == "vq-06-tts-failed":
                         page.get_by_role("tab", name="诊断卡", exact=True).click()
                         page.locator("#diagnostic-card img").wait_for(timeout=30_000)
                         page.get_by_role("tab", name="语音复盘", exact=True).click()
                         expect(page.locator("#diagnostic-audio")).to_be_hidden()
                         assert "tts_failed" in page.locator("#audio-metadata").inner_text()
+                        assert (
+                            "ModuleNotFoundError"
+                            in page.locator("#recap-text textarea").input_value()
+                        )
                     else:
                         page.get_by_role("tab", name="诊断卡", exact=True).click()
                         assert page.locator("#diagnostic-card img[src]").count() == 0
@@ -752,10 +956,24 @@ def test_vq_06_vq_07_partial_recovery_in_real_edge(
                             "语音后端", timeout=30_000
                         )
                         expect(page.locator("#diagnostic-audio")).to_be_visible()
-                    _write_qa_staging(page, "-".join(scenario.split("-")[:2]))
+                    _write_qa_staging(
+                        page,
+                        context,
+                        browser_base_url,
+                        "-".join(scenario.split("-")[:2]),
+                    )
                     page.locator("#partial-retry").click()
                     _wait_for_terminal_status(page, "✓ 已完成")
                     assert page.locator("#partial-retry").is_disabled()
+                    if scenario == "vq-06-tts-failed":
+                        page.get_by_role("tab", name="语音复盘", exact=True).click()
+                        expect(page.locator("#diagnostic-audio")).to_be_visible()
+                    else:
+                        page.get_by_role("tab", name="诊断卡", exact=True).click()
+                        page.locator("#diagnostic-card img").wait_for(timeout=30_000)
+                    page.get_by_role("tab", name="引用与下载", exact=True).click()
+                    complete_manifest = _download_verified_bundle(page, context, partial=False)
+                    assert complete_manifest["result_id"] != partial_manifest["result_id"]
                 finally:
                     context.close()
 
@@ -791,12 +1009,24 @@ def test_vq_08_safe_failure_and_vq_09_fallback_truth_in_real_edge(
                 ):
                     assert label in details
                 assert "source_bundle_invalid" in details
-                assert not re.search(r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)", details)
+                expect(page.locator("#diagnostic-report")).to_have_text("尚未生成诊断结果")
                 assert page.locator("#diagnostic-card img[src]").count() == 0
                 expect(page.locator("#diagnostic-audio")).to_be_hidden()
+                expect(page.locator("#recap-text")).to_be_hidden()
+                assert page.locator("#recap-text textarea").count() == 0
                 page.get_by_role("tab", name="引用与下载", exact=True).click()
                 expect(page.locator("#download-result")).to_be_hidden()
-                _write_qa_staging(page, "vq-08")
+                expect(page.locator("#individual-artifacts")).to_be_hidden()
+                citation_surface = page.locator("#citation-table").inner_text()
+                assert "evidence_" not in citation_surface
+                assert "http://" not in citation_surface and "https://" not in citation_surface
+                page_surface = page.content()
+                assert "/debugmate-content/" not in page_surface
+                assert not re.search(
+                    r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)",
+                    page.locator("body").inner_text(),
+                )
+                _write_qa_staging(page, context, browser_base_url, "vq-08")
             finally:
                 context.close()
 
@@ -819,7 +1049,9 @@ def test_vq_08_safe_failure_and_vq_09_fallback_truth_in_real_edge(
                 expect(page.locator("#diagnostic-audio")).to_be_visible()
                 page.get_by_role("tab", name="引用与下载", exact=True).click()
                 expect(page.locator("#download-result")).to_contain_text("下载完整证据包")
-                _write_qa_staging(page, "vq-09")
+                manifest = _download_verified_bundle(page, context, partial=False)
+                assert manifest["audio"]["backend"] == "sapi"
+                _write_qa_staging(page, context, browser_base_url, "vq-09")
             finally:
                 context.close()
         finally:
@@ -842,6 +1074,20 @@ def test_vq_10_single_field_correction_creates_new_identity_and_preserves_old_ru
             _wait_for_terminal_status(page, "✓ 已完成")
             metadata = page.locator("#result-metadata")
             old_identity = metadata.inner_text()
+            old_run_match = re.search(r"run_[0-9a-f]{32}", old_identity)
+            assert old_run_match is not None
+            old_run_id = old_run_match.group(0)
+            session_prefix = _latest_issued_session_prefix(context, browser_base_url)
+            initial_session_state = _session_state_for_prefix(
+                context, browser_base_url, session_prefix
+            )
+            assert initial_session_state["status"] == "completed"
+            assert initial_session_state["source_run_id"] == old_run_id
+            page.get_by_role("tab", name="引用与下载", exact=True).click()
+            old_manifest = _download_verified_bundle(page, context, partial=False)
+            old_download_metadata = page.locator("#download-metadata").inner_text()
+            assert old_run_id in old_download_metadata
+            initial_counts = _qa_audit_counts(context, browser_base_url)
 
             field = page.get_by_label("包/模块", exact=True)
             old_value = field.input_value()
@@ -855,6 +1101,8 @@ def test_vq_10_single_field_correction_creates_new_identity_and_preserves_old_ru
             assert "有 1 项未确认修改" in pending_copy
             assert old_value in pending_copy and new_value in pending_copy and "→" in pending_copy
             assert metadata.inner_text() == old_identity
+            page.wait_for_timeout(1_000)
+            assert _qa_audit_counts(context, browser_base_url) == initial_counts
 
             confirm = page.get_by_role("button", name="确认修改并重新诊断", exact=True)
             assert confirm.is_enabled()
@@ -863,17 +1111,40 @@ def test_vq_10_single_field_correction_creates_new_identity_and_preserves_old_ru
             create.wait_for(timeout=30_000)
             assert create.is_enabled()
             assert metadata.inner_text() == old_identity
+            page.wait_for_timeout(1_000)
+            assert _qa_audit_counts(context, browser_base_url) == initial_counts
             create.click()
-            page.wait_for_function(
-                "([selector, oldValue]) => "
-                "document.querySelector(selector)?.innerText !== oldValue",
-                arg=["#result-metadata", old_identity],
-                timeout=90_000,
+            created_counts = _wait_for_created_result_counts(
+                context, browser_base_url, initial_counts
             )
+            assert created_counts["run_count"] >= initial_counts["run_count"] + 1
+            _wait_for_terminal_status(page, "✓ 已完成")
+            new_run_id = _wait_for_new_session_source_run(
+                context, browser_base_url, session_prefix, old_run_id
+            )
+            expect(metadata).to_contain_text(new_run_id, timeout=30_000)
             new_identity = metadata.inner_text()
             assert new_identity != old_identity
             assert "来源运行" in new_identity
-            _write_qa_staging(page, "vq-10")
+            page.get_by_role("tab", name="引用与下载", exact=True).click()
+            download_metadata = page.locator("#download-metadata")
+            try:
+                expect(download_metadata).to_contain_text(new_run_id, timeout=30_000)
+            except AssertionError as error:
+                raise AssertionError(
+                    (
+                        new_run_id,
+                        download_metadata.inner_text(),
+                        _qa_session_states(context, browser_base_url),
+                        _qa_session_events(context, browser_base_url),
+                    )
+                ) from error
+            new_manifest = _download_verified_bundle(page, context, partial=False)
+            assert new_manifest["result_id"] != old_manifest["result_id"]
+            identity = new_manifest.get("identity")
+            assert isinstance(identity, dict)
+            assert identity.get("source_run_id") == new_run_id
+            _write_qa_staging(page, context, browser_base_url, "vq-10")
 
             _activate_qa(context, browser_base_url, "vq-02-replay")
             recovery = context.new_page()

@@ -96,6 +96,8 @@ _CASE_ID = "case_"
 _RUN_ID = "run_"
 _RESULT_ID = "result_"
 _CONTENT_PREFIX = "/debugmate-content/"
+_CONTENT_ROUTE = f"{_CONTENT_PREFIX}{{token}}"
+_CONTENT_CALLBACKS_ATTR = "_debugmate_content_callbacks"
 _DEFAULT_CONTENT_ORIGIN = "http://127.0.0.1:7860"
 
 
@@ -210,6 +212,196 @@ class _UiContentStore:
         return content
 
 
+class _UiSessionStateStore:
+    """Bounded server-only registry of one strict result state per UI session."""
+
+    def __init__(self, *, max_sessions: int = 64) -> None:
+        if not isinstance(max_sessions, int) or isinstance(max_sessions, bool) or max_sessions < 1:
+            raise ValueError("max_sessions must be a positive integer")
+        self._max_sessions = max_sessions
+        self._values: dict[str, ResultViewState] = {}
+        self._lease_by_session: dict[str, str] = {}
+        self._session_by_lease: dict[str, str] = {}
+        self._lease_sources: dict[str, str] = {}
+        self._session_order: dict[str, None] = {}
+        self._audit_events: list[dict[str, str | bool | None]] = []
+        self._lock = threading.RLock()
+
+    def _record_event(
+        self,
+        operation: str,
+        key: str,
+        state: ResultViewState | None,
+        *,
+        success: bool,
+    ) -> None:
+        self._audit_events.append(
+            {
+                "operation": operation,
+                "session_sha256_prefix": sha256_bytes(key.encode("utf-8"))[:12],
+                "status": None if state is None else state.status.value,
+                "source_run_id": (
+                    None
+                    if state is None or state.identity is None
+                    else state.identity.source_run_id
+                ),
+                "success": success,
+            }
+        )
+        del self._audit_events[:-32]
+
+    @staticmethod
+    def _key(request: object | None) -> str | None:
+        value = getattr(request, "session_hash", None)
+        if (
+            not isinstance(value, str)
+            or not 8 <= len(value) <= 128
+            or any(
+                not (character.isascii() and (character.isalnum() or character in "-_"))
+                for character in value
+            )
+        ):
+            return None
+        return value
+
+    @staticmethod
+    def _checked_state(state: object) -> ResultViewState | None:
+        if not isinstance(state, ResultViewState):
+            return None
+        try:
+            return ResultViewState.model_validate_json(state.model_dump_json(), strict=True)
+        except (TypeError, ValueError):
+            return None
+
+    def _drop_session(self, key: str) -> None:
+        self._values.pop(key, None)
+        self._session_order.pop(key, None)
+        lease = self._lease_by_session.pop(key, None)
+        if lease is not None:
+            self._session_by_lease.pop(lease, None)
+            self._lease_sources.pop(lease, None)
+
+    def _touch_session(self, key: str) -> None:
+        self._session_order.pop(key, None)
+        self._session_order[key] = None
+        while len(self._session_order) > self._max_sessions:
+            self._drop_session(next(iter(self._session_order)))
+
+    def _store(self, key: str, checked: ResultViewState) -> None:
+        self._values[key] = checked
+        lease = self._lease_by_session.get(key)
+        if lease is not None and checked.identity is not None:
+            self._lease_sources[lease] = checked.identity.source_run_id
+        self._touch_session(key)
+
+    def issue_lease(self, request: object) -> str | None:
+        key = self._key(request)
+        if key is None:
+            return None
+        with self._lock:
+            lease = self._lease_by_session.get(key)
+            if lease is None:
+                lease = "lease_" + secrets.token_hex(16)
+                self._lease_by_session[key] = lease
+                self._session_by_lease[lease] = key
+            self._touch_session(key)
+            self._record_event("issue_lease", key, self._values.get(key), success=True)
+            return lease
+
+    def publish(self, request: object, state: object) -> bool:
+        key = self._key(request)
+        checked = self._checked_state(state)
+        if key is None or checked is None:
+            return False
+        with self._lock:
+            self._store(key, checked)
+            self._record_event("publish_request", key, checked, success=True)
+        return True
+
+    def publish_lease(self, lease: object, state: object, expected_source_run_id: object) -> bool:
+        checked = self._checked_state(state)
+        if (
+            not isinstance(lease, str)
+            or len(lease) != 38
+            or not lease.startswith("lease_")
+            or any(character not in "0123456789abcdef" for character in lease[6:])
+            or not isinstance(expected_source_run_id, str)
+            or not self._strict_run_id(expected_source_run_id)
+            or checked is None
+        ):
+            return False
+        with self._lock:
+            key = self._session_by_lease.get(lease)
+            if key is None:
+                return False
+            if self._lease_sources.get(lease) != expected_source_run_id:
+                self._record_event("publish_lease", key, checked, success=False)
+                return False
+            self._store(key, checked)
+            self._record_event("publish_lease", key, checked, success=True)
+        return True
+
+    def clear_lease(self, lease: object) -> bool:
+        if not isinstance(lease, str):
+            return False
+        with self._lock:
+            key = self._session_by_lease.get(lease)
+            if key is None:
+                return False
+            self._record_event("clear_lease", key, self._values.get(key), success=True)
+            self._drop_session(key)
+        return True
+
+    @staticmethod
+    def _strict_run_id(value: str) -> bool:
+        return (
+            value.startswith(_RUN_ID)
+            and len(value) == len(_RUN_ID) + 32
+            and all(character in "0123456789abcdef" for character in value[len(_RUN_ID) :])
+        )
+
+    def read(self, request: object | None) -> ResultViewState | None:
+        key = self._key(request)
+        if key is None:
+            return None
+        with self._lock:
+            value = self._values.get(key)
+        if value is None:
+            return None
+        return ResultViewState.model_validate_json(value.model_dump_json(), strict=True)
+
+    def clear(self, request: object | None) -> bool:
+        key = self._key(request)
+        if key is None:
+            return False
+        with self._lock:
+            existed = key in self._values or key in self._lease_by_session
+            self._drop_session(key)
+            return existed
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._values)
+
+    def audit_snapshot(self) -> tuple[dict[str, str | None], ...]:
+        """Return hashed identity-only diagnostics; never raw session keys or capabilities."""
+
+        with self._lock:
+            values = tuple(self._values.items())
+        return tuple(
+            {
+                "session_sha256_prefix": sha256_bytes(key.encode("utf-8"))[:12],
+                "status": state.status.value,
+                "source_run_id": (None if state.identity is None else state.identity.source_run_id),
+            }
+            for key, state in values
+        )
+
+    def audit_events(self) -> tuple[dict[str, str | bool | None], ...]:
+        with self._lock:
+            return tuple(dict(item) for item in self._audit_events)
+
+
 @dataclass(frozen=True, slots=True)
 class CallbackPayload:
     """Strict UI state plus server-owned component outputs, never input paths."""
@@ -253,6 +445,7 @@ class UiCallbacks:
     ) -> None:
         self._service = service
         self._content = _UiContentStore(content_origin)
+        self._sessions = _UiSessionStateStore()
 
     def _require_loopback_request(self, request: object | None) -> None:
         """Require the queued event source to match the configured loopback server."""
@@ -292,6 +485,49 @@ class UiCallbacks:
         """Route-only content handoff; it never accepts or returns a file path."""
 
         return self._content.resolve(url)
+
+    def publish_session_state(self, request: object, state: object) -> bool:
+        """Publish one strict server result state for this local Gradio session."""
+
+        return self._sessions.publish(request, state)
+
+    def issue_session_lease(self, request: object) -> str | None:
+        return self._sessions.issue_lease(request)
+
+    def publish_session_state_lease(
+        self, lease: object, state: object, expected_source_run_id: object
+    ) -> bool:
+        return self._sessions.publish_lease(lease, state, expected_source_run_id)
+
+    def clear_session_lease(self, lease: object) -> bool:
+        return self._sessions.clear_lease(lease)
+
+    def session_audit_snapshot(self) -> tuple[dict[str, str | None], ...]:
+        return self._sessions.audit_snapshot()
+
+    def session_audit_events(self) -> tuple[dict[str, str | bool | None], ...]:
+        return self._sessions.audit_events()
+
+    def download_surface(
+        self, *, request: object | None = None
+    ) -> tuple[str, UiContentUrl | None, str | None]:
+        """Re-verify and issue only a terminal bundle from server session state."""
+
+        state = self._sessions.read(request)
+        if (
+            not isinstance(state, ResultViewState)
+            or state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+            or state.identity is None
+            or state.result_id is None
+        ):
+            return "", None, None
+        try:
+            self._require_loopback_request(request)
+            view = render_view_state(state)
+            bundle_url = self._content.issue(self._member(state, "bundle"), attachment=True)
+            return view.download_metadata, bundle_url, view.download_label
+        except (ResultServiceError, OSError, TypeError, ValueError):
+            return "", None, None
 
     def _member(self, state: ResultViewState, member_id: str):
         if state.identity is None or state.result_id is None:
@@ -515,7 +751,7 @@ class UiCallbacks:
 def mount_content_endpoint(application, callbacks: UiCallbacks) -> None:
     """Serve a token's re-hashed in-memory bytes; no component path is exposed."""
 
-    @application.get(f"{_CONTENT_PREFIX}{{token}}", include_in_schema=False)
+    @application.get(_CONTENT_ROUTE, include_in_schema=False)
     def content(token: str) -> Response:
         try:
             value = callbacks.resolve_content(f"{_CONTENT_PREFIX}{token}")
@@ -525,6 +761,16 @@ def mount_content_endpoint(application, callbacks: UiCallbacks) -> None:
         if value.attachment:
             headers["Content-Disposition"] = f'attachment; filename="{value.filename}"'
         return Response(content=value.payload, media_type=value.mime_type, headers=headers)
+
+
+def ensure_content_endpoint(app: gr.Blocks) -> None:
+    """Reattach the private content route after Gradio rebuilds its ASGI app."""
+
+    callbacks = getattr(app, _CONTENT_CALLBACKS_ATTR, None)
+    if not isinstance(callbacks, UiCallbacks):
+        raise TypeError("DebugMate content callbacks are unavailable")
+    if _CONTENT_ROUTE not in {getattr(route, "path", "") for route in app.app.routes}:
+        mount_content_endpoint(app.app, callbacks)
 
 
 def _idle_view() -> ResultViewState:
@@ -662,6 +908,7 @@ def build_app(
     with gr.Blocks(title="DebugMate 诊断工作台", analytics_enabled=False) as app:
         callbacks = UiCallbacks(service, content_origin=content_origin)
         current_state = gr.State(_idle_view())
+        session_lease = gr.State(value=None)
         preview_token_state = gr.State(value=None)
         local_previews = preview_store or LocalPreviewStore()
         local_approval_key = approval_key or secrets.token_bytes(32)
@@ -709,7 +956,7 @@ def build_app(
                     "加载回放案例", variant="secondary", elem_id="replay-action"
                 )
                 fields = [
-                    gr.Textbox(label=label, interactive=True, value="") for label in _FIELD_LABELS
+                    gr.Textbox(label=label, interactive=False, value="") for label in _FIELD_LABELS
                 ]
                 pending = gr.Textbox(
                     label="修改草稿",
@@ -752,7 +999,11 @@ def build_app(
                 gr.Markdown("## 三模态结果")
                 with gr.Tabs():
                     with gr.Tab("文字报告"):
-                        report = gr.Markdown("尚未生成诊断结果", elem_classes="report-panel")
+                        report = gr.Markdown(
+                            "尚未生成诊断结果",
+                            elem_id="diagnostic-report",
+                            elem_classes="report-panel",
+                        )
                     with gr.Tab("诊断卡"):
                         card = gr.Image(
                             label="诊断卡",
@@ -779,6 +1030,7 @@ def build_app(
                         )
                         recap = gr.Textbox(
                             label="已验证复盘稿",
+                            elem_id="recap-text",
                             interactive=False,
                             lines=6,
                             value="复盘稿会与语音一并经过验证后显示。",
@@ -789,8 +1041,14 @@ def build_app(
                             datatype=["str", "str", "str", "str"],
                             interactive=False,
                             label="引用",
+                            elem_id="citation-table",
                         )
-                        gr.File(label="已验证单个产物", interactive=False, visible=False)
+                        gr.File(
+                            label="已验证单个产物",
+                            elem_id="individual-artifacts",
+                            interactive=False,
+                            visible=False,
+                        )
                         download_metadata = gr.Markdown(
                             "", elem_id="download-metadata", elem_classes="metadata"
                         )
@@ -836,7 +1094,11 @@ def build_app(
             audio_metadata,
         ]
 
-        def apply_payload(payload: CallbackPayload) -> tuple[object, ...]:
+        def apply_payload(
+            payload: CallbackPayload,
+            *,
+            preserved_correction: tuple[object, CorrectionDraft] | None = None,
+        ) -> tuple[object, ...]:
             """Reset local correction controls whenever verified result changes."""
 
             source_run_id = (
@@ -846,13 +1108,28 @@ def build_app(
                 else None
             )
             values = payload.field_values if source_run_id is not None else _EMPTY_FIELD_VALUES
+            fields_enabled = source_run_id is not None
             retry_update, retry_case_id, retry_result_id = _retry_control_updates(payload)
+            correction_source = (
+                source_run_id if preserved_correction is None else preserved_correction[0]
+            )
+            correction_value = None if preserved_correction is None else preserved_correction[1]
+            component_updates = list(_component_updates(payload))
+            # Main result callbacks are clearers, never publishers, for the
+            # native download surfaces.  The zero-input session resync below
+            # is the sole path that re-verifies and issues a bundle capability.
+            component_updates[6] = gr.update(
+                value=None,
+                label="下载结果包",
+                visible=False,
+                interactive=False,
+            )
             return (
-                *_component_updates(payload),
-                *(gr.update(value=value) for value in values),
+                *component_updates,
+                *(gr.update(value=value, interactive=fields_enabled) for value in values),
                 values,
-                source_run_id,
-                None,
+                correction_source,
+                correction_value,
                 gr.update(value="请先修改至少一个抽取字段。"),
                 gr.update(value=""),
                 gr.update(open=False),
@@ -871,13 +1148,15 @@ def build_app(
                 retry_update,
                 retry_case_id,
                 retry_result_id,
-                gr.update(value=payload.view.download_metadata),
+                gr.update(value=""),
                 gr.update(value=payload.view.audio_metadata or ""),
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
+            lease = callbacks.issue_session_lease(request)
             for payload in callbacks.load_replay_events(fixture_id, request=request):
-                yield apply_payload(payload)
+                callbacks.publish_session_state(request, payload.state)
+                yield (*apply_payload(payload), lease)
 
         def replay_button_enabled(fixture_id: object) -> dict[str, bool]:
             return gr.update(interactive=fixture_id == "module-not-found")
@@ -906,18 +1185,22 @@ def build_app(
             )
 
         def approve_and_diagnose_stream(preview_token: str | None, request: gr.Request):
+            lease = callbacks.issue_session_lease(request)
             try:
                 record = local_previews.consume(preview_token, _request_session(request))
                 if record is None:
                     raise ResultServiceError("result_bundle_invalid")
                 approved = approve_preview(record.preview, local_approval_key)
             except (TypeError, ValueError, ResultServiceError):
-                yield apply_payload(
-                    callbacks._render(callbacks._failure(_idle_view(), "result_bundle_invalid"))
+                payload = callbacks._render(
+                    callbacks._failure(_idle_view(), "result_bundle_invalid")
                 )
+                callbacks.publish_session_state(request, payload.state)
+                yield (*apply_payload(payload), lease)
                 return
             for payload in callbacks.diagnose_events(approved, request=request):
-                yield apply_payload(payload)
+                callbacks.publish_session_state(request, payload.state)
+                yield (*apply_payload(payload), lease)
 
         def update_correction_draft(
             original: object, previous_run_id: object, *values: object
@@ -954,28 +1237,89 @@ def build_app(
                 gr.update(interactive=False),
             )
 
-        def create_new_run(
-            previous_run_id: object, draft: object, request: gr.Request
-        ) -> tuple[object, ...]:
-            if not isinstance(draft, CorrectionDraft):
-                return apply_payload(
-                    callbacks._render(callbacks._failure(_idle_view(), "result_bundle_invalid"))
+        def create_new_run_stream(
+            previous_run_id: object,
+            draft: object,
+            lease: object,
+            request: gr.Request,
+        ):
+            """Publish running and terminal states under one top-level session."""
+
+            if not callbacks._strict_id(previous_run_id, _RUN_ID) or not isinstance(
+                draft, CorrectionDraft
+            ):
+                callbacks.clear_session_lease(lease)
+                payload = callbacks._render(
+                    callbacks._failure(_idle_view(), "result_bundle_invalid")
                 )
-            return apply_payload(
-                callbacks.correct(previous_run_id, draft, confirmed=True, request=request)
+                callbacks.publish_session_state(request, payload.state)
+                yield apply_payload(payload)
+                return
+            running = callbacks._render(
+                ResultViewState(
+                    mode=ResultMode.LIVE,
+                    status=ResultStatus.RUNNING,
+                    availability=ArtifactAvailability(),
+                    current_stage="correction",
+                )
             )
+            if not callbacks.publish_session_state_lease(lease, running.state, previous_run_id):
+                callbacks.clear_session_lease(lease)
+                payload = callbacks._render(
+                    callbacks._failure(_idle_view(), "result_bundle_invalid")
+                )
+                yield apply_payload(payload)
+                return
+            yield apply_payload(
+                running,
+                preserved_correction=(previous_run_id, draft),
+            )
+            terminal = callbacks.correct(previous_run_id, draft, confirmed=True, request=request)
+            if not callbacks.publish_session_state_lease(lease, terminal.state, previous_run_id):
+                callbacks.clear_session_lease(lease)
+                terminal = callbacks._render(
+                    callbacks._failure(_idle_view(), "result_bundle_invalid")
+                )
+            yield apply_payload(terminal)
 
         def retry_verified_partial(
             case_id: object, result_id: object, request: gr.Request
         ) -> tuple[object, ...]:
             """Retry the server-verified failed stage without a browser stage/path input."""
 
-            return apply_payload(callbacks.retry(case_id, result_id, request=request))
+            payload = callbacks.retry(case_id, result_id, request=request)
+            callbacks.publish_session_state(request, payload.state)
+            return apply_payload(payload)
 
-        replay_button.click(
+        def sync_download_surfaces(request: gr.Request) -> tuple[object, object]:
+            """Refresh bundle UI only from the server-held strict result state."""
+
+            metadata, bundle_url, label = callbacks.download_surface(request=request)
+            return (
+                gr.update(value=metadata),
+                gr.update(
+                    value=_capability_file_data(bundle_url),
+                    label=label or "下载结果包",
+                    visible=bundle_url is not None,
+                    interactive=bundle_url is not None,
+                ),
+            )
+
+        replay_completed = replay_button.click(
             load_replay_stream,
             inputs=[replay],
-            outputs=result_outputs,
+            outputs=[*result_outputs, session_lease],
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+            postprocess=False,
+        )
+        replay_completed.then(
+            sync_download_surfaces,
+            inputs=None,
+            outputs=[download_metadata, download],
             api_name=False,
             queue=True,
             trigger_mode="once",
@@ -1002,10 +1346,21 @@ def build_app(
             postprocess=False,
         )
         # The only browser-held live authority is a one-time opaque token.
-        start_button.click(
+        diagnosis_completed = start_button.click(
             approve_and_diagnose_stream,
             inputs=[preview_token_state],
-            outputs=result_outputs,
+            outputs=[*result_outputs, session_lease],
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+            postprocess=False,
+        )
+        diagnosis_completed.then(
+            sync_download_surfaces,
+            inputs=None,
+            outputs=[download_metadata, download],
             api_name=False,
             queue=True,
             trigger_mode="once",
@@ -1041,9 +1396,9 @@ def build_app(
             api_name=False,
             queue=False,
         )
-        create_button.click(
-            create_new_run,
-            inputs=[correction_run, correction_draft],
+        correction_completed = create_button.click(
+            create_new_run_stream,
+            inputs=[correction_run, correction_draft, session_lease],
             outputs=result_outputs,
             api_name=False,
             queue=True,
@@ -1052,10 +1407,32 @@ def build_app(
             concurrency_id="debugmate-case",
             postprocess=False,
         )
-        retry_button.click(
+        correction_completed.then(
+            sync_download_surfaces,
+            inputs=None,
+            outputs=[download_metadata, download],
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+            postprocess=False,
+        )
+        retry_completed = retry_button.click(
             retry_verified_partial,
             inputs=[retry_case, retry_result],
             outputs=result_outputs,
+            api_name=False,
+            queue=True,
+            trigger_mode="once",
+            concurrency_limit=1,
+            concurrency_id="debugmate-case",
+            postprocess=False,
+        )
+        retry_completed.then(
+            sync_download_surfaces,
+            inputs=None,
+            outputs=[download_metadata, download],
             api_name=False,
             queue=True,
             trigger_mode="once",
@@ -1071,5 +1448,6 @@ def build_app(
     # route before queueing would silently attach it to the discarded ASGI app
     # and leave every otherwise-valid capability URL at 404.
     queued_app = app.queue(default_concurrency_limit=1)
-    mount_content_endpoint(queued_app.app, callbacks)
+    setattr(queued_app, _CONTENT_CALLBACKS_ATTR, callbacks)
+    ensure_content_endpoint(queued_app)
     return queued_app

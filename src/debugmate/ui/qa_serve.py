@@ -21,7 +21,7 @@ from debugmate.results.contracts import (
     SafeFailure,
 )
 from debugmate.results.service import ServiceStageEvent
-from debugmate.ui.app import WORKBENCH_CSS, build_app
+from debugmate.ui.app import WORKBENCH_CSS, build_app, ensure_content_endpoint
 from debugmate.ui.qa_scenarios import (
     QA_STAGE_ORDER,
     QaCapabilityGate,
@@ -81,6 +81,22 @@ class _QaService:
         except KeyError:
             raise ValueError("QA scenario has no result service") from None
 
+    def audit_counts(self) -> dict[str, int]:
+        """Return counts only from the selected runner-owned scenario tree."""
+
+        scenario_root = self._runtime_root / self._selected().value
+        return {
+            "run_count": sum(
+                1 for _item in (scenario_root / "evidence").glob("case_*/run_*/manifest.json")
+            ),
+            "result_count": sum(
+                1
+                for _item in (scenario_root / "results").glob(
+                    "case_*/result_*/result-manifest.json"
+                )
+            ),
+        }
+
     def load_replay_events(self, _fixture_id: str) -> Iterator[ServiceStageEvent]:
         scenario = self._selected()
         if scenario is QaScenario.VQ_08_SOURCE_INVALID:
@@ -136,13 +152,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     enabled = os.environ.get("DEBUGMATE_QA_ENABLED") == "1"
     stage_gate = QaStageGate(timeout_seconds=30.0)
     service = _QaService(args.runtime_root.absolute(), stage_gate)
+    app = build_app(service, content_origin=f"http://{args.host}:{args.port}")
+    callbacks = app._debugmate_content_callbacks
+
+    def audit() -> dict[str, object]:
+        return {
+            **service.audit_counts(),
+            "session_states": callbacks.session_audit_snapshot(),
+            "session_events": callbacks.session_audit_events(),
+        }
+
     gate = QaCapabilityGate(
         process_enabled=enabled,
         capability=capability,
         scenario_handler=service.activate,
         stage_gate=stage_gate,
+        audit_handler=audit,
     )
-    app = build_app(service, content_origin=f"http://{args.host}:{args.port}")
     app.launch(
         server_name=args.host,
         server_port=args.port,
@@ -153,6 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         prevent_thread_lock=True,
         css=WORKBENCH_CSS,
     )
+    ensure_content_endpoint(app)
     mount_qa_endpoint(app.app, gate)
     app.block_thread()
     return 0

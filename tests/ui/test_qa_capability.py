@@ -339,10 +339,20 @@ def test_ordinary_serve_assembly_ignores_residual_qa_environment_without_explici
 
     class _LaunchProbe:
         def __init__(self, app) -> None:
-            self.app = app
+            self._blocks = app
+
+        @property
+        def app(self):
+            return self._blocks.app
 
         def launch(self, **kwargs) -> None:
             captured["launch"] = kwargs
+
+        def block_thread(self) -> None:
+            captured["blocked"] = True
+
+        def __getattr__(self, name: str):
+            return getattr(self._blocks, name)
 
     def capture_build(service, **kwargs):
         app = build_app(service, **kwargs)
@@ -408,10 +418,28 @@ def test_runner_environment_restores_preexisting_and_missing_values() -> None:
     assert clean == {"KEEP": "untouched"}
 
 
+def test_authorized_audit_action_uses_only_server_owned_counter() -> None:
+    qa = _qa()
+    calls: list[str] = []
+    gate = qa.QaCapabilityGate(
+        process_enabled=True,
+        capability=CAPABILITY,
+        scenario_handler=lambda _scenario: {"accepted": True},
+        audit_handler=lambda: calls.append("audit") or {"run_count": 2, "result_count": 1},
+    )
+
+    assert gate.dispatch(_Request(), {"action": "audit"}) == {
+        "run_count": 2,
+        "result_count": 1,
+    }
+    assert calls == ["audit"]
+
+
 def test_truth_state_runner_and_qa_serve_keep_capability_private_and_cleanup_owned_state() -> None:
     runner = (ROOT / "scripts/run-phase4-truth-state-qa.ps1").read_text(encoding="utf-8")
     qa_serve = (ROOT / "src/debugmate/ui/qa_serve.py").read_text(encoding="utf-8")
     ordinary_serve = (ROOT / "src/debugmate/ui/serve.py").read_text(encoding="utf-8")
+    browser_test = (ROOT / "tests/ui/test_browser.py").read_text(encoding="utf-8")
 
     for name in (
         "DEBUGMATE_UI_BASE_URL",
@@ -438,3 +466,9 @@ def test_truth_state_runner_and_qa_serve_keep_capability_private_and_cleanup_own
     )
     assert "qa_serve" not in ordinary_serve
     assert "qa_scenarios" not in ordinary_serve
+    context_source = browser_test[
+        browser_test.index("def _qa_context") : browser_test.index("def _activate_qa")
+    ]
+    assert "extra_http_headers" not in context_source
+    assert "headers={_QA_HEADER:" in browser_test
+    assert "capability.encode" not in browser_test
