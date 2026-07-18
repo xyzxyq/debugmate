@@ -60,6 +60,13 @@ WORKBENCH_CSS = "\n".join(
         ".metadata { font-family: Cascadia Mono, Consolas, monospace; font-size: 12px; }",
         ".metadata { overflow-wrap: anywhere; }",
         ".report-panel { max-height: 440px; overflow: auto; }",
+        ".report-panel pre { max-width: 100%; overflow-x: auto; }",
+        "#diagnostic-commands { max-width: 100%; overflow: auto; }",
+        "#diagnostic-commands td:nth-child(2) { white-space: pre; }",
+        (
+            "#diagnostic-card img { display: block; max-width: 100%; "
+            "height: auto; object-fit: contain; }"
+        ),
         ":focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }",
         (
             "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
@@ -418,6 +425,7 @@ class CallbackPayload:
     confidence: str = "暂无"
     fact_rows: tuple[tuple[str, str, str, str, str], ...] = ()
     citation_rows: tuple[tuple[str, str, str, str], ...] = ()
+    command_rows: tuple[tuple[str, str, str, str, str, str], ...] = ()
     recap_text: str = ""
     failure_details: tuple[tuple[str, str], ...] = ()
 
@@ -558,6 +566,7 @@ class UiCallbacks:
         str,
         tuple[tuple[str, str, str, str, str], ...],
         tuple[tuple[str, str, str, str], ...],
+        tuple[tuple[str, str, str, str, str, str], ...],
         str,
     ]:
         """Derive UI facts only from freshly verified public result members."""
@@ -590,16 +599,33 @@ class UiCallbacks:
                 (item.evidence_id, item.source_id, item.source_url, item.locator)
                 for item in diagnosis.evidence
             )
+            commands = tuple(
+                (
+                    section,
+                    item.command,
+                    str(item.platform),
+                    item.impact,
+                    item.expected_result,
+                    item.rollback,
+                )
+                for section, items in (
+                    ("检查", diagnosis.checks),
+                    ("修复", diagnosis.fixes),
+                    ("验证", diagnosis.verification_steps),
+                )
+                for item in items
+            )
             return (
                 summary,
                 str(diagnosis.category),
                 f"{diagnosis.confidence:.2f}",
                 facts,
                 citations,
+                commands,
                 recap,
             )
         except (KeyError, ResultServiceError, TypeError, ValueError, UnicodeError):
-            return "", "等待诊断", "暂无", (), (), ""
+            return "", "等待诊断", "暂无", (), (), (), ""
 
     def _render(self, state: ResultViewState) -> CallbackPayload:
         if state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}:
@@ -636,7 +662,8 @@ class UiCallbacks:
                 confidence=details[2],
                 fact_rows=details[3],
                 citation_rows=details[4],
-                recap_text=details[5],
+                command_rows=details[5],
+                recap_text=details[6],
                 failure_details=render_view_state(state).failure_details,
             )
         except (ResultServiceError, UnicodeError, OSError, ValueError):
@@ -948,7 +975,10 @@ def build_app(
                 )
                 gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
                 replay = gr.Dropdown(
-                    choices=[("ModuleNotFoundError：缺少虚构依赖包", "module-not-found")],
+                    choices=[
+                        ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
+                        ("长报告与长命令：布局韧性", "long-content"),
+                    ],
                     label="固定回放案例",
                     value="module-not-found",
                 )
@@ -987,6 +1017,13 @@ def build_app(
                 )
                 with gr.Accordion("命令说明（仅供查看）", open=False):
                     gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
+                    command_table = gr.Dataframe(
+                        headers=["步骤", "命令", "平台", "影响", "预期结果", "回退说明"],
+                        datatype=["str", "str", "str", "str", "str", "str"],
+                        interactive=False,
+                        label="已验证诊断命令",
+                        elem_id="diagnostic-commands",
+                    )
                 failure = gr.Markdown("", elem_id="failure-details")
                 retry_button = gr.Button(
                     "安全重试",
@@ -1092,6 +1129,7 @@ def build_app(
             retry_result,
             download_metadata,
             audio_metadata,
+            command_table,
         ]
 
         def apply_payload(
@@ -1150,6 +1188,7 @@ def build_app(
                 retry_result_id,
                 gr.update(value=""),
                 gr.update(value=payload.view.audio_metadata or ""),
+                gr.update(value=command_table.postprocess(list(payload.command_rows)).model_dump()),
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
@@ -1159,7 +1198,7 @@ def build_app(
                 yield (*apply_payload(payload), lease)
 
         def replay_button_enabled(fixture_id: object) -> dict[str, bool]:
-            return gr.update(interactive=fixture_id == "module-not-found")
+            return gr.update(interactive=fixture_id in {"module-not-found", "long-content"})
 
         def _request_session(request: object) -> str:
             session = getattr(request, "session_hash", None)

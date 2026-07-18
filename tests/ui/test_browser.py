@@ -901,6 +901,125 @@ def _wait_for_terminal_status(page, copy: str) -> None:
     page.locator("#diagnostic-status").get_by_text(copy, exact=False).wait_for(timeout=90_000)
 
 
+def _select_replay(page, label: str) -> None:
+    control = page.get_by_label("固定回放案例", exact=True)
+    control.click()
+    page.get_by_role("option", name=label, exact=True).click()
+    expect(control).to_have_value(label)
+
+
+def _body_overflow(page) -> bool:
+    return bool(
+        page.evaluate(
+            "() => document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        )
+    )
+
+
+def test_vq_04_long_content_commands_and_vq_05_tall_card_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            _select_replay(page, "长报告与长命令：布局韧性")
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            report = page.locator("#diagnostic-report")
+            report_metrics = report.locator("*").evaluate_all(
+                "elements => elements.map(element => ({clientHeight: element.clientHeight, "
+                "scrollHeight: element.scrollHeight, overflowY: "
+                "getComputedStyle(element).overflowY}))"
+            )
+            assert any(
+                metric["scrollHeight"] > metric["clientHeight"] > 0
+                and metric["overflowY"] in {"auto", "scroll"}
+                for metric in report_metrics
+            )
+            expect(page.get_by_text("命令说明（仅供查看）", exact=True)).to_be_visible()
+            page.get_by_text("命令说明（仅供查看）", exact=True).click()
+            commands = page.locator("#diagnostic-commands")
+            expect(commands).to_contain_text("windows_powershell")
+            expect(commands).to_contain_text("EXPECTED-LONG-COMMAND-END")
+            expect(commands).to_contain_text("ROLLBACK-LONG-COMMAND-END")
+            command_metrics = commands.locator("xpath=self | .//*").evaluate_all(
+                "elements => elements.map(element => ({clientWidth: element.clientWidth, "
+                "scrollWidth: element.scrollWidth, overflowX: "
+                "getComputedStyle(element).overflowX}))"
+            )
+            assert any(
+                metric["scrollWidth"] > metric["clientWidth"] > 0
+                and metric["overflowX"] in {"auto", "scroll"}
+                for metric in command_metrics
+            )
+            expect(
+                page.get_by_text(
+                    "诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。", exact=True
+                ).first
+            ).to_be_visible()
+
+            page.get_by_role("tab", name="诊断卡", exact=True).click()
+            image = page.locator("#diagnostic-card img").first
+            image.wait_for(timeout=30_000)
+            card = image.evaluate(
+                "element => ({naturalWidth: element.naturalWidth, "
+                "naturalHeight: element.naturalHeight, "
+                "width: element.getBoundingClientRect().width, "
+                "height: element.getBoundingClientRect().height, "
+                "parentWidth: element.parentElement.getBoundingClientRect().width})"
+            )
+            assert card["naturalHeight"] > card["naturalWidth"]
+            assert (
+                abs(card["width"] / card["height"] - card["naturalWidth"] / card["naturalHeight"])
+                < 0.01
+            )
+            assert card["width"] <= card["parentWidth"] + 1
+            assert _body_overflow(page) is False
+        finally:
+            context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize("viewport", [(1024, 768), (768, 1024)])
+def test_vq_11_vq_12_completed_responsive_geometry_in_real_edge(
+    browser_base_url: str, viewport: tuple[int, int]
+) -> None:
+    width, height = viewport
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": width, "height": height})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+            tabs = page.get_by_role("tab").all_inner_texts()
+            assert tabs == ["文字报告", "诊断卡", "语音复盘", "引用与下载"]
+            regions = page.locator("#workbench-grid .region")
+            boxes = [regions.nth(index).bounding_box() for index in range(3)]
+            assert all(box is not None for box in boxes)
+            first, second, third = boxes
+            assert first is not None and second is not None and third is not None
+            if width == 1024:
+                assert abs(first["y"] - second["y"]) < 4
+                assert third["y"] > max(first["y"], second["y"])
+                assert third["width"] >= first["width"] + second["width"] - 24
+            else:
+                assert first["y"] < second["y"] < third["y"]
+            assert page.locator("#replay-action").is_visible()
+            assert page.locator("#diagnostic-status").is_visible()
+            assert _body_overflow(page) is False
+        finally:
+            context.close()
+            browser.close()
+
+
 def test_vq_06_vq_07_partial_recovery_in_real_edge(
     browser_base_url: str,
 ) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import socket
 import subprocess
 import sys
@@ -819,6 +820,70 @@ def test_replay_default_is_allowlisted_and_only_enables_its_control() -> None:
     assert enabled("module-not-found")["interactive"] is True
     assert enabled(None)["interactive"] is False
     assert enabled("not-allowlisted")["interactive"] is False
+
+
+def test_long_content_replay_and_commands_are_strict_read_only_surfaces() -> None:
+    app = build_app(_Service())
+    config = app.get_config_file()
+    replay = next(
+        component
+        for component in config["components"]
+        if component["type"] == "dropdown" and component["props"].get("label") == "固定回放案例"
+    )
+    command_table = next(
+        component
+        for component in config["components"]
+        if component["props"].get("elem_id") == "diagnostic-commands"
+    )
+    enabled = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "replay_button_enabled"
+    )
+
+    assert replay["props"]["choices"] == [
+        ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
+        ("长报告与长命令：布局韧性", "long-content"),
+    ]
+    assert replay["props"]["allow_custom_value"] is False
+    assert enabled("long-content")["interactive"] is True
+    assert enabled("../long-content")["interactive"] is False
+    assert enabled('{"fixture_id":"long-content"}')["interactive"] is False
+    assert command_table["type"] == "dataframe"
+    assert command_table["props"]["interactive"] is False
+    assert command_table["props"]["headers"] == [
+        "步骤",
+        "命令",
+        "平台",
+        "影响",
+        "预期结果",
+        "回退说明",
+    ]
+
+
+def test_completed_payload_commands_are_exactly_derived_from_diagnosis_record() -> None:
+    app = build_app(_Service())
+    callback = app._debugmate_content_callbacks
+    request = _Request("verified-command-rows")
+
+    payload = callback.load_replay("module-not-found", request=request)
+
+    diagnosis = json.loads(
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(encoding="utf-8")
+    )
+    expected = tuple(
+        (
+            section,
+            item["command"],
+            item["platform"],
+            item["impact"],
+            item["expected_result"],
+            item["rollback"],
+        )
+        for section, key in (("检查", "checks"), ("修复", "fixes"), ("验证", "verification_steps"))
+        for item in diagnosis[key]
+    )
+    assert payload.command_rows == expected
 
 
 def test_replay_button_callback_streams_running_states_and_disables_repeat_action() -> None:
