@@ -1054,6 +1054,9 @@ def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
             announced = page.locator('[role="status"][aria-live="polite"]')
             expect(announced).to_have_text("状态：已完成", timeout=30_000)
 
+            correction_accordion = _tab_to(page, expected_name="抽取字段与纠错", limit=3)
+            correction_accordion.press("Space")
+            expect(correction_accordion).to_have_class(re.compile(r"\bopen\b"))
             _tab_to(page, expected_name="异常类型", limit=20)
             for field_label in ("关键回溯行", "包/模块", "版本", "设备", "路径"):
                 _tab_to(page, expected_name=field_label, limit=2)
@@ -1160,6 +1163,9 @@ def test_vq_15_completed_state_remains_reachable_at_two_x_browser_zoom_geometry(
 
             page.locator("#diagnostic-status").scroll_into_view_if_needed()
             assert page.locator("#diagnostic-status").is_visible()
+            correction_accordion = _tab_to(page, expected_name="抽取字段与纠错", limit=6)
+            correction_accordion.press("Space")
+            expect(correction_accordion).to_have_class(re.compile(r"\bopen\b"))
             primary_action = page.get_by_role("button", name="确认修改并重新诊断", exact=True)
             primary_action.scroll_into_view_if_needed()
             assert primary_action.is_visible()
@@ -1288,15 +1294,22 @@ def test_vq_11_vq_12_completed_responsive_geometry_in_real_edge(
             _wait_for_terminal_status(page, "✓ 已完成")
             tabs = page.get_by_role("tab").all_inner_texts()
             assert tabs == ["文字报告", "诊断卡", "语音复盘", "引用与下载"]
-            regions = page.locator("#workbench-grid .region")
-            boxes = [regions.nth(index).bounding_box() for index in range(3)]
+            regions = [
+                page.locator("#workbench-grid .control-rail"),
+                page.locator("#workbench-grid .diagnosis-canvas"),
+                page.locator("#workbench-grid .result-workspace"),
+            ]
+            boxes = [region.bounding_box() for region in regions]
             assert all(box is not None for box in boxes)
             first, second, third = boxes
             assert first is not None and second is not None and third is not None
             if width == 1024:
+                assert abs(first["width"] - 300) <= 1
                 assert abs(first["y"] - second["y"]) < 4
-                assert third["y"] > max(first["y"], second["y"])
-                assert third["width"] >= first["width"] + second["width"] - 24
+                assert first["x"] < second["x"]
+                assert abs(second["x"] - third["x"]) <= 1
+                assert third["y"] > second["y"]
+                assert abs(second["width"] - third["width"]) <= 1
             else:
                 assert first["y"] < second["y"] < third["y"]
             assert page.locator("#replay-action").is_visible()
@@ -1825,17 +1838,15 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
             page = browser.new_page(viewport={"width": 1366, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+            for heading in ("操作控制台", "诊断主画布", "结果工作区"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
             page.get_by_role("button", name="加载回放案例", exact=True).wait_for(timeout=30_000)
             visible_before_viewport = []
             for text, locator in (
-                ("输入与抽取", page.get_by_role("heading", name="输入与抽取", exact=True)),
-                ("诊断与证据", page.get_by_role("heading", name="诊断与证据", exact=True)),
-                ("三模态结果", page.get_by_role("heading", name="三模态结果", exact=True)),
-                ("固定回放案例", page.get_by_text("固定回放案例", exact=True)),
-                ("加载回放案例", page.get_by_role("button", name="加载回放案例", exact=True)),
+                ("操作控制台", page.get_by_role("heading", name="操作控制台", exact=True)),
+                ("诊断主画布", page.get_by_role("heading", name="诊断主画布", exact=True)),
+                ("结果工作区", page.get_by_role("heading", name="结果工作区", exact=True)),
             ):
                 box = locator.bounding_box()
                 visible_before_viewport.append(
@@ -1848,12 +1859,17 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
                         and box["y"] + box["height"] <= 768,
                     }
                 )
+            assert page.get_by_text("固定回放案例", exact=True).is_visible()
+            assert page.get_by_role("button", name="加载回放案例", exact=True).is_visible()
             screenshot = _capture_failure_screenshot(page)
             metrics = page.evaluate(
                 """() => ({
-                    regions: [...document.querySelectorAll('.region')].map((element) => {
+                    regions: [
+                        '.control-rail', '.diagnosis-canvas', '.result-workspace'
+                    ].map((selector) => {
+                        const element = document.querySelector(`#workbench-grid ${selector}`);
                         const box = element.getBoundingClientRect();
-                        return { width: box.width, y: box.y };
+                        return { selector, width: box.width, y: box.y };
                     }),
                     scrollWidth: document.documentElement.scrollWidth,
                     clientWidth: document.documentElement.clientWidth,
@@ -1870,11 +1886,9 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
     )
     assert all(item["y"] < 768 for item in metrics["regions"])
     assert visible_before_viewport == [
-        {"text": "输入与抽取", "visible": True},
-        {"text": "诊断与证据", "visible": True},
-        {"text": "三模态结果", "visible": True},
-        {"text": "固定回放案例", "visible": True},
-        {"text": "加载回放案例", "visible": True},
+        {"text": "操作控制台", "visible": True},
+        {"text": "诊断主画布", "visible": True},
+        {"text": "结果工作区", "visible": True},
     ]
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
@@ -2033,15 +2047,21 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
             page = browser.new_page(viewport={"width": 1024, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+            for heading in ("操作控制台", "诊断主画布", "结果工作区"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
             page.get_by_role("button", name="加载回放案例", exact=True).wait_for(timeout=30_000)
             metrics = page.evaluate(
                 """() => ({
-                    regions: [...document.querySelectorAll('.region')].map((element) => {
+                    regions: [
+                        '.control-rail', '.diagnosis-canvas', '.result-workspace'
+                    ].map((selector) => {
+                        const element = document.querySelector(`#workbench-grid ${selector}`);
                         const box = element.getBoundingClientRect();
-                        return { x: box.x, y: box.y, width: box.width, height: box.height };
+                        return {
+                            selector, x: box.x, y: box.y,
+                            width: box.width, height: box.height
+                        };
                     }),
                     scrollWidth: document.documentElement.scrollWidth,
                     clientWidth: document.documentElement.clientWidth,
@@ -2050,19 +2070,13 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
         finally:
             browser.close()
     assert len(metrics["regions"]) == 3
-    input_region, evidence_region, results_region = metrics["regions"]
-    assert abs(input_region["y"] - evidence_region["y"]) <= 1
-    assert input_region["x"] < evidence_region["x"]
-    assert results_region["y"] > input_region["y"]
-    assert results_region["y"] > evidence_region["y"]
-    assert abs(results_region["x"] - input_region["x"]) <= 1
-    assert (
-        abs(
-            (results_region["x"] + results_region["width"])
-            - (evidence_region["x"] + evidence_region["width"])
-        )
-        <= 1
-    )
+    control_rail, diagnosis_canvas, result_workspace = metrics["regions"]
+    assert abs(control_rail["width"] - 300) <= 1
+    assert abs(control_rail["y"] - diagnosis_canvas["y"]) <= 1
+    assert control_rail["x"] < diagnosis_canvas["x"]
+    assert abs(diagnosis_canvas["x"] - result_workspace["x"]) <= 1
+    assert result_workspace["y"] > diagnosis_canvas["y"]
+    assert abs(diagnosis_canvas["width"] - result_workspace["width"]) <= 1
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
@@ -2077,7 +2091,7 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             page = browser.new_page(viewport={"width": 768, "height": 1024})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("输入与抽取", "诊断与证据", "三模态结果"):
+            for heading in ("操作控制台", "诊断主画布", "结果工作区"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             replay_label = page.get_by_text("固定回放案例", exact=True)
             replay_label.wait_for(timeout=30_000)
@@ -2086,9 +2100,15 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             replay_boxes = [replay_label.bounding_box(), replay_button.bounding_box()]
             metrics = page.evaluate(
                 """() => ({
-                    regions: [...document.querySelectorAll('.region')].map((element) => {
+                    regions: [
+                        '.control-rail', '.diagnosis-canvas', '.result-workspace'
+                    ].map((selector) => {
+                        const element = document.querySelector(`#workbench-grid ${selector}`);
                         const box = element.getBoundingClientRect();
-                        return { x: box.x, y: box.y, width: box.width, height: box.height };
+                        return {
+                            selector, x: box.x, y: box.y,
+                            width: box.width, height: box.height
+                        };
                     }),
                     scrollWidth: document.documentElement.scrollWidth,
                     clientWidth: document.documentElement.clientWidth,
@@ -2097,10 +2117,10 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
         finally:
             browser.close()
     assert len(metrics["regions"]) == 3
-    input_region, evidence_region, results_region = metrics["regions"]
-    assert abs(input_region["x"] - evidence_region["x"]) <= 1
-    assert abs(evidence_region["x"] - results_region["x"]) <= 1
-    assert input_region["y"] < evidence_region["y"] < results_region["y"]
+    control_rail, diagnosis_canvas, result_workspace = metrics["regions"]
+    assert abs(control_rail["x"] - diagnosis_canvas["x"]) <= 1
+    assert abs(diagnosis_canvas["x"] - result_workspace["x"]) <= 1
+    assert control_rail["y"] < diagnosis_canvas["y"] < result_workspace["y"]
     assert all(
         box is not None
         and box["width"] > 0
