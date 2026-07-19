@@ -48,11 +48,14 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 ## 提交材料
 
 - PPT：`deliverables/DebugMate-V0.1.pptx`
+- 最终讲解视频：`deliverables/DebugMate-V0.1-demo.mp4`（约 5 分 59 秒）
+- 字幕：`deliverables/DebugMate-V0.1-subtitles.srt`
 - 演示讲解稿：`docs/course/video-script.md`
 - PPT 结构：`docs/course/presentation-outline.md`
 - 案例说明：`docs/course/v0.1-demo-cases.md`
 - 提示词对比：`docs/course/prompt-iteration.md`
 - 真实截图与清单：`evidence/course-v0.1/`
+- 视频生成脚本与视觉规范：`scripts/build-course-video.py`、`video/DESIGN.md`
 
 ## 已知限制
 

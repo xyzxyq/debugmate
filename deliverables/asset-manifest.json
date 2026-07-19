@@ -3,14 +3,14 @@
   "generated_on": "2026-07-19",
   "pptx": {
     "path": "deliverables/DebugMate-V0.1.pptx",
-    "sha256": "0c3f79bae7b7d8ae1c798bd0b10710deccb976f5ca31740fe691c70810f981b7",
+    "sha256": "f0c6382cff975d18e89f80918251ecba83376fc92b304162f77f1e2ac7f66634",
     "slides": 13
   },
   "assets": [
     {
       "path": "docs/course/README.md",
-      "bytes": 3148,
-      "sha256": "30f09bf4769897c77e2d5ab6d631b594f3875e5b518fba3082daf7ea7148184f"
+      "bytes": 3377,
+      "sha256": "34b43aa66971d208c776e627423d08fe7f284c7323038885b7f5920534d51d0d"
     },
     {
       "path": "docs/course/presentation-outline.md",
@@ -45,7 +45,7 @@
     {
       "path": "deliverables/DebugMate-V0.1.pptx",
       "bytes": 599529,
-      "sha256": "0c3f79bae7b7d8ae1c798bd0b10710deccb976f5ca31740fe691c70810f981b7"
+      "sha256": "f0c6382cff975d18e89f80918251ecba83376fc92b304162f77f1e2ac7f66634"
     }
   ]
 }
