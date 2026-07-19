@@ -4,8 +4,8 @@ milestone: v0.1
 milestone_name: course-demo
 status: complete
 stopped_at: V0.1 course package generated and machine-verified
-last_updated: "2026-07-19T18:10:00+08:00"
-last_activity: 2026-07-19 -- PPTX, subtitles and 358.923-second MP4 completed
+last_updated: "2026-07-19T23:01:47+08:00"
+last_activity: 2026-07-19 -- Completed quick task 260719-r5a: refreshed final dark workbench course evidence
 progress:
   total_phases: 6
   completed_phases: 6
@@ -40,6 +40,12 @@ Progress: [██████████] 26/26 plans completed (100%)
 - 21 output privacy scan tests passed.
 - PPTX package has 13 slides and all asset hashes recompute.
 - MP4 fully decodes, contains H.264 video and AAC audio, mean volume is -24.3 dB and duration exceeds 3 minutes.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260719-r5a | Refresh final dark workbench Edge evidence, PPT and video | 2026-07-19 | this commit | Verified | [260719-r5a-debugmate-gradio](./quick/260719-r5a-debugmate-gradio/) |
 
 ## Final Human Check
 

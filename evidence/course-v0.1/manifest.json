@@ -7,28 +7,28 @@
     "height": 768,
     "capture": "full_page"
   },
-  "source_commit": "7c7941c",
+  "source_commit": "57613c9",
   "screenshots": [
     {
       "path": "screenshots/01-completed-overview.png",
       "case_label": "完成态：报告、引用与结果包",
       "status": "completed",
-      "bytes": 216084,
-      "sha256": "6a0d789e7667684f7c2c97617ddac816f7e46d0e62b5e0e9163d892350ff3914"
+      "bytes": 178634,
+      "sha256": "2c826b40123418f95eab0cd7a7d0075cd306666973007d80a0ac04b85249b49d"
     },
     {
       "path": "screenshots/02-tts-partial.png",
       "case_label": "部分完成：语音生成失败但报告与诊断卡可用",
       "status": "partial",
-      "bytes": 277489,
-      "sha256": "9b7a41544672b17489242b3904c7b2e8ef0876fb5e7d981e7e9bcd3a5b064b43"
+      "bytes": 246866,
+      "sha256": "ba24d724188073f9f03e30f2017188c12cc3c9cd2d8ff1def4a427e8c76297de"
     },
     {
       "path": "screenshots/03-card-partial.png",
       "case_label": "部分完成：诊断卡失败但报告与语音可用",
       "status": "partial",
-      "bytes": 286766,
-      "sha256": "144e68e71de0d8c544cad27c96b93c4f05d138b684b8d444c1f84d1a922343ab"
+      "bytes": 256247,
+      "sha256": "801cc5765744eee1aad63508a282dabc767f4b0939a114b840715fab169ba75e"
     }
   ],
   "non_screenshot_cases": [
