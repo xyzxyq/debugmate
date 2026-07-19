@@ -57,11 +57,6 @@ WORKBENCH_CSS = "\n".join(
             "--border-color-primary: var(--border); }"
         ),
         (
-            ".gradio-container .form, .gradio-container .block, .gradio-container .wrap, "
-            ".gradio-container .panel { background: var(--surface-1) !important; "
-            "color: var(--text) !important; border-color: var(--border) !important; }"
-        ),
-        (
             ".gradio-container code, .gradio-container pre { background: var(--surface-2) "
             "!important; color: var(--text) !important; border-color: var(--border) !important; }"
         ),
@@ -75,7 +70,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".command-bar { position: sticky; top: 0; z-index: 20; }",
         (
-            ".command-bar > .form { display: grid; "
+            ".command-bar > .styler { display: grid; "
             "grid-template-columns: minmax(220px, 0.8fr) "
             "minmax(160px, auto) minmax(280px, 1.4fr); align-items: center; gap: 12px; "
             "background: var(--surface-1) !important; }"
@@ -90,7 +85,14 @@ WORKBENCH_CSS = "\n".join(
         ".command-bar .status-indicator { min-width: max-content; }",
         ".command-bar .status-indicator p { margin: 0; color: var(--success); font-weight: 700; }",
         ".command-bar .metadata { margin-left: auto; text-align: right; }",
-        ".command-bar .block, .command-bar .wrap { padding: 0 !important; border: 0 !important; }",
+        (
+            ".command-bar > .styler > .block { background: transparent !important; "
+            "border: 0 !important; padding: 0 !important; }"
+        ),
+        ".command-bar > .styler > .product-title { grid-column: 1; grid-row: 1 / span 2; }",
+        ".command-bar > .styler > #diagnostic-status { grid-column: 2; grid-row: 1; }",
+        ".command-bar > .styler > #accessible-status { grid-column: 2; grid-row: 2; }",
+        ".command-bar > .styler > #result-metadata { grid-column: 3; grid-row: 1 / span 2; }",
         "#workbench-grid:has(> #workbench-grid) { display: grid; }",
         (
             "#workbench-grid:has(> #workbench-grid) { "
@@ -118,7 +120,7 @@ WORKBENCH_CSS = "\n".join(
         ".diagnosis-canvas { border-top: 2px solid var(--warning) !important; }",
         ".result-workspace { border-top: 2px solid var(--success) !important; }",
         (
-            ".region > .form, .region .gr-accordion, .region .tabs, .region .tabitem { "
+            ".region > .styler, .region .gr-accordion, .region .tabs, .region .tabitem { "
             "background: var(--surface-1) !important; color: var(--text) !important; "
             "border-color: var(--border) !important; }"
         ),
@@ -227,7 +229,7 @@ WORKBENCH_CSS = "\n".join(
         "#failure-details:not(:empty) { color: var(--failure); }",
         "#partial-retry { border-color: var(--warning) !important; }",
         (
-            "#diagnostic-audio, #diagnostic-audio .wrap, #diagnostic-audio .audio-container, "
+            "#diagnostic-audio, #diagnostic-audio .wrap, #diagnostic-audio label, "
             "#diagnostic-audio .controls { background: var(--surface-2) !important; "
             "color: var(--text) !important; border-color: var(--border) !important; "
             "color-scheme: dark; }"
@@ -270,7 +272,11 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "@media (max-width: 899px) { .command-bar { position: static; } "
-            ".command-bar > .form { grid-template-columns: 1fr; } "
+            ".command-bar > .styler { grid-template-columns: 1fr; } "
+            ".command-bar > .styler > .product-title, .command-bar > .styler > #diagnostic-status, "
+            ".command-bar > .styler > #accessible-status, "
+            ".command-bar > .styler > #result-metadata "
+            "{ grid-column: auto; grid-row: auto; } "
             ".command-bar .metadata { margin-left: 0; "
             "text-align: left; } }"
         ),

@@ -861,14 +861,38 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                         });
                         return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
                     };
-                    const effectiveBackground = element => {
-                        let current = element;
-                        while (current) {
-                            const parsed = parse(getComputedStyle(current).backgroundColor);
-                            if (parsed && parsed.alpha > 0) return parsed.rgb;
-                            current = current.parentElement;
+                    const composite = (foreground, backdrop, alpha) => foreground.map(
+                        (channel, index) => channel * alpha + backdrop[index] * (1 - alpha)
+                    );
+                    const ancestry = element => {
+                        const chain = [];
+                        for (let current = element; current; current = current.parentElement) {
+                            chain.push(current);
                         }
-                        return [255, 255, 255];
+                        return chain.reverse();
+                    };
+                    const effectiveBackground = element => {
+                        let background = [255, 255, 255];
+                        for (const current of ancestry(element)) {
+                            const style = getComputedStyle(current);
+                            const parsed = parse(style.backgroundColor);
+                            const opacity = Number(style.opacity);
+                            if (parsed && parsed.alpha > 0) {
+                                background = composite(
+                                    parsed.rgb, background, parsed.alpha * opacity
+                                );
+                            }
+                        }
+                        return background;
+                    };
+                    const effectiveForeground = element => {
+                        const parsed = parse(getComputedStyle(element).color);
+                        if (!parsed) return null;
+                        const backdrop = effectiveBackground(element.parentElement);
+                        const opacity = ancestry(element).reduce(
+                            (value, current) => value * Number(getComputedStyle(current).opacity), 1
+                        );
+                        return composite(parsed.rgb, backdrop, parsed.alpha * opacity);
                     };
                     const contrast = (foreground, background) => {
                         const first = luminance(foreground);
@@ -904,7 +928,7 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                     ].map(selector => {
                         const element = document.querySelector(selector);
                         if (!element) return {selector, missing: true};
-                        const foreground = parse(getComputedStyle(element).color)?.rgb;
+                        const foreground = effectiveForeground(element);
                         const background = effectiveBackground(element);
                         return {
                             selector,
@@ -920,7 +944,7 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                                 box.top < innerHeight;
                         })
                         .map(element => {
-                            const foreground = parse(getComputedStyle(element).color)?.rgb;
+                            const foreground = effectiveForeground(element);
                             const background = effectiveBackground(element);
                             return {
                                 text: element.innerText,
@@ -928,7 +952,14 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                                 contrast: foreground ? contrast(foreground, background) : 0,
                             };
                         });
-                    return {leaked, contrastTargets, disabledControls};
+                    const mediaMasks = [...document.querySelectorAll(
+                        'img, canvas, video, svg, #diagnostic-card'
+                    )].map(element => {
+                        const box = element.getBoundingClientRect();
+                        return {left: box.left, top: box.top, right: box.right, bottom: box.bottom};
+                    }).filter(mask => mask.right > 0 && mask.bottom > 0 &&
+                        mask.left < innerWidth && mask.top < innerHeight);
+                    return {leaked, contrastTargets, disabledControls, mediaMasks};
                 }"""
             )
             assert metrics["leaked"] == []
@@ -944,10 +975,219 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
             screenshot = page.screenshot(full_page=False)
             with Image.open(io.BytesIO(screenshot)) as captured:
                 pixels = tuple(captured.convert("RGB").get_flattened_data())
-            light_pixels = sum(
-                1 for red, green, blue in pixels if min(red, green, blue) >= 190
+            unmasked_pixels = 0
+            light_pixels = 0
+            for index, (red, green, blue) in enumerate(pixels):
+                x = index % captured.width
+                y = index // captured.width
+                if any(
+                    mask["left"] <= x < mask["right"] and mask["top"] <= y < mask["bottom"]
+                    for mask in metrics["mediaMasks"]
+                ):
+                    continue
+                unmasked_pixels += 1
+                if min(red, green, blue) >= 190:
+                    light_pixels += 1
+            assert unmasked_pixels > 0
+            assert light_pixels / unmasked_pixels < 0.08
+        finally:
+            context.close()
+            browser.close()
+
+
+def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            geometry = page.evaluate(
+                r"""() => {
+                    const carrier = [...document.querySelectorAll('.command-bar > .styler')]
+                        .find(element => element.children.length >= 4);
+                    if (!carrier) return {missing: true};
+                    const rect = selector => {
+                        const element = carrier.querySelector(selector);
+                        if (!element) return null;
+                        const box = element.getBoundingClientRect();
+                        return {x: box.x, right: box.right, y: box.y, width: box.width};
+                    };
+                    return {
+                        display: getComputedStyle(carrier).display,
+                        columns: getComputedStyle(carrier).gridTemplateColumns
+                            .trim().split(/\s+/).filter(Boolean).length,
+                        title: rect('.product-title'),
+                        status: rect('#diagnostic-status'),
+                        accessibleStatus: rect('#accessible-status'),
+                        metadata: rect('#result-metadata'),
+                    };
+                }"""
             )
-            assert light_pixels / len(pixels) < 0.08
+            assert not geometry.get("missing"), geometry
+            assert geometry["display"] == "grid", geometry
+            assert geometry["columns"] == 3, geometry
+            assert all(
+                geometry[name] and geometry[name]["width"] > 0
+                for name in ("title", "status", "accessibleStatus", "metadata")
+            ), geometry
+            assert geometry["title"]["right"] <= geometry["status"]["x"]
+            assert geometry["status"]["right"] <= geometry["metadata"]["x"]
+            assert abs(geometry["accessibleStatus"]["x"] - geometry["status"]["x"]) <= 2
+        finally:
+            context.close()
+            browser.close()
+
+
+def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            tabs = page.get_by_role("tab")
+            expected_surfaces = (
+                ("#diagnostic-report", ("#diagnostic-report",)),
+                ("#diagnostic-card", ()),
+                ("#diagnostic-audio", ("#audio-metadata", "#recap-text textarea")),
+                ("#citation-table", ("#citation-table",)),
+            )
+            assert tabs.count() == len(expected_surfaces)
+
+            for index, (surface_selector, text_selectors) in enumerate(expected_surfaces):
+                tab = tabs.nth(index)
+                tab.click()
+                expect(tab).to_have_attribute("aria-selected", "true")
+                page.locator(surface_selector).wait_for(state="visible", timeout=30_000)
+                metrics = page.evaluate(
+                    r"""selectors => {
+                        const parse = value => {
+                            const parts = value.match(/[\d.]+/g);
+                            if (!parts || parts.length < 3) return null;
+                            return {
+                                rgb: parts.slice(0, 3).map(Number),
+                                alpha: parts.length > 3 ? Number(parts[3]) : 1,
+                            };
+                        };
+                        const luminance = rgb => {
+                            const linear = rgb.map(channel => {
+                                const value = channel / 255;
+                                return value <= 0.04045
+                                    ? value / 12.92
+                                    : ((value + 0.055) / 1.055) ** 2.4;
+                            });
+                            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+                        };
+                        const composite = (foreground, backdrop, alpha) => foreground.map(
+                            (channel, index) => channel * alpha + backdrop[index] * (1 - alpha)
+                        );
+                        const ancestry = element => {
+                            const chain = [];
+                            for (let current = element; current; current = current.parentElement) {
+                                chain.push(current);
+                            }
+                            return chain.reverse();
+                        };
+                        const background = element => {
+                            let rendered = [255, 255, 255];
+                            for (const current of ancestry(element)) {
+                                const style = getComputedStyle(current);
+                                const fill = parse(style.backgroundColor);
+                                if (fill && fill.alpha > 0) {
+                                    rendered = composite(
+                                        fill.rgb, rendered, fill.alpha * Number(style.opacity)
+                                    );
+                                }
+                            }
+                            return rendered;
+                        };
+                        const contrast = element => {
+                            const color = parse(getComputedStyle(element).color);
+                            if (!color) return 0;
+                            const backdrop = background(element.parentElement);
+                        const opacity = ancestry(element).reduce(
+                            (value, current) => value * Number(
+                                getComputedStyle(current).opacity
+                            ),
+                            1
+                        );
+                        const foreground = composite(
+                            color.rgb, backdrop, color.alpha * opacity
+                        );
+                            const fill = background(element);
+                            const first = luminance(foreground);
+                            const second = luminance(fill);
+                            return (Math.max(first, second) + 0.05) /
+                                (Math.min(first, second) + 0.05);
+                        };
+                        const visible = element => {
+                            const box = element.getBoundingClientRect();
+                            return box.width > 0 && box.height > 0 && box.bottom > 0 &&
+                                box.top < innerHeight;
+                        };
+                        const leaked = [...document.querySelectorAll('#result-workspace *')]
+                            .filter(element => {
+                                const box = element.getBoundingClientRect();
+                                return visible(element) && box.width * box.height >= 2000 &&
+                                    !element.closest('img, canvas, video, svg, #diagnostic-card') &&
+                                    luminance(background(element)) > 0.45;
+                            })
+                            .map(element => (
+                                `${element.tagName.toLowerCase()}#${element.id}.${element.className}`
+                            ));
+                        const text = selectors.text.map(selector => {
+                            const element = document.querySelector(selector);
+                            return {
+                                selector,
+                                visible: Boolean(element && visible(element)),
+                                contrast: element ? contrast(element) : 0,
+                            };
+                        });
+                        const audio = selectors.audio.map(selector => {
+                            const element = document.querySelector(selector);
+                            return {
+                                selector,
+                                visible: Boolean(element && visible(element)),
+                                luminance: element ? luminance(background(element)) : 1,
+                            };
+                        });
+                        return {leaked, text, audio};
+                    }""",
+                    {
+                        "text": list(text_selectors),
+                        "audio": (
+                            (
+                                "#diagnostic-audio",
+                                "#diagnostic-audio label",
+                                "#diagnostic-audio .controls",
+                            )
+                            if surface_selector == "#diagnostic-audio"
+                            else ()
+                        ),
+                    },
+                )
+                assert metrics["leaked"] == [], metrics["leaked"]
+                assert all(
+                    target["visible"] and target["contrast"] >= 4.5
+                    for target in metrics["text"]
+                ), metrics["text"]
+                assert all(
+                    target["visible"] and target["luminance"] <= 0.45
+                    for target in metrics["audio"]
+                ), metrics["audio"]
         finally:
             context.close()
             browser.close()
