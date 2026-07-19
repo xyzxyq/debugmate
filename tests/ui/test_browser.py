@@ -694,6 +694,7 @@ def _download_verified_bundle(page, context, *, partial: bool) -> dict[str, obje
     downloaded_path = download.path()
     assert downloaded_path is not None
     payload = Path(downloaded_path).read_bytes()
+    assert 0 < len(payload) <= 32 * 1024 * 1024
     archive_sha256 = hashlib.sha256(payload).hexdigest()
     assert re.fullmatch(r"[0-9a-f]{64}", archive_sha256)
 
@@ -825,6 +826,35 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
         finally:
             if context is not None:
                 context.close()
+            browser.close()
+
+
+def test_v01_download_matches_visible_source_run_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.get_by_role("button", name="加载回放案例", exact=True).click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            metadata = page.locator("#result-metadata").first.inner_text()
+            visible_match = re.search(r"来源运行：(run_[0-9a-f]{32})", metadata)
+            assert visible_match is not None
+            visible_source_run_id = visible_match.group(1)
+
+            download_tab = page.get_by_role("tab", name="引用与下载", exact=True)
+            download_tab.click()
+            manifest = _download_verified_bundle(page, context, partial=False)
+            identity = manifest.get("identity")
+            assert isinstance(identity, dict)
+            assert identity.get("source_run_id") == visible_source_run_id
+        finally:
+            context.close()
             browser.close()
 
 
