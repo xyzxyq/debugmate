@@ -1,0 +1,62 @@
+# DebugMate V0.1 课程提交说明
+
+## 项目定位
+
+DebugMate 是面向人工智能专业学习场景的多模态报错诊断与复盘智能体。用户提供报错文本、截图、代码和环境信息，系统先在本机脱敏并等待确认，再生成带知识引用的结构化诊断，最后从同一个诊断对象派生文字报告、PNG 诊断卡和 MP3 语音复盘。
+
+V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
+
+## 课程要求对应
+
+- 专属知识库：`knowledge/sources.json` 收录 17 个 Python、pip、PyTorch、CUDA、Hugging Face、Ultralytics 和 Windows 官方来源。
+- 完整工作流：输入校验 -> 文本/截图脱敏 -> 用户预览确认 -> 事实抽取与纠错 -> 分类与知识检索 -> 结构化诊断 -> 报告/PNG/MP3 -> ZIP 下载。
+- 多模态成果：文字、图像、语音均由同一 `DiagnosisRecord` 派生。
+- 提示词优化：`prompts/v1-baseline.md` 至 `prompts/v4-course-release.md`。
+- 真实成果：`evidence/course-v0.1/` 保存当前代码真实 Edge 截图和哈希清单。
+- 局限说明：Dify 在线路径受账号、额度和模型 provider 影响，录制安全路径使用明确标注的本地规则/固定回放。
+
+## 主要工具
+
+| 工具 | 功能定位 |
+|---|---|
+| Dify Cloud（可选增强） | 视觉模型、知识检索、LLM 工作流和未来在线演示 |
+| Python + Pydantic | 本地工作流、严格 Schema、结果一致性与证据生成 |
+| RapidOCR + Pillow | 截图文字候选与上传前像素脱敏；确定性绘制 PNG |
+| Gradio | 统一输入、隐私确认、诊断结果和下载页面 |
+| Windows SAPI + FFmpeg | 免费本地语音降级与 MP3 检查 |
+| pytest + Playwright Edge | 自动验证状态、键盘、缩放、长内容和下载 |
+
+## 演示运行
+
+在仓库根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m debugmate.ui.serve
+```
+
+打开命令输出中的本地地址。在“固定回放案例”中选择案例并点击“加载回放案例”。页面会明确显示“离线回放”，不会伪装成云端实时调用。
+
+## 建议演示顺序
+
+1. 展示输入区和“生成本地脱敏预览”。
+2. 说明上传前必须由用户确认脱敏结果。
+3. 加载 `ModuleNotFoundError` 完成案例。
+4. 依次展示事实与引用、文字报告、诊断卡、语音复盘和 ZIP 下载。
+5. 展示一次语音或诊断卡部分失败，说明安全降级和最小重试。
+6. 切换长内容案例，展开命令说明，强调命令只供查看。
+
+## 提交材料
+
+- PPT：`deliverables/DebugMate-V0.1.pptx`
+- 演示讲解稿：`docs/course/video-script.md`
+- PPT 结构：`docs/course/presentation-outline.md`
+- 案例说明：`docs/course/v0.1-demo-cases.md`
+- 提示词对比：`docs/course/prompt-iteration.md`
+- 真实截图与清单：`evidence/course-v0.1/`
+
+## 已知限制
+
+- 当前只有少量代表性案例，不代表覆盖全部 Python/AI 故障。
+- Dify 在线视觉与 TTS 未作为 V0.1 完成前提。
+- 本地 SAPI MP3 在正式录屏前仍需人工试听一次。
+- 系统不会自动执行修复命令，建议由用户审阅后自行运行。
