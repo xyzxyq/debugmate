@@ -1,5 +1,7 @@
 # Requirements: DebugMate
 
+> V0.1 scope note (2026-07-19): these identifiers remain for traceability, but acceptance is for a local Windows course demonstration with 3-5 representative cases. Public deployment, production reliability certification, exhaustive security/fault matrices, and full visual certification are deferred.
+
 **Defined:** 2026-07-10  
 **Core Value:** 对真实或可复现的 AI/Python 报错，基于专属知识库生成有依据、可执行、说明不确定性的诊断，并同步输出一致的文字、图像和语音结果。
 

@@ -1,89 +1,49 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: milestone
+milestone: v0.1
+milestone_name: course-demo
 status: executing
-stopped_at: Plan 04-10 completed; Plan 04-11 visual/responsive/accessibility evidence pending
-last_updated: "2026-07-17T17:55:20+08:00"
-last_activity: 2026-07-17 -- Plan 04-10 truth-state Edge matrix completed and independently approved
+stopped_at: Phase 04-11 representative UI verification in progress
+last_updated: "2026-07-19T00:00:00+08:00"
+last_activity: 2026-07-19 -- remaining work reduced from release-grade gates to course-demo V0.1
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 24
+  total_plans: 26
   completed_plans: 22
-  percent: 92
+  percent: 85
 ---
 
 # Project State
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-07-10)
+See: `.planning/PROJECT.md` (updated 2026-07-19)
 
 **Core value:** 对真实或可复现的 AI/Python 报错，基于专属知识库生成有依据、可执行、说明不确定性的诊断，并同步输出一致的文字、图像和语音结果。  
-**Current focus:** Phase 04 — multimodal-results-ui
+**Current focus:** 完成本地 Windows 课程演示 V0.1，而非公开部署或生产发布。
 
 ## Current Position
 
 Phase: 04 (multimodal-results-ui) — EXECUTING
-Plan: 10 of 12 completed; 04-11 next
-Status: Executing
-Last activity: 2026-07-17 -- 04-10 real Edge truth-state matrix and dual re-review complete
+Plan: 10 of 12 completed; 04-11 in progress
+Next: representative UI checks -> one positive ZIP check -> 3-5 case evidence -> PPT/video package
 
-Progress: [█████████░] 22/24 plans completed (92%); Phase 4 verification remains open
+Progress: [████████░░] 22/26 plans completed (85%)
 
-## Performance Metrics
+## V0.1 Scope Decision
 
-**Velocity:**
+- 保留：真实演示闭环、上传前隐私预览、专属知识库、工作流、同源报告/PNG/MP3/ZIP、3-5 个代表性案例、真实截图、PPT 和视频材料。
+- 可选：Dify/在线 LLM 作为增强和课程说明；录制时允许使用明确标注的本地确定性回放。
+- 延后：公网部署、账户与权限、监控/SLA、跨平台、完整 15 行视觉认证、原子证据 generation/pointer、故障注入和生产级攻击矩阵。
+- 完成标准：课程合规、流程完整、结果真实、能够讲清工具与提示词、局限和改进。
 
-- Total plans completed: 21
-- Average duration: —
-- Total execution time: 0.0 hours
+## Known External Limits
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 1 | 3 | - | - |
-| 03 | 6 | - | - |
-
-**Recent Trend:**
-
-- Last 5 plans: —
-- Trend: No execution data
-
-*Updated after each plan completion*
-| Phase 02 P01 | 40min | 4 tasks | 15 files |
-| Phase 02 P02 | 6h44m | 3 tasks | 14 files |
-| Phase 02 P03 | 17h13m | 5 tasks + hardening | 31 files |
-
-## Accumulated Context
-
-### Decisions
-
-Decisions are logged in `PROJECT.md` Key Decisions table. Recent decisions affecting current work:
-
-- [Phase 1]: 正式主路径为 Dify Cloud + Windows 本地 Python 薄客户端，Coze 仅作限时替代探针。
-- [Phase 1]: `DiagnosisRecord v1` 是文字、PNG 和 MP3 的单一事实源。
-- [Phase 2]: 知识库只收录官方或可核验来源，输入离开本机前必须脱敏。
-- [Phase 4]: 核心 PNG 使用确定性渲染；TTS 与 PNG 均保留可记录的本地降级后端。
-- [Phase 4]: 在外部 Dify 凭据不可用时，先以严格哈希校验的官方知识快照和无网络 `local-rule-v1` 打通真实审批、诊断与多模态结果链；不得将回放伪装成 live。
-- [Phase 5]: 只有通过引用、隐私、Schema、文件有效性和一致性门禁的案例才能进入课程材料。
-
-### Pending Todos
-
-None yet.
-
-### Blockers/Concerns
-
-- [Phase 1]: Dify Cloud 当前账号额度、视觉模型、TTS provider、DSL 导入导出和 API 限制尚需真实探针确认。
-- [Phase 2]: 17 个官方来源已在线核验；后续仍需监控页面结构与许可条款漂移。
-- [External gate]: Dify 真实数据集写入/回读需要账号、数据集 ID 与 API 密钥；当前只完成 dry-run 和 MockTransport 契约验证。
-- [Phase 4]: local SAPI MP3 已通过本机生成、ffprobe/解码和非静音机器验证；人工听验仍为 `human_needed`。Dify TTS 与 edge TTS 外部门禁仍保持 open。
-- [External gate]: Dify/VLM 的真实结构化输出稳定性与引用映射仍需在凭据配置后补充现场探针；Phase 3 离线契约与回放路径已验收。
+- Dify 凭据、额度、视觉模型和 TTS provider 仍可能不可用，但不再阻塞 V0.1 本地演示。
+- 本地 SAPI MP3 已通过机器检查；录制前只需做一次人工听验。
+- 云端实时结果不得与本地回放混淆，界面和讲解材料必须明确标注后端。
 
 ## Session Continuity
 
-Last session: 2026-07-17T17:55:20+08:00
-Stopped at: Plan 04-10 completed and approved; proceeding to Plan 04-11
-Resume file: .planning/phases/04-multimodal-results-ui/04-11-PLAN.md
+Resume file: `.planning/phases/04-multimodal-results-ui/04-11-PLAN.md`
