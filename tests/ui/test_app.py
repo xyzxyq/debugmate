@@ -198,7 +198,7 @@ def _partial_state_for_app(failed_stage: str) -> ResultViewState:
     )
 
 
-def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() -> None:
+def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
     app = build_app(_Service())
     config = app.get_config_file()
     rendered = repr(config)
@@ -210,11 +210,77 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     ]
     assert len(workbench_grids) == 1
 
+    command_bars = [
+        component
+        for component in config["components"]
+        if "command-bar" in component.get("props", {}).get("elem_classes", [])
+    ]
+    control_rails = [
+        component
+        for component in config["components"]
+        if "control-rail" in component.get("props", {}).get("elem_classes", [])
+    ]
+    diagnosis_canvases = [
+        component
+        for component in config["components"]
+        if "diagnosis-canvas" in component.get("props", {}).get("elem_classes", [])
+    ]
+    result_workspaces = [
+        component
+        for component in config["components"]
+        if "result-workspace" in component.get("props", {}).get("elem_classes", [])
+    ]
+    correction_panels = [
+        component
+        for component in config["components"]
+        if "correction-panel" in component.get("props", {}).get("elem_classes", [])
+    ]
+    assert len(command_bars) == 1
+    assert len(control_rails) == 1
+    assert len(diagnosis_canvases) == 1
+    assert len(result_workspaces) == 1
+    assert len(correction_panels) == 1
+    assert correction_panels[0]["type"] == "accordion"
+    assert correction_panels[0]["props"]["open"] is False
+    assert any(
+        "section-kicker" in component.get("props", {}).get("elem_classes", [])
+        for component in config["components"]
+    )
+
+    elem_ids = {
+        component.get("props", {}).get("elem_id") for component in config["components"]
+    }
+    assert {
+        "diagnostic-status",
+        "accessible-status",
+        "result-metadata",
+        "workbench-grid",
+        "local-preview",
+        "local-approve",
+        "replay-action",
+        "fact-table",
+        "diagnostic-commands",
+        "failure-details",
+        "partial-retry",
+        "diagnostic-report",
+        "diagnostic-card",
+        "diagnostic-audio",
+        "audio-metadata",
+        "recap-text",
+        "citation-table",
+        "individual-artifacts",
+        "download-metadata",
+        "download-result",
+    } <= elem_ids
+
     for text in (
         "DebugMate 诊断工作台",
-        "输入与抽取",
-        "诊断与证据",
-        "三模态结果",
+        "操作控制台",
+        "新诊断",
+        "固定回放",
+        "抽取字段与纠错",
+        "诊断主画布",
+        "结果工作区",
         "文字报告",
         "诊断卡",
         "语音复盘",
@@ -237,10 +303,33 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
     assert source.count("gr.HTML(") == 1
     assert "<script" not in source.lower()
     assert "#workbench-grid:has(> #workbench-grid)" in app.css
-    assert "minmax(280px, 3fr) minmax(360px, 4fr) minmax(440px, 5fr)" in app.css
-    assert "gap: 16px;" in app.css
+    for token in (
+        "--canvas: #0b0f14",
+        "--surface-1: #111820",
+        "--surface-2: #17212b",
+        "--text: #e8edf2",
+        "--muted: #91a0ad",
+        "--border: #293642",
+        "--primary: #27b3c2",
+        "--warning: #e7a84b",
+        "--failure: #ef6b73",
+        "--success: #4ecb8d",
+    ):
+        assert token in app.css
+    assert (
+        "minmax(280px, 0.72fr) minmax(360px, 0.95fr) minmax(460px, 1.35fr)"
+        in app.css
+    )
+    assert "gap: 12px;" in app.css
+    assert ".command-bar { position: sticky;" in app.css
+    assert ".control-rail" in app.css
+    assert ".diagnosis-canvas" in app.css
+    assert ".result-workspace" in app.css
+    assert ".section-kicker" in app.css
+    assert ".correction-panel" in app.css
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
+    assert "@media (max-width: 639px)" in app.css
     assert "overflow-x: hidden" not in app.css
 
 

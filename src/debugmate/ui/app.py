@@ -34,17 +34,40 @@ from debugmate.ui.presentation import ComponentViewModel, render_view_state
 
 WORKBENCH_CSS = "\n".join(
     (
-        ":root { --canvas: #f4f7fb; --surface: #ffffff; --ink: #172238; --accent: #2457a7; }",
+        (
+            ":root { --canvas: #0b0f14; --surface-1: #111820; --surface-2: #17212b; "
+            "--text: #e8edf2; --muted: #91a0ad; --border: #293642; "
+            "--primary: #27b3c2; --primary-hover: #35c6d5; --warning: #e7a84b; "
+            "--failure: #ef6b73; --success: #4ecb8d; --accent: #27b3c2; }"
+        ),
         "* { box-sizing: border-box; }",
-        ".gradio-container { max-width: 1440px !important; margin: 0 auto; }",
-        ".gradio-container { background: var(--canvas); }",
-        ".status-bar { position: sticky; top: 0; z-index: 2; background: var(--surface); }",
-        ".status-bar { border-bottom: 1px solid #ccd6e5; }",
+        (
+            "body, .gradio-container { background: var(--canvas) !important; "
+            "color: var(--text) !important; }"
+        ),
+        (
+            ".gradio-container { max-width: 1560px !important; margin: 0 auto; "
+            "padding: 10px 14px 18px !important; }"
+        ),
+        ".command-bar { position: sticky; top: 0; z-index: 20; }",
+        (
+            ".command-bar { display: grid; grid-template-columns: minmax(220px, 0.8fr) "
+            "minmax(160px, auto) minmax(280px, 1.4fr); align-items: center; gap: 12px; "
+            "margin: 0 0 12px !important; padding: 10px 14px !important; "
+            "background: rgba(17, 24, 32, 0.98) !important; border: 1px solid var(--border) "
+            "!important; border-radius: 8px !important; "
+            "box-shadow: 0 8px 24px rgba(0, 0, 0, .24); }"
+        ),
+        ".command-bar .product-title { min-width: 0; }",
+        ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 20px; }",
+        ".command-bar .status-indicator { min-width: max-content; }",
+        ".command-bar .status-indicator p { margin: 0; color: var(--success); font-weight: 700; }",
+        ".command-bar .metadata { margin-left: auto; text-align: right; }",
         "#workbench-grid:has(> #workbench-grid) { display: grid; }",
         (
             "#workbench-grid:has(> #workbench-grid) { "
-            "grid-template-columns: minmax(280px, 3fr) minmax(360px, 4fr) "
-            "minmax(440px, 5fr); gap: 16px; }"
+            "grid-template-columns: minmax(280px, 0.72fr) minmax(360px, 0.95fr) "
+            "minmax(460px, 1.35fr); gap: 12px; }"
         ),
         "#workbench-grid:has(> #workbench-grid) { align-items: start; }",
         "#workbench-grid:has(> #workbench-grid) > #workbench-grid { display: contents; }",
@@ -54,16 +77,105 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "#workbench-grid:has(> #workbench-grid) .region { min-width: 0; "
-            "background: var(--surface); border: 1px solid #ccd6e5; }"
+            "background: var(--surface-1); border: 1px solid var(--border); }"
         ),
-        "#workbench-grid:has(> #workbench-grid) .region { border-radius: 10px; padding: 12px; }",
-        ".metadata { font-family: Cascadia Mono, Consolas, monospace; font-size: 12px; }",
+        (
+            "#workbench-grid:has(> #workbench-grid) .region { border-radius: 8px; "
+            "padding: 14px; overflow: hidden; }"
+        ),
+        ".control-rail { border-top: 2px solid var(--primary) !important; }",
+        ".diagnosis-canvas { border-top: 2px solid var(--warning) !important; }",
+        ".result-workspace { border-top: 2px solid var(--success) !important; }",
+        (
+            ".region h2 { margin: 0 0 10px; color: var(--text); font-size: 16px; "
+            "letter-spacing: .01em; }"
+        ),
+        (
+            ".section-kicker p { margin: 10px 0 6px; color: var(--muted); font-size: 11px; "
+            "font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }"
+        ),
+        (
+            ".metadata { color: var(--muted) !important; font-family: Cascadia Mono, "
+            "Consolas, monospace; font-size: 12px; }"
+        ),
         ".metadata { overflow-wrap: anywhere; }",
+        (
+            ".region label, .region .label-wrap, .region .block-label { "
+            "color: var(--muted) !important; }"
+        ),
+        (
+            ".region input, .region textarea, .region select { background: var(--surface-2) "
+            "!important; color: var(--text) !important; border-color: var(--border) !important; }"
+        ),
+        ".region input::placeholder, .region textarea::placeholder { color: var(--muted); }",
+        (
+            ".region button { min-height: 40px; border-radius: 8px !important; "
+            "font-weight: 700 !important; }"
+        ),
+        (
+            ".region button.primary { background: var(--primary) !important; color: #071014 "
+            "!important; border-color: var(--primary) !important; }"
+        ),
+        ".region button.primary:hover { background: var(--primary-hover) !important; }",
+        (
+            ".region button.secondary { background: var(--surface-2) !important; "
+            "color: var(--text) !important; border-color: var(--border) !important; }"
+        ),
+        ".region button.secondary:hover { border-color: var(--primary) !important; }",
+        (
+            ".region button:disabled { color: var(--muted) !important; opacity: .56; "
+            "cursor: not-allowed; }"
+        ),
+        (
+            ".correction-panel { margin-top: 10px !important; background: var(--surface-2) "
+            "!important; border: 1px solid var(--border) !important; "
+            "border-radius: 8px !important; }"
+        ),
+        ".correction-panel summary { color: var(--text) !important; font-weight: 700; }",
+        (
+            ".diagnosis-summary { padding: 10px 12px; background: var(--surface-2); "
+            "border-left: 3px solid var(--warning); border-radius: 6px; }"
+        ),
+        ".diagnosis-summary p { margin: 0; }",
         ".tab-container.visually-hidden[aria-hidden='true'] { display: none !important; }",
-        ".report-panel { max-height: 440px; overflow: auto; }",
+        (
+            ".result-workspace .tabs { background: transparent !important; "
+            "border-color: var(--border) !important; }"
+        ),
+        (
+            ".result-workspace .tab-nav { border-bottom-color: var(--border) !important; "
+            "gap: 4px; }"
+        ),
+        (
+            ".result-workspace .tab-nav button { color: var(--muted) !important; "
+            "background: transparent !important; }"
+        ),
+        (
+            ".result-workspace .tab-nav button.selected { color: var(--text) !important; "
+            "border-color: var(--primary) !important; }"
+        ),
+        ".report-panel { max-height: 560px; overflow: auto; }",
         ".report-panel pre { max-width: 100%; overflow-x: auto; }",
         "#fact-table, #citation-table, #diagnostic-commands { max-width: 100%; overflow: auto; }",
+        (
+            "#fact-table { max-height: 430px; scrollbar-color: var(--border) "
+            "var(--surface-1); }"
+        ),
+        (
+            ".region table { width: 100%; border-collapse: collapse; color: var(--text); "
+            "font-size: 12px; }"
+        ),
+        (
+            ".region th { padding: 8px 9px; background: var(--surface-2); color: var(--muted); "
+            "border: 0; border-bottom: 1px solid var(--border); text-align: left; }"
+        ),
+        (
+            ".region td { padding: 8px 9px; border: 0; border-bottom: 1px solid var(--border); "
+            "vertical-align: top; overflow-wrap: anywhere; }"
+        ),
         "#diagnostic-commands td:nth-child(2) { white-space: pre; }",
+        "#failure-details:not(:empty) { color: var(--failure); }",
+        "#partial-retry { border-color: var(--warning) !important; }",
         (
             "#diagnostic-card img { display: block; max-width: 100%; "
             "height: auto; object-fit: contain; }"
@@ -74,11 +186,16 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
-            "{ grid-template-columns: 5fr 7fr; } }"
+            "{ grid-template-columns: minmax(280px, 300px) minmax(0, 1fr); } }"
         ),
         (
             "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
-            ".results-region { grid-column: 1 / -1; } }"
+            ".control-rail { grid-row: 1 / span 2; } }"
+        ),
+        (
+            "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
+            ".diagnosis-canvas, #workbench-grid:has(> #workbench-grid) .result-workspace "
+            "{ grid-column: 2; } }"
         ),
         (
             "@media (max-width: 899px) { #workbench-grid:has(> #workbench-grid) "
@@ -86,7 +203,14 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "@media (max-width: 899px) { #workbench-grid:has(> #workbench-grid) "
-            ".results-region { grid-column: auto; } }"
+            ".control-rail, #workbench-grid:has(> #workbench-grid) .diagnosis-canvas, "
+            "#workbench-grid:has(> #workbench-grid) .result-workspace "
+            "{ grid-column: auto; grid-row: auto; } }"
+        ),
+        (
+            "@media (max-width: 899px) { .command-bar { position: static; "
+            "grid-template-columns: 1fr; } .command-bar .metadata { margin-left: 0; "
+            "text-align: left; } }"
         ),
         "@media (max-width: 899px) { .report-panel { max-height: none; } }",
         "@media (max-width: 639px) { .gradio-container { padding: 8px !important; } }",
@@ -971,9 +1095,13 @@ def build_app(
         correction_draft = gr.State(value=None)
         retry_case = gr.State(value=None)
         retry_result = gr.State(value=None)
-        with gr.Group(elem_classes="status-bar"):
-            gr.Markdown("# DebugMate 诊断工作台")
-            status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
+        with gr.Group(elem_classes=["status-bar", "command-bar"]):
+            gr.Markdown("# DebugMate 诊断工作台", elem_classes="product-title")
+            status = gr.Markdown(
+                "● 等待诊断",
+                elem_id="diagnostic-status",
+                elem_classes="status-indicator",
+            )
             accessible_status = gr.HTML(
                 "状态：等待诊断",
                 html_template=(
@@ -985,8 +1113,9 @@ def build_app(
             )
             result_metadata = gr.Markdown("", elem_id="result-metadata", elem_classes="metadata")
         with gr.Group(elem_id="workbench-grid"):
-            with gr.Column(elem_classes="region"):
-                gr.Markdown("## 输入与抽取")
+            with gr.Column(elem_classes=["region", "control-rail"]):
+                gr.Markdown("## 操作控制台")
+                gr.Markdown("新诊断", elem_classes="section-kicker")
                 redacted_input = gr.Textbox(
                     label="脱敏后的输入",
                     interactive=False,
@@ -1010,6 +1139,7 @@ def build_app(
                     elem_id="local-approve",
                 )
                 gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
+                gr.Markdown("固定回放", elem_classes="section-kicker")
                 replay = gr.Dropdown(
                     choices=[
                         ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
@@ -1021,30 +1151,41 @@ def build_app(
                 replay_button = gr.Button(
                     "加载回放案例", variant="secondary", elem_id="replay-action"
                 )
-                fields = [
-                    gr.Textbox(label=label, interactive=False, value="") for label in _FIELD_LABELS
-                ]
-                pending = gr.Textbox(
-                    label="修改草稿",
-                    interactive=False,
-                    lines=4,
-                    value="请先修改至少一个抽取字段。",
-                )
-                correction_button = gr.Button("确认修改并重新诊断", interactive=False)
-                with gr.Accordion("确认创建新运行", open=False) as confirmation_panel:
-                    gr.Markdown("确认后将创建新的运行和结果；当前证据与结果不会被覆盖。")
-                    confirmation_summary = gr.Textbox(
-                        label="待确认修改",
+                with gr.Accordion(
+                    "抽取字段与纠错",
+                    open=False,
+                    elem_classes="correction-panel",
+                ):
+                    fields = [
+                        gr.Textbox(label=label, interactive=False, value="")
+                        for label in _FIELD_LABELS
+                    ]
+                    pending = gr.Textbox(
+                        label="修改草稿",
                         interactive=False,
-                        lines=5,
+                        lines=4,
+                        value="请先修改至少一个抽取字段。",
                     )
-                    create_button = gr.Button("创建新运行", variant="primary", interactive=False)
-                    return_button = gr.Button("返回检查")
+                    correction_button = gr.Button("确认修改并重新诊断", interactive=False)
+                    with gr.Accordion("确认创建新运行", open=False) as confirmation_panel:
+                        gr.Markdown("确认后将创建新的运行和结果；当前证据与结果不会被覆盖。")
+                        confirmation_summary = gr.Textbox(
+                            label="待确认修改",
+                            interactive=False,
+                            lines=5,
+                        )
+                        create_button = gr.Button(
+                            "创建新运行", variant="primary", interactive=False
+                        )
+                        return_button = gr.Button("返回检查")
                 gr.Markdown("页面仅展示已验证的脱敏输入与结果。")
 
-            with gr.Column(elem_classes="region"):
-                gr.Markdown("## 诊断与证据")
-                category_confidence = gr.Markdown("类别：等待诊断\n\n置信度：暂无")
+            with gr.Column(elem_classes=["region", "diagnosis-canvas"]):
+                gr.Markdown("## 诊断主画布")
+                category_confidence = gr.Markdown(
+                    "类别：等待诊断\n\n置信度：暂无",
+                    elem_classes="diagnosis-summary",
+                )
                 fact_table = gr.Markdown(
                     _markdown_table("事实与证据", _FACT_HEADERS, ()),
                     elem_id="fact-table",
@@ -1063,8 +1204,10 @@ def build_app(
                     elem_id="partial-retry",
                 )
 
-            with gr.Column(elem_classes=["region", "results-region"]):
-                gr.Markdown("## 三模态结果")
+            with gr.Column(
+                elem_classes=["region", "results-region", "result-workspace"]
+            ):
+                gr.Markdown("## 结果工作区")
                 with gr.Tabs():
                     with gr.Tab("文字报告"):
                         report = gr.Markdown(
