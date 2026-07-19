@@ -47,13 +47,41 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             ".gradio-container { max-width: 1560px !important; margin: 0 auto; "
-            "padding: 10px 14px 18px !important; }"
+            "padding: 10px 14px 18px !important; --body-background-fill: var(--canvas); "
+            "--background-fill-primary: var(--surface-1); "
+            "--background-fill-secondary: var(--surface-2); "
+            "--block-background-fill: var(--surface-1); "
+            "--block-border-color: var(--border); --block-label-text-color: var(--muted); "
+            "--input-background-fill: var(--surface-2); --input-border-color: var(--border); "
+            "--body-text-color: var(--text); --body-text-color-subdued: var(--muted); "
+            "--border-color-primary: var(--border); }"
+        ),
+        (
+            ".gradio-container .form, .gradio-container .block, .gradio-container .wrap, "
+            ".gradio-container .panel { background: var(--surface-1) !important; "
+            "color: var(--text) !important; border-color: var(--border) !important; }"
+        ),
+        (
+            ".gradio-container code, .gradio-container pre { background: var(--surface-2) "
+            "!important; color: var(--text) !important; border-color: var(--border) !important; }"
+        ),
+        (
+            ".gradio-container .prose, .gradio-container .prose p, .gradio-container .prose li, "
+            ".gradio-container .prose strong { color: var(--text) !important; }"
+        ),
+        (
+            ".gradio-container a { color: var(--primary) !important; "
+            "text-decoration-color: var(--primary) !important; }"
         ),
         ".command-bar { position: sticky; top: 0; z-index: 20; }",
         (
-            ".command-bar { display: grid; grid-template-columns: minmax(220px, 0.8fr) "
+            ".command-bar > .form { display: grid; "
+            "grid-template-columns: minmax(220px, 0.8fr) "
             "minmax(160px, auto) minmax(280px, 1.4fr); align-items: center; gap: 12px; "
-            "margin: 0 0 12px !important; padding: 10px 14px !important; "
+            "background: var(--surface-1) !important; }"
+        ),
+        (
+            ".command-bar { margin: 0 0 12px !important; padding: 10px 14px !important; "
             "background: var(--surface-1) !important; border: 1px solid var(--border) "
             "!important; border-radius: 8px !important; }"
         ),
@@ -62,13 +90,17 @@ WORKBENCH_CSS = "\n".join(
         ".command-bar .status-indicator { min-width: max-content; }",
         ".command-bar .status-indicator p { margin: 0; color: var(--success); font-weight: 700; }",
         ".command-bar .metadata { margin-left: auto; text-align: right; }",
+        ".command-bar .block, .command-bar .wrap { padding: 0 !important; border: 0 !important; }",
         "#workbench-grid:has(> #workbench-grid) { display: grid; }",
         (
             "#workbench-grid:has(> #workbench-grid) { "
             "grid-template-columns: minmax(280px, 0.72fr) minmax(360px, 0.95fr) "
             "minmax(460px, 1.35fr); gap: 12px; }"
         ),
-        "#workbench-grid:has(> #workbench-grid) { align-items: start; }",
+        (
+            "#workbench-grid:has(> #workbench-grid) { align-items: start; "
+            "background: var(--canvas) !important; border: 0 !important; }"
+        ),
         "#workbench-grid:has(> #workbench-grid) > #workbench-grid { display: contents; }",
         (
             "#workbench-grid:has(> #workbench-grid) > #workbench-grid > .styler "
@@ -85,6 +117,11 @@ WORKBENCH_CSS = "\n".join(
         ".control-rail { border-top: 2px solid var(--primary) !important; }",
         ".diagnosis-canvas { border-top: 2px solid var(--warning) !important; }",
         ".result-workspace { border-top: 2px solid var(--success) !important; }",
+        (
+            ".region > .form, .region .gr-accordion, .region .tabs, .region .tabitem { "
+            "background: var(--surface-1) !important; color: var(--text) !important; "
+            "border-color: var(--border) !important; }"
+        ),
         (
             ".region h2 { margin: 0 0 10px; color: var(--text); font-size: 16px; "
             "letter-spacing: .01em; }"
@@ -125,8 +162,9 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".region button.secondary:hover { border-color: var(--primary) !important; }",
         (
-            ".region button:disabled { color: var(--muted) !important; opacity: .56; "
-            "cursor: not-allowed; }"
+            ".region button:disabled { background: var(--surface-2) !important; "
+            "color: var(--text) !important; border-color: var(--border) !important; "
+            "opacity: .84; cursor: not-allowed; }"
         ),
         (
             ".correction-panel { margin-top: 10px !important; background: var(--surface-2) "
@@ -136,7 +174,8 @@ WORKBENCH_CSS = "\n".join(
         ".correction-panel summary { color: var(--text) !important; font-weight: 700; }",
         (
             ".diagnosis-summary { padding: 10px 12px; background: var(--surface-2); "
-            "border-left: 3px solid var(--warning); border-radius: 6px; }"
+            "border-left: 3px solid var(--warning); border-radius: 6px; "
+            "color: var(--text) !important; }"
         ),
         ".diagnosis-summary p { margin: 0; }",
         ".tab-container.visually-hidden[aria-hidden='true'] { display: none !important; }",
@@ -156,7 +195,16 @@ WORKBENCH_CSS = "\n".join(
             ".result-workspace .tab-nav button.selected { color: var(--text) !important; "
             "border-color: var(--primary) !important; }"
         ),
+        (
+            ".result-workspace [role='tab'] { color: var(--muted) !important; "
+            "background: var(--surface-1) !important; }"
+        ),
+        (
+            ".result-workspace [role='tab'][aria-selected='true'] { color: var(--primary) "
+            "!important; border-color: var(--primary) !important; }"
+        ),
         ".report-panel { max-height: 560px; overflow: auto; }",
+        ".report-panel, #fact-table, #citation-table { color: var(--text) !important; }",
         ".report-panel pre { max-width: 100%; overflow-x: auto; }",
         "#fact-table, #citation-table, #diagnostic-commands { max-width: 100%; overflow: auto; }",
         (
@@ -179,6 +227,12 @@ WORKBENCH_CSS = "\n".join(
         "#failure-details:not(:empty) { color: var(--failure); }",
         "#partial-retry { border-color: var(--warning) !important; }",
         (
+            "#diagnostic-audio, #diagnostic-audio .wrap, #diagnostic-audio .audio-container, "
+            "#diagnostic-audio .controls { background: var(--surface-2) !important; "
+            "color: var(--text) !important; border-color: var(--border) !important; "
+            "color-scheme: dark; }"
+        ),
+        (
             "#diagnostic-card img { display: block; max-width: 100%; "
             "height: auto; object-fit: contain; }"
         ),
@@ -186,6 +240,11 @@ WORKBENCH_CSS = "\n".join(
             ":focus-visible { outline: 2px solid var(--accent) !important; "
             "outline-offset: 2px !important; }"
         ),
+        (
+            "footer { background: var(--canvas) !important; color: var(--muted) !important; "
+            "border-color: var(--border) !important; }"
+        ),
+        "footer a, footer button { color: var(--muted) !important; }",
         (
             "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
             "{ grid-template-columns: minmax(280px, 300px) minmax(0, 1fr); } }"
@@ -210,8 +269,9 @@ WORKBENCH_CSS = "\n".join(
             "{ grid-column: auto; grid-row: auto; } }"
         ),
         (
-            "@media (max-width: 899px) { .command-bar { position: static; "
-            "grid-template-columns: 1fr; } .command-bar .metadata { margin-left: 0; "
+            "@media (max-width: 899px) { .command-bar { position: static; } "
+            ".command-bar > .form { grid-template-columns: 1fr; } "
+            ".command-bar .metadata { margin-left: 0; "
             "text-align: left; } }"
         ),
         "@media (max-width: 899px) { .report-panel { max-height: none; } }",

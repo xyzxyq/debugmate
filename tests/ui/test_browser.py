@@ -829,6 +829,130 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
             browser.close()
 
 
+def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            metrics = page.evaluate(
+                r"""() => {
+                    const parse = value => {
+                        const parts = value.match(/[\d.]+/g);
+                        if (!parts || parts.length < 3) return null;
+                        return {
+                            rgb: parts.slice(0, 3).map(Number),
+                            alpha: parts.length > 3 ? Number(parts[3]) : 1,
+                        };
+                    };
+                    const luminance = rgb => {
+                        const linear = rgb.map(channel => {
+                            const value = channel / 255;
+                            return value <= 0.04045
+                                ? value / 12.92
+                                : ((value + 0.055) / 1.055) ** 2.4;
+                        });
+                        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+                    };
+                    const effectiveBackground = element => {
+                        let current = element;
+                        while (current) {
+                            const parsed = parse(getComputedStyle(current).backgroundColor);
+                            if (parsed && parsed.alpha > 0) return parsed.rgb;
+                            current = current.parentElement;
+                        }
+                        return [255, 255, 255];
+                    };
+                    const contrast = (foreground, background) => {
+                        const first = luminance(foreground);
+                        const second = luminance(background);
+                        return (Math.max(first, second) + 0.05) /
+                            (Math.min(first, second) + 0.05);
+                    };
+                    const leaked = [...document.querySelectorAll('.gradio-container *, footer')]
+                        .filter(element => {
+                            const box = element.getBoundingClientRect();
+                            const outsideViewport = box.bottom <= 0 || box.top >= innerHeight;
+                            if (box.width * box.height < 2000 || outsideViewport) {
+                                return false;
+                            }
+                            const parsed = parse(getComputedStyle(element).backgroundColor);
+                            return parsed && parsed.alpha > 0 && luminance(parsed.rgb) > 0.45;
+                        })
+                        .map(element => ({
+                            selector: `${element.tagName.toLowerCase()}#${element.id}.` +
+                                element.className,
+                            background: getComputedStyle(element).backgroundColor,
+                            area: Math.round(
+                                element.getBoundingClientRect().width *
+                                element.getBoundingClientRect().height
+                            ),
+                        }));
+                    const contrastTargets = [
+                        '.diagnosis-summary',
+                        '#fact-table',
+                        '#diagnostic-report',
+                        '#result-metadata',
+                        'footer',
+                    ].map(selector => {
+                        const element = document.querySelector(selector);
+                        if (!element) return {selector, missing: true};
+                        const foreground = parse(getComputedStyle(element).color)?.rgb;
+                        const background = effectiveBackground(element);
+                        return {
+                            selector,
+                            color: getComputedStyle(element).color,
+                            background: `rgb(${background.join(', ')})`,
+                            contrast: foreground ? contrast(foreground, background) : 0,
+                        };
+                    });
+                    const disabledControls = [...document.querySelectorAll('button:disabled')]
+                        .filter(element => {
+                            const box = element.getBoundingClientRect();
+                            return box.width > 0 && box.height > 0 && box.bottom > 0 &&
+                                box.top < innerHeight;
+                        })
+                        .map(element => {
+                            const foreground = parse(getComputedStyle(element).color)?.rgb;
+                            const background = effectiveBackground(element);
+                            return {
+                                text: element.innerText,
+                                opacity: Number(getComputedStyle(element).opacity),
+                                contrast: foreground ? contrast(foreground, background) : 0,
+                            };
+                        });
+                    return {leaked, contrastTargets, disabledControls};
+                }"""
+            )
+            assert metrics["leaked"] == []
+            assert all(
+                not target.get("missing") and target["contrast"] >= 4.5
+                for target in metrics["contrastTargets"]
+            ), metrics["contrastTargets"]
+            assert all(
+                control["opacity"] >= 0.8 and control["contrast"] >= 4.5
+                for control in metrics["disabledControls"]
+            ), metrics["disabledControls"]
+
+            screenshot = page.screenshot(full_page=False)
+            with Image.open(io.BytesIO(screenshot)) as captured:
+                pixels = tuple(captured.convert("RGB").get_flattened_data())
+            light_pixels = sum(
+                1 for red, green, blue in pixels if min(red, green, blue) >= 190
+            )
+            assert light_pixels / len(pixels) < 0.08
+        finally:
+            context.close()
+            browser.close()
+
+
 def test_v01_download_matches_visible_source_run_in_real_edge(
     browser_base_url: str,
 ) -> None:
