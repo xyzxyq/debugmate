@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -303,6 +304,18 @@ def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
     assert source.count("gr.HTML(") == 1
     assert "<script" not in source.lower()
     assert "#workbench-grid:has(> #workbench-grid)" in app.css
+    approved_colors = {
+        "#0b0f14",
+        "#111820",
+        "#17212b",
+        "#e8edf2",
+        "#91a0ad",
+        "#293642",
+        "#27b3c2",
+        "#e7a84b",
+        "#ef6b73",
+        "#4ecb8d",
+    }
     for token in (
         "--canvas: #0b0f14",
         "--surface-1: #111820",
@@ -316,6 +329,12 @@ def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
         "--success: #4ecb8d",
     ):
         assert token in app.css
+    css_hex_colors = {
+        color.lower() for color in re.findall(r"#[0-9a-fA-F]{3,8}\b", app.css)
+    }
+    css_function_colors = re.findall(r"\b(?:rgb|rgba)\([^)]*\)", app.css, re.IGNORECASE)
+    assert css_hex_colors == approved_colors
+    assert css_function_colors == []
     assert (
         "minmax(280px, 0.72fr) minmax(360px, 0.95fr) minmax(460px, 1.35fr)"
         in app.css

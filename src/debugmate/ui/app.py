@@ -37,7 +37,7 @@ WORKBENCH_CSS = "\n".join(
         (
             ":root { --canvas: #0b0f14; --surface-1: #111820; --surface-2: #17212b; "
             "--text: #e8edf2; --muted: #91a0ad; --border: #293642; "
-            "--primary: #27b3c2; --primary-hover: #35c6d5; --warning: #e7a84b; "
+            "--primary: #27b3c2; --warning: #e7a84b; "
             "--failure: #ef6b73; --success: #4ecb8d; --accent: #27b3c2; }"
         ),
         "* { box-sizing: border-box; }",
@@ -54,9 +54,8 @@ WORKBENCH_CSS = "\n".join(
             ".command-bar { display: grid; grid-template-columns: minmax(220px, 0.8fr) "
             "minmax(160px, auto) minmax(280px, 1.4fr); align-items: center; gap: 12px; "
             "margin: 0 0 12px !important; padding: 10px 14px !important; "
-            "background: rgba(17, 24, 32, 0.98) !important; border: 1px solid var(--border) "
-            "!important; border-radius: 8px !important; "
-            "box-shadow: 0 8px 24px rgba(0, 0, 0, .24); }"
+            "background: var(--surface-1) !important; border: 1px solid var(--border) "
+            "!important; border-radius: 8px !important; }"
         ),
         ".command-bar .product-title { min-width: 0; }",
         ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 20px; }",
@@ -113,10 +112,13 @@ WORKBENCH_CSS = "\n".join(
             "font-weight: 700 !important; }"
         ),
         (
-            ".region button.primary { background: var(--primary) !important; color: #071014 "
+            ".region button.primary { background: var(--primary) !important; color: var(--canvas) "
             "!important; border-color: var(--primary) !important; }"
         ),
-        ".region button.primary:hover { background: var(--primary-hover) !important; }",
+        (
+            ".region button.primary:hover { background: var(--text) !important; "
+            "border-color: var(--text) !important; }"
+        ),
         (
             ".region button.secondary { background: var(--surface-2) !important; "
             "color: var(--text) !important; border-color: var(--border) !important; }"
@@ -139,7 +141,7 @@ WORKBENCH_CSS = "\n".join(
         ".diagnosis-summary p { margin: 0; }",
         ".tab-container.visually-hidden[aria-hidden='true'] { display: none !important; }",
         (
-            ".result-workspace .tabs { background: transparent !important; "
+            ".result-workspace .tabs { background: var(--surface-1) !important; "
             "border-color: var(--border) !important; }"
         ),
         (
@@ -148,7 +150,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             ".result-workspace .tab-nav button { color: var(--muted) !important; "
-            "background: transparent !important; }"
+            "background: var(--surface-1) !important; }"
         ),
         (
             ".result-workspace .tab-nav button.selected { color: var(--text) !important; "
