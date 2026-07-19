@@ -1,0 +1,41 @@
+{
+  "schema_version": "course-v0.1-evidence-1.0",
+  "captured_at": "2026-07-19",
+  "browser": "Microsoft Edge (Playwright, headless)",
+  "viewport": {
+    "width": 1366,
+    "height": 768,
+    "capture": "full_page"
+  },
+  "source_commit": "7c7941c",
+  "screenshots": [
+    {
+      "path": "screenshots/01-completed-overview.png",
+      "case_label": "完成态：报告、引用与结果包",
+      "status": "completed",
+      "bytes": 216084,
+      "sha256": "6a0d789e7667684f7c2c97617ddac816f7e46d0e62b5e0e9163d892350ff3914"
+    },
+    {
+      "path": "screenshots/02-tts-partial.png",
+      "case_label": "部分完成：语音生成失败但报告与诊断卡可用",
+      "status": "partial",
+      "bytes": 277489,
+      "sha256": "9b7a41544672b17489242b3904c7b2e8ef0876fb5e7d981e7e9bcd3a5b064b43"
+    },
+    {
+      "path": "screenshots/03-card-partial.png",
+      "case_label": "部分完成：诊断卡失败但报告与语音可用",
+      "status": "partial",
+      "bytes": 286766,
+      "sha256": "144e68e71de0d8c544cad27c96b93c4f05d138b684b8d444c1f84d1a922343ab"
+    }
+  ],
+  "non_screenshot_cases": [
+    {
+      "case_label": "长报告与长命令布局韧性",
+      "fixture_id": "long-content",
+      "verification": "tests/ui/test_browser.py::test_vq_04_long_content_commands_and_vq_05_tall_card_in_real_edge"
+    }
+  ]
+}
