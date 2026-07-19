@@ -1306,7 +1306,7 @@ def test_vq_11_vq_12_completed_responsive_geometry_in_real_edge(
             if width == 1024:
                 assert abs(first["width"] - 300) <= 1
                 assert abs(first["y"] - second["y"]) < 4
-                assert first["x"] < second["x"]
+                assert first["x"] + first["width"] <= second["x"] + 1
                 assert abs(second["x"] - third["x"]) <= 1
                 assert third["y"] > second["y"]
                 assert abs(second["width"] - third["width"]) <= 1
@@ -2073,7 +2073,7 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
     control_rail, diagnosis_canvas, result_workspace = metrics["regions"]
     assert abs(control_rail["width"] - 300) <= 1
     assert abs(control_rail["y"] - diagnosis_canvas["y"]) <= 1
-    assert control_rail["x"] < diagnosis_canvas["x"]
+    assert control_rail["x"] + control_rail["width"] <= diagnosis_canvas["x"] + 1
     assert abs(diagnosis_canvas["x"] - result_workspace["x"]) <= 1
     assert result_workspace["y"] > diagnosis_canvas["y"]
     assert abs(diagnosis_canvas["width"] - result_workspace["width"]) <= 1
@@ -2097,7 +2097,16 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             replay_label.wait_for(timeout=30_000)
             replay_button = page.get_by_role("button", name="加载回放案例", exact=True)
             replay_button.wait_for(timeout=30_000)
+            assert replay_button.is_enabled()
             replay_boxes = [replay_label.bounding_box(), replay_button.bounding_box()]
+            keyboard_replay = _tab_to(
+                page,
+                expected_id="replay-action",
+                expected_name="加载回放案例",
+                limit=20,
+            )
+            keyboard_replay.press("Enter")
+            _wait_for_terminal_status(page, "✓ 已完成")
             metrics = page.evaluate(
                 """() => ({
                     regions: [
