@@ -907,8 +907,8 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                             if (box.width * box.height < 2000 || outsideViewport) {
                                 return false;
                             }
-                            const parsed = parse(getComputedStyle(element).backgroundColor);
-                            return parsed && parsed.alpha > 0 && luminance(parsed.rgb) > 0.45;
+                            return !element.closest('img, canvas, video, svg') &&
+                                luminance(effectiveBackground(element)) > 0.45;
                         })
                         .map(element => ({
                             selector: `${element.tagName.toLowerCase()}#${element.id}.` +
@@ -953,7 +953,7 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                             };
                         });
                     const mediaMasks = [...document.querySelectorAll(
-                        'img, canvas, video, svg, #diagnostic-card'
+                        '#diagnostic-card img, img, canvas, video, svg'
                     )].map(element => {
                         const box = element.getBoundingClientRect();
                         return {left: box.left, top: box.top, right: box.right, bottom: box.bottom};
@@ -1040,6 +1040,52 @@ def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
             assert geometry["title"]["right"] <= geometry["status"]["x"]
             assert geometry["status"]["right"] <= geometry["metadata"]["x"]
             assert abs(geometry["accessibleStatus"]["x"] - geometry["status"]["x"]) <= 2
+
+            mobile_context = browser.new_context(viewport={"width": 768, "height": 1024})
+            try:
+                mobile_page = mobile_context.new_page()
+                mobile_page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+                mobile_page.locator(".gradio-container").wait_for(timeout=30_000)
+                mobile_page.locator("#replay-action").click()
+                _wait_for_terminal_status(mobile_page, "✓ 已完成")
+                mobile_page.evaluate("window.scrollTo(0, 0)")
+                mobile_geometry = mobile_page.evaluate(
+                    r"""() => {
+                        const carrier = [...document.querySelectorAll('.command-bar > .styler')]
+                            .find(element => element.children.length >= 4);
+                        if (!carrier) return {missing: true};
+                        const rect = selector => {
+                            const element = carrier.querySelector(selector);
+                            if (!element) return null;
+                            const box = element.getBoundingClientRect();
+                            return {x: box.x, right: box.right, y: box.y, bottom: box.bottom};
+                        };
+                        return {
+                            display: getComputedStyle(carrier).display,
+                            columns: getComputedStyle(carrier).gridTemplateColumns
+                                .trim().split(/\s+/).filter(Boolean).length,
+                            viewport: innerWidth,
+                            items: [
+                                rect('.product-title'),
+                                rect('#diagnostic-status'),
+                                rect('#accessible-status'),
+                                rect('#result-metadata'),
+                            ],
+                        };
+                    }"""
+                )
+                assert not mobile_geometry.get("missing"), mobile_geometry
+                assert mobile_geometry["display"] == "grid", mobile_geometry
+                assert mobile_geometry["columns"] == 1, mobile_geometry
+                assert all(item and 0 <= item["x"] <= item["right"] <= mobile_geometry["viewport"]
+                           for item in mobile_geometry["items"]), mobile_geometry
+                stacked = sorted(mobile_geometry["items"], key=lambda item: item["y"])
+                assert all(
+                    following["y"] >= previous["bottom"] - 1
+                    for previous, following in zip(stacked, stacked[1:], strict=False)
+                ), mobile_geometry
+            finally:
+                mobile_context.close()
         finally:
             context.close()
             browser.close()
@@ -1138,16 +1184,31 @@ def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
                             return box.width > 0 && box.height > 0 && box.bottom > 0 &&
                                 box.top < innerHeight;
                         };
-                        const leaked = [...document.querySelectorAll('#result-workspace *')]
+                        const findLeaks = () => [
+                            ...document.querySelectorAll('.result-workspace *')
+                        ]
                             .filter(element => {
                                 const box = element.getBoundingClientRect();
                                 return visible(element) && box.width * box.height >= 2000 &&
-                                    !element.closest('img, canvas, video, svg, #diagnostic-card') &&
+                                    !element.closest('img, canvas, video, svg') &&
                                     luminance(background(element)) > 0.45;
                             })
                             .map(element => (
                                 `${element.tagName.toLowerCase()}#${element.id}.${element.className}`
                             ));
+                        const card = selectors.probeCard
+                            ? document.querySelector('#diagnostic-card')
+                            : null;
+                        const originalBackground = card?.style.backgroundColor;
+                        if (card) card.style.setProperty(
+                            'background-color', 'rgb(255, 255, 255)', 'important'
+                        );
+                        const probeLeaks = findLeaks();
+                        if (card) {
+                            card.style.backgroundColor = originalBackground;
+                            card.style.removeProperty('background-color');
+                        }
+                        const leaked = findLeaks();
                         const text = selectors.text.map(selector => {
                             const element = document.querySelector(selector);
                             return {
@@ -1164,10 +1225,11 @@ def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
                                 luminance: element ? luminance(background(element)) : 1,
                             };
                         });
-                        return {leaked, text, audio};
+                        return {leaked, probeLeaks, text, audio};
                     }""",
                     {
                         "text": list(text_selectors),
+                        "probeCard": surface_selector == "#diagnostic-card",
                         "audio": (
                             (
                                 "#diagnostic-audio",
@@ -1179,6 +1241,10 @@ def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
                         ),
                     },
                 )
+                if surface_selector == "#diagnostic-card":
+                    assert any(
+                        "#diagnostic-card" in value for value in metrics["probeLeaks"]
+                    ), metrics
                 assert metrics["leaked"] == [], metrics["leaked"]
                 assert all(
                     target["visible"] and target["contrast"] >= 4.5
