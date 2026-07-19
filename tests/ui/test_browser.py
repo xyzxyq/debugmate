@@ -803,7 +803,10 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
             status.get_by_text("✓ 已完成", exact=False).wait_for(timeout=90_000)
             assert "离线回放" in status.inner_text()
             metadata = page.locator("#result-metadata").first.inner_text()
-            page.get_by_role("tab", name="引用与下载", exact=True).click()
+            download_tab = page.get_by_role("tab", name="引用与下载", exact=True)
+            download_tab.focus()
+            download_tab.press("Enter")
+            expect(download_tab).to_have_attribute("aria-selected", "true")
             download_surface = page.locator("#download-metadata").first
             expect(download_surface).to_contain_text("离线回放", timeout=30_000)
             download_metadata = download_surface.inner_text()
@@ -916,6 +919,265 @@ def _body_overflow(page) -> bool:
     )
 
 
+def _focused_control(page) -> tuple[object, dict[str, object]]:
+    locator = page.locator(
+        ":focus:is(button, a, input, textarea, select, audio, [role='tab'], [role='button'])"
+    ).last
+    locator.wait_for(state="attached")
+    page.wait_for_function(
+        "element => parseFloat(getComputedStyle(element).outlineOffset) >= 2",
+        arg=locator.element_handle(),
+    )
+    metrics = locator.evaluate(
+        """element => {
+            const style = getComputedStyle(element);
+            return {
+                id: element.id,
+                name: element.getAttribute('aria-label') ||
+                    element.labels?.[0]?.innerText?.trim() ||
+                    element.innerText?.trim() || '',
+                outlineStyle: style.outlineStyle,
+                outlineWidth: parseFloat(style.outlineWidth),
+                outlineOffset: parseFloat(style.outlineOffset),
+            };
+        }"""
+    )
+    return locator, metrics
+
+
+def _assert_visible_focus(page) -> tuple[object, dict[str, object]]:
+    locator, metrics = _focused_control(page)
+    assert metrics["outlineStyle"] not in {"none", "hidden"}
+    assert metrics["outlineWidth"] >= 2
+    assert metrics["outlineOffset"] >= 2
+    return locator, metrics
+
+
+def _tab_to(page, *, expected_id: str | None = None, expected_name: str, limit: int = 12):
+    for _step in range(limit):
+        page.keyboard.press("Tab")
+        if (
+            page.locator(
+                ":focus:is(button, a, input, textarea, select, audio, "
+                "[role='tab'], [role='button'])"
+            ).count()
+            == 0
+        ):
+            continue
+        locator, metrics = _assert_visible_focus(page)
+        if (expected_id is None or metrics["id"] == expected_id) and expected_name in str(
+            metrics["name"]
+        ):
+            return locator
+    raise AssertionError(f"Tab order did not reach {expected_name!r} within {limit} steps")
+
+
+def _shift_tab_to(page, *, expected_name: str, limit: int = 12):
+    for _step in range(limit):
+        page.keyboard.press("Shift+Tab")
+        if (
+            page.locator(
+                ":focus:is(button, a, input, textarea, select, audio, "
+                "[role='tab'], [role='button'])"
+            ).count()
+            == 0
+        ):
+            continue
+        locator, metrics = _assert_visible_focus(page)
+        if expected_name in str(metrics["name"]):
+            return locator
+    raise AssertionError(f"Reverse tab order did not reach {expected_name!r} within {limit} steps")
+
+
+def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+
+            positive_tabindex = page.locator("[tabindex]").evaluate_all(
+                "elements => elements.map(element => Number(element.tabIndex))"
+                ".filter(value => value > 0)"
+            )
+            assert positive_tabindex == []
+            _tab_to(
+                page,
+                expected_id="local-preview",
+                expected_name="生成本地脱敏预览",
+                limit=20,
+            )
+            _tab_to(page, expected_name="固定回放案例", limit=3)
+            replay_button = _tab_to(
+                page,
+                expected_id="replay-action",
+                expected_name="加载回放案例",
+                limit=2,
+            )
+            replay_button.press("Enter")
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            announced = page.locator('[role="status"][aria-live="polite"]')
+            expect(announced).to_have_text("状态：已完成", timeout=30_000)
+
+            _tab_to(page, expected_name="异常类型", limit=20)
+            for field_label in ("关键回溯行", "包/模块", "版本", "设备", "路径"):
+                _tab_to(page, expected_name=field_label, limit=2)
+            _tab_to(page, expected_name="确认创建新运行", limit=2)
+
+            command_accordion = _tab_to(page, expected_name="命令说明（仅供查看）", limit=3)
+            command_accordion.press("Space")
+            expect(command_accordion).to_have_class(re.compile(r"\bopen\b"))
+            expect(page.locator("#diagnostic-commands")).to_be_visible()
+
+            _tab_to(page, expected_name="文字报告", limit=3)
+            diagnosis_tab = _tab_to(page, expected_name="诊断卡", limit=2)
+            diagnosis_tab.press("Enter")
+            expect(page.get_by_role("tab", name="诊断卡", exact=True)).to_have_attribute(
+                "aria-selected", "true"
+            )
+            audio_tab = _tab_to(page, expected_name="语音复盘", limit=2)
+            audio_tab.press("Enter")
+            expect(page.get_by_role("tab", name="语音复盘", exact=True)).to_have_attribute(
+                "aria-selected", "true"
+            )
+
+            _tab_to(page, expected_name="引用与下载", limit=2)
+            audio_control = _tab_to(page, expected_name="Play", limit=8)
+            audio_control.press("Space")
+            pause_control = page.get_by_role("button", name="Pause", exact=True)
+            expect(pause_control).to_be_visible()
+
+            download_tab = _shift_tab_to(page, expected_name="引用与下载", limit=8)
+            download_tab.press("Enter")
+            expect(page.get_by_role("tab", name="引用与下载", exact=True)).to_have_attribute(
+                "aria-selected", "true"
+            )
+            download_control = _tab_to(page, expected_name="下载完整证据包", limit=60)
+            with page.expect_download(timeout=30_000):
+                download_control.press("Enter")
+        finally:
+            context.close()
+            browser.close()
+
+
+def test_vq_14_statuses_keep_icon_and_text_under_test_side_grayscale(
+    browser_base_url: str,
+) -> None:
+    scenarios = (
+        ("vq-02-replay", "✓", "已完成", "↺", "离线回放"),
+        ("vq-06-tts-failed", "⚠", "部分完成", None, None),
+        ("vq-08-source-invalid", "✕", "诊断失败", None, None),
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            for scenario, icon, label, mode_icon, mode_label in scenarios:
+                context, _capability = _qa_context(browser, browser_base_url)
+                try:
+                    _activate_qa(context, browser_base_url, scenario)
+                    page = context.new_page()
+                    page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+                    page.locator(".gradio-container").wait_for(timeout=30_000)
+                    page.add_style_tag(content="html { filter: grayscale(1) !important; }")
+                    page.locator("#replay-action").click()
+                    _wait_for_terminal_status(page, f"{icon} {label}")
+                    status_text = page.locator("#diagnostic-status").inner_text()
+                    assert icon in status_text and label in status_text
+                    if mode_icon is not None and mode_label is not None:
+                        assert mode_icon in status_text and mode_label in status_text
+                    assert (
+                        page.evaluate("() => getComputedStyle(document.documentElement).filter")
+                        == "grayscale(1)"
+                    )
+                finally:
+                    context.close()
+        finally:
+            browser.close()
+
+
+def test_vq_15_completed_state_remains_reachable_at_two_x_browser_zoom_geometry(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        try:
+            page = context.new_page()
+            page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator("#replay-action").click()
+            _wait_for_terminal_status(page, "✓ 已完成")
+
+            assert page.evaluate("() => innerWidth") == 1366
+            cdp = context.new_cdp_session(page)
+            cdp.send(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 683,
+                    "height": 384,
+                    "screenWidth": 1366,
+                    "screenHeight": 768,
+                    "deviceScaleFactor": 2,
+                    "mobile": False,
+                },
+            )
+            page.wait_for_function("() => innerWidth === 683 && devicePixelRatio === 2")
+
+            page.locator("#diagnostic-status").scroll_into_view_if_needed()
+            assert page.locator("#diagnostic-status").is_visible()
+            primary_action = page.get_by_role("button", name="确认修改并重新诊断", exact=True)
+            primary_action.scroll_into_view_if_needed()
+            assert primary_action.is_visible()
+            download_tab = page.get_by_role("tab", name="引用与下载", exact=True)
+            download_tab.focus()
+            download_tab.press("Enter")
+            expect(download_tab).to_have_attribute("aria-selected", "true")
+            download = page.locator("#download-result")
+            download.scroll_into_view_if_needed()
+            assert download.is_visible()
+            metrics = page.evaluate(
+                """() => ({
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                    clipped: [...document.querySelectorAll(
+                        '#diagnostic-status, [role=tab], #download-result'
+                    )].some(element =>
+                        element.scrollWidth > element.clientWidth + 1 ||
+                        element.scrollHeight > element.clientHeight + 1
+                    ),
+                    tabOverlap: [...document.querySelectorAll('[role=tab]')]
+                        .some((element, index, elements) => {
+                            const first = element.getBoundingClientRect();
+                            return elements.slice(index + 1).some(other => {
+                                const second = other.getBoundingClientRect();
+                                return first.left < second.right - 1 &&
+                                    first.right > second.left + 1 &&
+                                    first.top < second.bottom - 1 &&
+                                    first.bottom > second.top + 1;
+                            });
+                        }),
+                })"""
+            )
+            assert metrics["scrollWidth"] == metrics["clientWidth"]
+            assert metrics["clipped"] is False
+            assert metrics["tabOverlap"] is False
+            action_metrics = primary_action.evaluate(
+                "element => ({clientWidth: element.clientWidth, "
+                "scrollWidth: element.scrollWidth, clientHeight: element.clientHeight, "
+                "scrollHeight: element.scrollHeight})"
+            )
+            assert action_metrics["scrollWidth"] <= action_metrics["clientWidth"] + 1
+            assert action_metrics["scrollHeight"] <= action_metrics["clientHeight"] + 1
+        finally:
+            context.close()
+            browser.close()
+
+
 def test_vq_04_long_content_commands_and_vq_05_tall_card_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -947,16 +1209,11 @@ def test_vq_04_long_content_commands_and_vq_05_tall_card_in_real_edge(
             expect(commands).to_contain_text("windows_powershell")
             expect(commands).to_contain_text("EXPECTED-LONG-COMMAND-END")
             expect(commands).to_contain_text("ROLLBACK-LONG-COMMAND-END")
-            command_metrics = commands.locator("xpath=self | .//*").evaluate_all(
-                "elements => elements.map(element => ({clientWidth: element.clientWidth, "
-                "scrollWidth: element.scrollWidth, overflowX: "
-                "getComputedStyle(element).overflowX}))"
-            )
-            assert any(
-                metric["scrollWidth"] > metric["clientWidth"] > 0
-                and metric["overflowX"] in {"auto", "scroll"}
-                for metric in command_metrics
-            )
+            command_box = commands.bounding_box()
+            assert command_box is not None
+            assert command_box["x"] >= 0
+            assert command_box["x"] + command_box["width"] <= page.evaluate("innerWidth") + 1
+            assert not _body_overflow(page)
             expect(
                 page.get_by_text(
                     "诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。", exact=True
@@ -1202,7 +1459,10 @@ def test_vq_10_single_field_correction_creates_new_identity_and_preserves_old_ru
             )
             assert initial_session_state["status"] == "completed"
             assert initial_session_state["source_run_id"] == old_run_id
-            page.get_by_role("tab", name="引用与下载", exact=True).click()
+            download_tab = page.get_by_role("tab", name="引用与下载", exact=True)
+            download_tab.focus()
+            download_tab.press("Enter")
+            expect(download_tab).to_have_attribute("aria-selected", "true")
             old_manifest = _download_verified_bundle(page, context, partial=False)
             old_download_metadata = page.locator("#download-metadata").inner_text()
             assert old_run_id in old_download_metadata

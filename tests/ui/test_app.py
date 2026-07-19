@@ -224,9 +224,18 @@ def test_build_app_has_native_three_region_workbench_and_no_unsafe_components() 
         "页面仅展示已验证的脱敏输入与结果。",
     ):
         assert text in rendered
-    assert "html" not in {component["type"] for component in config["components"]}
+    html_components = [
+        component for component in config["components"] if component["type"] == "html"
+    ]
+    assert len(html_components) == 1
+    assert html_components[0]["props"]["elem_id"] == "accessible-status"
+    assert html_components[0]["props"]["html_template"] == (
+        '<p role="status" aria-live="polite" aria-atomic="true">${value}</p>'
+    )
     assert "subprocess" not in Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
-    assert "gr.HTML" not in Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
+    source = Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
+    assert source.count("gr.HTML(") == 1
+    assert "<script" not in source.lower()
     assert "#workbench-grid:has(> #workbench-grid)" in app.css
     assert "minmax(280px, 3fr) minmax(360px, 4fr) minmax(440px, 5fr)" in app.css
     assert "gap: 16px;" in app.css
@@ -751,7 +760,7 @@ def test_retry_control_is_disabled_outside_verified_partial_terminal_state(
     assert (case_id, result_id) == (None, None)
 
 
-def test_live_callback_sends_postprocessed_dataframe_cells_and_one_metadata_row() -> None:
+def test_live_callback_sends_accessible_read_only_tables_and_one_metadata_row() -> None:
     app = build_app(_Service())
     callback = next(
         block_fn.fn
@@ -772,22 +781,12 @@ def test_live_callback_sends_postprocessed_dataframe_cells_and_one_metadata_row(
     assert frame[1].count("run_") == 1
     fact_value = frame[28]["value"]
     citation_value = frame[29]["value"]
-    assert fact_value["headers"] == [
-        "事实 ID",
-        "观察或结论",
-        "证据 ID",
-        "来源",
-        "支持关系",
-    ]
-    assert any("ModuleNotFoundError" in cell for row in fact_value["data"] for cell in row)
-    assert any(cell.startswith("evidence_") for row in fact_value["data"] for cell in row)
-    assert citation_value["headers"] == ["证据 ID", "标题", "官方来源", "版本范围"]
-    assert any(
-        cell == "https://docs.python.org/3/library/exceptions.html"
-        for row in citation_value["data"]
-        for cell in row
-    )
-    assert any(cell == "ModuleNotFoundError" for row in citation_value["data"] for cell in row)
+    assert "| 事实 ID | 观察或结论 | 证据 ID | 来源 | 支持关系 |" in fact_value
+    assert "ModuleNotFoundError" in fact_value
+    assert "evidence_" in fact_value
+    assert "| 证据 ID | 标题 | 官方来源 | 版本范围 |" in citation_value
+    assert "https://docs.python.org/3/library/exceptions.html" in citation_value
+    assert "ModuleNotFoundError" in citation_value
 
 
 def test_gap_01_archive_preserves_the_original_browser_failure() -> None:
@@ -849,16 +848,9 @@ def test_long_content_replay_and_commands_are_strict_read_only_surfaces() -> Non
     assert enabled("long-content")["interactive"] is True
     assert enabled("../long-content")["interactive"] is False
     assert enabled('{"fixture_id":"long-content"}')["interactive"] is False
-    assert command_table["type"] == "dataframe"
-    assert command_table["props"]["interactive"] is False
-    assert command_table["props"]["headers"] == [
-        "步骤",
-        "命令",
-        "平台",
-        "影响",
-        "预期结果",
-        "回退说明",
-    ]
+    assert command_table["type"] == "markdown"
+    assert command_table["props"]["value"].startswith("### 已验证诊断命令")
+    assert "| 步骤 | 命令 | 平台 | 影响 | 预期结果 | 回退说明 |" in command_table["props"]["value"]
 
 
 def test_completed_payload_commands_are_exactly_derived_from_diagnosis_record() -> None:

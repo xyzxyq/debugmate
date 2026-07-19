@@ -59,15 +59,19 @@ WORKBENCH_CSS = "\n".join(
         "#workbench-grid:has(> #workbench-grid) .region { border-radius: 10px; padding: 12px; }",
         ".metadata { font-family: Cascadia Mono, Consolas, monospace; font-size: 12px; }",
         ".metadata { overflow-wrap: anywhere; }",
+        ".tab-container.visually-hidden[aria-hidden='true'] { display: none !important; }",
         ".report-panel { max-height: 440px; overflow: auto; }",
         ".report-panel pre { max-width: 100%; overflow-x: auto; }",
-        "#diagnostic-commands { max-width: 100%; overflow: auto; }",
+        "#fact-table, #citation-table, #diagnostic-commands { max-width: 100%; overflow: auto; }",
         "#diagnostic-commands td:nth-child(2) { white-space: pre; }",
         (
             "#diagnostic-card img { display: block; max-width: 100%; "
             "height: auto; object-fit: contain; }"
         ),
-        ":focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px; }",
+        (
+            ":focus-visible { outline: 2px solid var(--accent) !important; "
+            "outline-offset: 2px !important; }"
+        ),
         (
             "@media (max-width: 1199px) { #workbench-grid:has(> #workbench-grid) "
             "{ grid-template-columns: 5fr 7fr; } }"
@@ -105,6 +109,29 @@ _RESULT_ID = "result_"
 _CONTENT_PREFIX = "/debugmate-content/"
 _CONTENT_ROUTE = f"{_CONTENT_PREFIX}{{token}}"
 _CONTENT_CALLBACKS_ATTR = "_debugmate_content_callbacks"
+_FACT_HEADERS = ("事实 ID", "观察或结论", "证据 ID", "来源", "支持关系")
+_COMMAND_HEADERS = ("步骤", "命令", "平台", "影响", "预期结果", "回退说明")
+_CITATION_HEADERS = ("证据 ID", "标题", "官方来源", "版本范围")
+
+
+def _markdown_table(title: str, headers: tuple[str, ...], rows: tuple[tuple[str, ...], ...]) -> str:
+    """Render verified scalar rows as a non-interactive accessible Markdown table."""
+
+    def cell(value: object) -> str:
+        return (
+            str(value)
+            .replace("\\", "\\\\")
+            .replace("|", "\\|")
+            .replace("\r", " ")
+            .replace("\n", " ")
+        )
+
+    header = "| " + " | ".join(cell(item) for item in headers) + " |"
+    separator = "| " + " | ".join("---" for _item in headers) + " |"
+    body = ["| " + " | ".join(cell(item) for item in row) + " |" for row in rows]
+    return "\n".join((f"### {title}", "", header, separator, *body))
+
+
 _DEFAULT_CONTENT_ORIGIN = "http://127.0.0.1:7860"
 
 
@@ -947,6 +974,15 @@ def build_app(
         with gr.Group(elem_classes="status-bar"):
             gr.Markdown("# DebugMate 诊断工作台")
             status = gr.Markdown("● 等待诊断", elem_id="diagnostic-status")
+            accessible_status = gr.HTML(
+                "状态：等待诊断",
+                html_template=(
+                    '<p role="status" aria-live="polite" aria-atomic="true">${value}</p>'
+                ),
+                elem_id="accessible-status",
+                container=False,
+                padding=False,
+            )
             result_metadata = gr.Markdown("", elem_id="result-metadata", elem_classes="metadata")
         with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes="region"):
@@ -1009,19 +1045,14 @@ def build_app(
             with gr.Column(elem_classes="region"):
                 gr.Markdown("## 诊断与证据")
                 category_confidence = gr.Markdown("类别：等待诊断\n\n置信度：暂无")
-                fact_table = gr.Dataframe(
-                    headers=["事实 ID", "观察或结论", "证据 ID", "来源", "支持关系"],
-                    datatype=["str", "str", "str", "str", "str"],
-                    interactive=False,
-                    label="事实与证据",
+                fact_table = gr.Markdown(
+                    _markdown_table("事实与证据", _FACT_HEADERS, ()),
+                    elem_id="fact-table",
                 )
                 with gr.Accordion("命令说明（仅供查看）", open=False):
                     gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
-                    command_table = gr.Dataframe(
-                        headers=["步骤", "命令", "平台", "影响", "预期结果", "回退说明"],
-                        datatype=["str", "str", "str", "str", "str", "str"],
-                        interactive=False,
-                        label="已验证诊断命令",
+                    command_table = gr.Markdown(
+                        _markdown_table("已验证诊断命令", _COMMAND_HEADERS, ()),
                         elem_id="diagnostic-commands",
                     )
                 failure = gr.Markdown("", elem_id="failure-details")
@@ -1073,11 +1104,8 @@ def build_app(
                             value="复盘稿会与语音一并经过验证后显示。",
                         )
                     with gr.Tab("引用与下载"):
-                        citation_table = gr.Dataframe(
-                            headers=["证据 ID", "标题", "官方来源", "版本范围"],
-                            datatype=["str", "str", "str", "str"],
-                            interactive=False,
-                            label="引用",
+                        citation_table = gr.Markdown(
+                            _markdown_table("引用", _CITATION_HEADERS, ()),
                             elem_id="citation-table",
                         )
                         gr.File(
@@ -1130,6 +1158,7 @@ def build_app(
             download_metadata,
             audio_metadata,
             command_table,
+            accessible_status,
         ]
 
         def apply_payload(
@@ -1178,17 +1207,18 @@ def build_app(
                 gr.update(value=payload.redacted_input),
                 gr.update(),
                 gr.update(value=f"类别：{payload.category}\n\n置信度：{payload.confidence}"),
-                gr.update(value=fact_table.postprocess(list(payload.fact_rows)).model_dump()),
-                gr.update(
-                    value=citation_table.postprocess(list(payload.citation_rows)).model_dump()
-                ),
+                gr.update(value=_markdown_table("事实与证据", _FACT_HEADERS, payload.fact_rows)),
+                gr.update(value=_markdown_table("引用", _CITATION_HEADERS, payload.citation_rows)),
                 gr.update(value=payload.recap_text),
                 retry_update,
                 retry_case_id,
                 retry_result_id,
                 gr.update(value=""),
                 gr.update(value=payload.view.audio_metadata or ""),
-                gr.update(value=command_table.postprocess(list(payload.command_rows)).model_dump()),
+                gr.update(
+                    value=_markdown_table("已验证诊断命令", _COMMAND_HEADERS, payload.command_rows)
+                ),
+                payload.view.accessible_status,
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
