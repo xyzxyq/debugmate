@@ -214,6 +214,17 @@ def test_font_preparation_prefers_project_and_rejects_links(tmp_path: Path) -> N
         )
 
 
+def test_font_preparation_ignores_foreign_platform_absolute_candidates(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="no approved font"):
+        prepare_generation_context(
+            project_root=tmp_path,
+            project_font_candidates=(),
+            windows_font_candidates=(Path("C:/Windows/Fonts/missing.ttf"),),
+        )
+
+
 def test_font_preparation_rejects_linked_root_and_linked_ancestor(tmp_path: Path) -> None:
     actual = tmp_path / "actual"
     (actual / "child").mkdir(parents=True)

@@ -199,7 +199,7 @@ def _partial_state_for_app(failed_stage: str) -> ResultViewState:
     )
 
 
-def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
+def test_build_app_has_macos_student_learning_workbench_and_no_unsafe_components() -> None:
     app = build_app(_Service())
     config = app.get_config_file()
     rendered = repr(config)
@@ -275,13 +275,14 @@ def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
     } <= elem_ids
 
     for text in (
-        "DebugMate 诊断工作台",
-        "操作控制台",
-        "新诊断",
-        "固定回放",
+        "DebugMate 学习诊断助手",
+        "开始诊断",
+        "示例案例",
         "抽取字段与纠错",
-        "诊断主画布",
-        "结果工作区",
+        "问题概览",
+        "下一步怎么做",
+        "详细依据",
+        "结果查看",
         "文字报告",
         "诊断卡",
         "语音复盘",
@@ -305,28 +306,38 @@ def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
     assert "<script" not in source.lower()
     assert "#workbench-grid:has(> #workbench-grid)" in app.css
     approved_colors = {
-        "#0b0f14",
-        "#111820",
-        "#17212b",
-        "#e8edf2",
-        "#91a0ad",
-        "#293642",
-        "#27b3c2",
-        "#e7a84b",
-        "#ef6b73",
-        "#4ecb8d",
+        "#f5f7fb",
+        "#ffffff",
+        "#f8fafc",
+        "#edf2f7",
+        "#0f172a",
+        "#5f6b7a",
+        "#d8dee8",
+        "#007aff",
+        "#e9f2ff",
+        "#fff7ed",
+        "#ff9f0a",
+        "#fff1f2",
+        "#ff3b30",
+        "#ecfdf3",
+        "#34c759",
     }
     for token in (
-        "--canvas: #0b0f14",
-        "--surface-1: #111820",
-        "--surface-2: #17212b",
-        "--text: #e8edf2",
-        "--muted: #91a0ad",
-        "--border: #293642",
-        "--primary: #27b3c2",
-        "--warning: #e7a84b",
-        "--failure: #ef6b73",
-        "--success: #4ecb8d",
+        "--canvas: #f5f7fb",
+        "--surface-1: #ffffff",
+        "--surface-2: #f8fafc",
+        "--sidebar: #edf2f7",
+        "--text: #0f172a",
+        "--muted: #5f6b7a",
+        "--border: #d8dee8",
+        "--primary: #007aff",
+        "--primary-soft: #e9f2ff",
+        "--warning-surface: #fff7ed",
+        "--warning: #ff9f0a",
+        "--failure-surface: #fff1f2",
+        "--failure: #ff3b30",
+        "--success-surface: #ecfdf3",
+        "--success: #34c759",
     ):
         assert token in app.css
     css_hex_colors = {
@@ -339,13 +350,15 @@ def test_build_app_has_dark_command_center_and_no_unsafe_components() -> None:
         "minmax(280px, 0.72fr) minmax(360px, 0.95fr) minmax(460px, 1.35fr)"
         in app.css
     )
-    assert "gap: 12px;" in app.css
+    assert "gap: 14px;" in app.css
     assert ".command-bar { position: sticky;" in app.css
     assert ".control-rail" in app.css
     assert ".diagnosis-canvas" in app.css
     assert ".result-workspace" in app.css
     assert ".section-kicker" in app.css
     assert ".correction-panel" in app.css
+    assert "box-shadow:" in app.css
+    assert "backdrop-filter: blur(18px)" in app.css
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "@media (max-width: 639px)" in app.css
@@ -908,7 +921,7 @@ def test_replay_default_is_allowlisted_and_only_enables_its_control() -> None:
     replay = next(
         component
         for component in config["components"]
-        if component["type"] == "dropdown" and component["props"].get("label") == "固定回放案例"
+        if component["type"] == "dropdown" and component["props"].get("label") == "示例案例"
     )
     replay_button = next(
         component
@@ -935,7 +948,7 @@ def test_long_content_replay_and_commands_are_strict_read_only_surfaces() -> Non
     replay = next(
         component
         for component in config["components"]
-        if component["type"] == "dropdown" and component["props"].get("label") == "固定回放案例"
+        if component["type"] == "dropdown" and component["props"].get("label") == "示例案例"
     )
     command_table = next(
         component

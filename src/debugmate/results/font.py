@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from debugmate.hashing import sha256_file
 from debugmate.results.contracts import (
@@ -44,6 +44,9 @@ def prepare_generation_context(
     windows_font_candidates: tuple[Path, ...] = (
         Path("C:/Windows/Fonts/msyh.ttc"),
         Path("C:/Windows/Fonts/simhei.ttf"),
+        Path("/System/Library/Fonts/STHeiti Light.ttc"),
+        Path("/System/Library/Fonts/Supplemental/Songti.ttc"),
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
     ),
     report_contract_version: str = "report-v1",
     card_contract_version: str = "card-v1",
@@ -65,6 +68,8 @@ def prepare_generation_context(
         for raw in windows_font_candidates:
             candidate = Path(raw)
             if not candidate.is_absolute():
+                if PureWindowsPath(str(raw)).is_absolute():
+                    continue
                 raise ValueError("Windows font allowlist entries must be absolute")
             resolved = candidate.resolve()
             if _has_unsafe_ancestor(candidate.absolute()) or resolved != candidate.absolute():
