@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from debugmate.contracts import DiagnosisRecord
 from debugmate.results.contracts import ResultMode, ResultStatus, ResultViewState
 
 PHASE4_STAGES: tuple[str, ...] = (
@@ -84,8 +85,12 @@ class ComponentViewModel:
     """All UI visibility/copy facts, derived only from ``ResultViewState``."""
 
     mode_badge: str
+    state_tone: str
     status_badge: str
     accessible_status: str
+    overview_heading: str
+    overview_body: str
+    secondary_disclosure_visible: bool
     primary_action: str | None
     retry_label: str | None
     actions_enabled: bool
@@ -107,6 +112,46 @@ class ComponentViewModel:
     empty_heading: str | None
     empty_body: str | None
     evidence_empty: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedDiagnosisPresentation:
+    """Student-facing facts derived only from one strictly validated diagnosis."""
+
+    category: str
+    confidence: str
+    root_cause: str | None
+    next_action: str | None
+    next_action_kind: str | None
+
+
+def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPresentation:
+    """Select the strongest cause and first safe action without inventing advice."""
+
+    if not isinstance(diagnosis, DiagnosisRecord):
+        raise TypeError("render_verified_diagnosis requires DiagnosisRecord")
+
+    strongest = max(
+        diagnosis.root_cause_candidates,
+        key=lambda candidate: candidate.confidence,
+        default=None,
+    )
+    if diagnosis.checks:
+        action = diagnosis.checks[0]
+        action_kind = "检查"
+    elif diagnosis.fixes:
+        action = diagnosis.fixes[0]
+        action_kind = "修复"
+    else:
+        action = None
+        action_kind = None
+    return VerifiedDiagnosisPresentation(
+        category=str(diagnosis.category),
+        confidence=f"{diagnosis.confidence:.2f}",
+        root_cause=None if strongest is None else strongest.cause,
+        next_action=None if action is None else action.command,
+        next_action_kind=action_kind,
+    )
 
 
 def _mode_badge(state: ResultViewState) -> str:
@@ -221,8 +266,15 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
         action = "加载回放案例" if state.mode is ResultMode.REPLAY else "开始诊断"
         return ComponentViewModel(
             **common,
+            state_tone="neutral",
             status_badge="● 等待诊断",
             accessible_status="状态：等待诊断",
+            overview_heading="两步开始诊断",
+            overview_body=(
+                "1. 生成脱敏预览，确认隐私信息已处理。\n\n"
+                "2. 确认并开始诊断，结果会显示在下方。"
+            ),
+            secondary_disclosure_visible=False,
             primary_action=action,
             retry_label=None,
             actions_enabled=True,
@@ -244,8 +296,12 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
         completed = len(state.completed_stages)
         return ComponentViewModel(
             **common,
+            state_tone="blue",
             status_badge=f"▶ 正在生成结果 · {stage_label}",
             accessible_status=f"状态：正在生成结果，{stage_label}",
+            overview_heading=f"▶ 正在生成结果 · {stage_label}",
+            overview_body=f"正在{stage_label}，请勿重复提交。已完成 {completed} 个阶段。",
+            secondary_disclosure_visible=False,
             primary_action=None,
             retry_label=None,
             actions_enabled=False,
@@ -265,8 +321,12 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
     if state.status is ResultStatus.COMPLETED:
         return ComponentViewModel(
             **common,
+            state_tone="green",
             status_badge="✓ 已完成",
             accessible_status="状态：已完成",
+            overview_heading="✓ 诊断完成",
+            overview_body="先查看原因与下一步，再按需展开完整证据和技术详情。",
+            secondary_disclosure_visible=True,
             primary_action="确认修改并重新诊断",
             retry_label=None,
             actions_enabled=True,
@@ -287,8 +347,12 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
         assert state.failure is not None
         return ComponentViewModel(
             **common,
+            state_tone="amber",
             status_badge="⚠ 部分完成",
             accessible_status="状态：部分完成",
+            overview_heading="⚠ 部分结果可用",
+            overview_body="已完成的结果仍可查看；请根据恢复说明只重试失败阶段。",
+            secondary_disclosure_visible=True,
             primary_action=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
             retry_label=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
             actions_enabled=True,
@@ -311,8 +375,12 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
     assert state.failure is not None
     return ComponentViewModel(
         **common,
+        state_tone="red",
         status_badge="✕ 诊断失败",
         accessible_status="状态：诊断失败",
+        overview_heading="✕ 本次诊断未生成可信结果",
+        overview_body="请查看恢复说明与安全错误码后重新开始。",
+        secondary_disclosure_visible=True,
         primary_action=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
         retry_label=f"重试：{_retry_copy(state.failure.retry_scope)[0]}",
         actions_enabled=True,

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from debugmate.contracts import DiagnosisRecord
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ArtifactIdentity,
@@ -12,7 +15,13 @@ from debugmate.results.contracts import (
     ResultViewState,
     SafeFailure,
 )
-from debugmate.ui.presentation import PHASE4_STAGES, render_view_state
+from debugmate.ui.presentation import (
+    PHASE4_STAGES,
+    render_verified_diagnosis,
+    render_view_state,
+)
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 IDENTITY = ArtifactIdentity(
     case_id="case_" + "1" * 32,
@@ -86,6 +95,11 @@ def _state(status: ResultStatus, **changes: object) -> ResultViewState:
 
 def test_idle_completed_partial_and_failed_have_exact_safe_visibility() -> None:
     idle = render_view_state(_state(ResultStatus.IDLE))
+    assert idle.state_tone == "neutral"
+    assert idle.overview_heading == "两步开始诊断"
+    assert "1. 生成脱敏预览" in idle.overview_body
+    assert "2. 确认并开始诊断" in idle.overview_body
+    assert idle.secondary_disclosure_visible is False
     assert idle.status_badge == "● 等待诊断"
     assert idle.primary_action == "开始诊断"
     assert idle.empty_heading == "尚未生成诊断结果"
@@ -94,12 +108,16 @@ def test_idle_completed_partial_and_failed_have_exact_safe_visibility() -> None:
     assert idle.tabs_enabled is False
 
     completed = render_view_state(_state(ResultStatus.COMPLETED))
+    assert completed.state_tone == "green"
+    assert completed.secondary_disclosure_visible is True
     assert completed.status_badge == "✓ 已完成"
     assert completed.visible_tabs == ("文字报告", "诊断卡", "语音复盘", "引用与下载")
     assert completed.download_label == "下载完整证据包"
     assert completed.failure_detail_labels == ()
 
     partial = render_view_state(_state(ResultStatus.PARTIAL))
+    assert partial.state_tone == "amber"
+    assert partial.secondary_disclosure_visible is True
     assert partial.status_badge == "⚠ 部分完成"
     assert partial.visible_tabs == ("文字报告", "诊断卡", "语音复盘", "引用与下载")
     assert partial.available_artifacts == ("report", "recap_text", "audio")
@@ -116,6 +134,8 @@ def test_idle_completed_partial_and_failed_have_exact_safe_visibility() -> None:
     )
 
     failed = render_view_state(_state(ResultStatus.FAILED))
+    assert failed.state_tone == "red"
+    assert failed.secondary_disclosure_visible is True
     assert failed.status_badge == "✕ 诊断失败"
     assert failed.tabs_enabled is False
     assert failed.download_label is None
@@ -132,10 +152,56 @@ def test_running_stages_are_ordered_indeterminate_and_disable_duplicate_actions(
         completed_stages=PHASE4_STAGES[:index],
     )
     view = render_view_state(state)
+    assert view.state_tone == "blue"
+    assert view.overview_heading == view.status_badge
+    assert view.secondary_disclosure_visible is False
     assert view.status_badge == f"▶ 正在生成结果 · {view.stage_label}"
     assert view.running_copy == f"正在{view.stage_label}，请勿重复提交。已完成 {index} 个阶段。"
     assert view.actions_enabled is False
     assert "%" not in view.running_copy
+
+
+def test_verified_diagnosis_selects_highest_confidence_cause_and_first_safe_action() -> None:
+    diagnosis = DiagnosisRecord.model_validate_json(
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_bytes(), strict=True
+    )
+
+    presentation = render_verified_diagnosis(diagnosis)
+
+    expected_cause = max(
+        diagnosis.root_cause_candidates,
+        key=lambda candidate: candidate.confidence,
+    ).cause
+    first_action = (diagnosis.checks + diagnosis.fixes)[0]
+    assert presentation.category == str(diagnosis.category)
+    assert presentation.confidence == f"{diagnosis.confidence:.2f}"
+    assert presentation.root_cause == expected_cause
+    assert presentation.next_action == first_action.command
+    assert presentation.next_action_kind == "检查"
+
+
+def test_verified_diagnosis_empty_candidates_and_actions_are_explicit_without_guessing() -> None:
+    diagnosis = DiagnosisRecord.model_validate_json(
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_bytes(), strict=True
+    ).model_copy(
+        update={
+            "root_cause_candidates": [],
+            "checks": [],
+            "fixes": [],
+        }
+    )
+
+    presentation = render_verified_diagnosis(diagnosis)
+
+    assert presentation.root_cause is None
+    assert presentation.next_action is None
+    assert presentation.next_action_kind is None
+    assert "ModuleNotFoundError" not in repr(presentation)
+
+
+def test_verified_diagnosis_fails_closed_for_unvalidated_input() -> None:
+    with pytest.raises(TypeError, match="DiagnosisRecord"):
+        render_verified_diagnosis({"category": "dependency_environment"})  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
