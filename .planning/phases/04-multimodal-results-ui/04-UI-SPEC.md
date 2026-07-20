@@ -23,6 +23,16 @@ DebugMate 是专业诊断工具，不是营销落地页。页面打开后第一�
 
 视觉层不得创造运行真实性：`live`、`replay`、`completed`、`partial`、`failed` 和 TTS fallback 均来自严格 `ResultViewState`/manifest；状态必须同时使用图标、中文文字和颜色，不能仅靠颜色表达。
 
+### 2026-07-20 审计后学生友好合同
+
+- 产品标题固定为 `DebugMate 学习诊断助手`。首屏唯一主路径是 `1. 生成脱敏预览` → `2. 确认并开始诊断`；第二步必须在一次性预览 token 存在前保持禁用。
+- `ResultViewState` 只决定 outcome、neutral/blue/green/amber/red 语义、恢复权限与披露条件；严格验证后的 `DiagnosisRecord` 才能决定完成态类别、置信度、原因和第一步行动。两条链路不得由文件存在性或 DOM 状态猜测。
+- `查看示例` 默认折叠；纠错仅在 verified completed/partial 后显示；retry 仅在 verified partial 且服务端身份完整时显示并可用。failed 保留七字段恢复说明，但不得伪造可执行 retry 权限。
+- 原始 run/case/result/fixture 身份、backend、事实/证据 ID、完整命令与下载元数据进入 `技术详情与恢复信息` disclosure。类别、置信度、最可信原因、第一步行动和文字报告优先。
+- 已知稳定类别在学生概览与 `结论速览` 中使用中文名称；原始枚举值只保留在完整技术报告/证据中。`文字报告` tab 先显示无 ID/hash 的结论速览，再呈现未改写的已验证报告 artifact。
+- `gr.Tabs` 容器只提供稳定 `elem_id="result-tabs"`。Gradio 6.20 不支持更新 `gr.Tabs.interactive`；实现必须保存四个 `gr.Tab` 引用，并从同一 `payload.view.tabs_enabled` 原子更新各 tab：idle/running/failed 锁定，completed/partial 启用。
+- 1024、768 与 375 px 按主流程 → 状态概览 → 核心结果 → 技术详情阅读；200% 缩放和长 ID/命令不得产生 body 级横向滚动或嵌套滚动陷阱。
+
 ## Design System
 
 | Property | Value |
@@ -51,33 +61,29 @@ Gradio native components are the interaction authority. CSS may set tokens, grid
 - At 1366 × 768, the top bar, all three region headings, the primary action, current status, and result tabs must be visible without horizontal scrolling. Long content may scroll inside bounded panels; the whole page must not create nested horizontal scrollbars.
 - Region surfaces use 1 px border and 8 px radius. Do not use floating glass panels, gradients, oversized shadows, decorative blobs, or full-width banner art.
 - Results region uses native `Tabs`: `文字报告` / `诊断卡` / `语音复盘` / `引用与下载`. The active tab must remain keyboard reachable. Tabs control vertical length; they do not conceal the overall outcome status.
-- Input screenshot and long details use `Accordion` with explicit labels. The six extracted fields remain visible as a compact editable group; they are not hidden behind six separate accordions.
+- 示例、纠错与技术详情使用有明确名称的 `Accordion`。六个抽取字段只在 verified completed/partial 后随纠错 disclosure 渐进显示，不拆成六个独立 accordion。
 
 ### Component hierarchy
 
 ```text
 gr.Blocks #debugmate-app
 ├─ Header #status-bar
-│  ├─ product label “DebugMate 诊断工作台”
-│  ├─ case ID + source run ID (truncated visually, full accessible value)
+│  ├─ product label “DebugMate 学习诊断助手”
 │  ├─ mode badge: 实时 / 离线回放
 │  ├─ outcome badge: 等待 / 运行中 / 已完成 / 部分完成 / 失败
-│  └─ backend + fallback notice
+│  └─ accessible live status
 ├─ Main #workbench-grid
 │  ├─ Section #input-extraction
-│  │  ├─ replay fixture Dropdown (allowlist values only)
+│  │  ├─ numbered local preview → approval controls
+│  │  ├─ “查看示例” Accordion with replay fixture allowlist
 │  │  ├─ redacted input Textbox
 │  │  ├─ redacted Image preview (Accordion)
-│  │  ├─ six explicit extraction fields
-│  │  ├─ correction change summary
-│  │  ├─ “确认修改并重新诊断” Button
-│  │  └─ correction confirmation panel
+│  │  └─ completed/partial-only correction Accordion
 │  ├─ Section #diagnosis-evidence
-│  │  ├─ category + confidence
-│  │  ├─ root-cause candidates with “有依据/推断” labels
-│  │  ├─ fact/evidence cross-reference Dataframe
-│  │  ├─ command details Accordion
-│  │  └─ failure/retry details panel
+│  │  ├─ state overview + verified category/confidence/root cause
+│  │  ├─ verified first action
+│  │  ├─ completed/partial/failed technical details Accordion
+│  │  └─ partial-only retry / seven-field recovery panel
 │  └─ Section #multimodal-results
 │     ├─ result identity + availability summary
 │     ├─ Tabs
@@ -115,7 +121,7 @@ Exceptions: 1 px borders and 2 px focus outline are non-spacing dimensions. No 4
 | Body | 14 px | 400 | 1.55 | descriptions, evidence, failure guidance |
 | Body strong | 14 px | 600 | 1.5 | root causes, available results |
 | Section heading | 16 px | 650 | 1.35 | three region titles, tab subsection titles |
-| Page title | 18 px | 700 | 1.3 | `DebugMate 诊断工作台` only |
+| Page title | 18 px | 700 | 1.3 | `DebugMate 学习诊断助手` only |
 | Code/traceback | 13 px | 400 | 1.55 | commands, package names, traceback lines |
 
 - No display typography above 20 px. The product name must not displace diagnostic content.
@@ -150,11 +156,11 @@ The 60/30/10 balance is canvas/surface/accent-and-status. Accent is reserved for
 
 | State | Top status | Main action | Result behavior | Required detail |
 |-------|------------|-------------|-----------------|-----------------|
-| idle | `● 等待诊断` | `开始诊断` or `加载回放案例` enabled when input/fixture valid | tabs visible but disabled/empty | short next-step empty state |
-| running | `▶ 正在生成结果 · {stage label}` | triggering actions disabled; no duplicate submit | retain last verified result only if explicitly labeled `上一结果`; otherwise skeleton/status | ordered completed stages and current stage from queue events |
-| completed | `✓ 已完成` | correction and eligible full rerun enabled | all verified available modalities shown | source/backend, identity, full bundle download |
-| partial | `⚠ 部分完成` | stage-scoped retry enabled if declared | show every verified artifact; missing tab contains explicit reason, never placeholder media | failed node, completed/inherited stages, retry scope, safe error code, partial ZIP label |
-| failed | `✕ 诊断失败` | only safe declared retry/reselect action enabled | no unverified artifacts; verified inherited/previous artifacts clearly separated | failed node, completed/inherited stages, retry scope, safe error code |
+| idle | `● 等待诊断` + neutral | `1. 生成脱敏预览`; step 2 disabled before token | all four native tabs visible and individually disabled | neutral two-step empty state; no guessed diagnosis |
+| running | `▶ 正在生成结果 · {stage label}` + blue | triggering actions disabled; no duplicate submit | all four tabs individually disabled | ordered completed stages and current stage from queue events; no percentage |
+| completed | `✓ 已完成` + green | correction disclosure available | all four tabs atomically enabled | verified cause/action first; source/backend/identity in technical details |
+| partial | `⚠ 部分完成` + amber | verified stage-scoped retry visible/enabled | all four tabs atomically enabled; missing artifact explicit | seven recovery fields, safe error code, partial ZIP label |
+| failed | `✕ 诊断失败` + red | no executable retry unless a verified partial identity exists | all four tabs disabled; no untrusted result | seven recovery fields remain visible in technical details |
 | replay mode | separate `↺ 离线回放 · {fixture}` badge in every outcome | live wording prohibited | top bar, result summary, and download metadata identify replay | fixture ID and source run ID; never claim current cloud success |
 | fallback active | `⚠ 语音已降级 · {backend}` secondary badge | no special action unless retry scope exists | valid audio remains playable | ordered failed backend(s), final backend, safe fallback reason |
 
@@ -162,13 +168,13 @@ The 60/30/10 balance is canvas/surface/accent-and-status. Accent is reserved for
 
 - Queue stages use fixed Chinese labels: `验证来源` → `整理诊断` → `生成报告` → `绘制诊断卡` → `生成语音` → `一致性校验` → `发布结果包`.
 - Show stage text and indeterminate progress; do not invent percentages.
-- Disable diagnosis, replay load, correction confirmation, and retry buttons while the same case is in flight. Keep tabs and existing verified outputs readable.
+- Disable diagnosis, replay load, correction confirmation, retry, and all four result tabs while the same case is in flight.
 - Loading copy: `正在{阶段}，请勿重复提交。已完成 {n} 个阶段。`
 
 ### Empty
 
-- Heading: `尚未生成诊断结果`
-- Body: `提交已脱敏输入，或从固定案例中选择一个回放案例。结果会在此显示文字报告、诊断卡和语音复盘。`
+- Heading: `两步开始诊断`
+- Body explicitly names `1. 生成脱敏预览` and `2. 确认并开始诊断`; it must not contain dependency-install, failure, or completed advice.
 - Evidence empty: `暂无可展示证据。诊断完成后将按事实 ID 与证据 ID 交叉列出。`
 - Never show fake sample charts, placeholder audio, or generated “example diagnosis” in an empty live view.
 

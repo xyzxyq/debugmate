@@ -2,6 +2,7 @@
 .venv/
 .env
 .artifacts/
+.debugmate-runtime/
 /.superpowers/sdd/
 evidence/*
 !evidence/.gitkeep

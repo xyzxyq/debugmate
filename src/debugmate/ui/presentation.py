@@ -27,6 +27,15 @@ _STAGE_LABELS = {
     "publish": "发布结果包",
 }
 _TABS = ("文字报告", "诊断卡", "语音复盘", "引用与下载")
+_CATEGORY_LABELS = {
+    "dependency_environment": "依赖与环境问题",
+    "path_permission": "路径与权限问题",
+    "python_runtime": "Python 运行时问题",
+    "tensor_shape_dtype": "张量形状或数据类型问题",
+    "cuda_memory": "CUDA 显存问题",
+    "model_loading": "模型加载问题",
+    "unknown": "暂未确定类别",
+}
 _FAILURE_DETAIL_LABELS = (
     "失败节点",
     "安全错误码",
@@ -146,7 +155,7 @@ def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPr
         action = None
         action_kind = None
     return VerifiedDiagnosisPresentation(
-        category=str(diagnosis.category),
+        category=_CATEGORY_LABELS[str(diagnosis.category)],
         confidence=f"{diagnosis.confidence:.2f}",
         root_cause=None if strongest is None else strongest.cause,
         next_action=None if action is None else action.command,

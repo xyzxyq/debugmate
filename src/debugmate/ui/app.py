@@ -30,7 +30,12 @@ from debugmate.results.service import (
     ServiceStageEvent,
 )
 from debugmate.ui.local_live import LocalPreviewStore
-from debugmate.ui.presentation import ComponentViewModel, render_view_state
+from debugmate.ui.presentation import (
+    ComponentViewModel,
+    VerifiedDiagnosisPresentation,
+    render_verified_diagnosis,
+    render_view_state,
+)
 
 WORKBENCH_CSS = "\n".join(
     (
@@ -74,14 +79,13 @@ WORKBENCH_CSS = "\n".join(
         (
             ".command-bar > .styler { display: grid; "
             "grid-template-columns: minmax(240px, 1fr) minmax(140px, auto) "
-            "minmax(220px, 1fr); align-items: center; gap: 14px; "
+            "minmax(220px, 1fr); align-items: center; gap: 16px; "
             "background: transparent !important; border: 0 !important; padding: 0 !important; }"
         ),
         (
-            ".command-bar { margin: 0 0 14px !important; padding: 12px 16px !important; "
+            ".command-bar { margin: 0 0 16px !important; padding: 12px 16px !important; "
             "background: var(--surface-1) !important; border: 1px solid var(--border) "
-            "!important; border-radius: 14px !important; box-shadow: 0 18px 45px #d8dee8; "
-            "backdrop-filter: blur(18px); }"
+            "!important; border-radius: 8px !important; box-shadow: 0 4px 12px #d8dee8; }"
         ),
         ".command-bar .product-title { min-width: 0; }",
         ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 20px; }",
@@ -119,8 +123,8 @@ WORKBENCH_CSS = "\n".join(
         "#workbench-grid:has(> #workbench-grid) { display: grid; }",
         (
             "#workbench-grid:has(> #workbench-grid) { "
-            "grid-template-columns: minmax(280px, 0.72fr) minmax(360px, 0.95fr) "
-            "minmax(460px, 1.35fr); gap: 14px; }"
+            "grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1fr) "
+            "minmax(460px, 1.3fr); gap: 16px; }"
         ),
         (
             "#workbench-grid:has(> #workbench-grid) { align-items: start; "
@@ -133,15 +137,13 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "#workbench-grid:has(> #workbench-grid) .region { min-width: 0; "
-            "background: var(--surface-1); border: 1px solid var(--border); "
-            "box-shadow: 0 14px 34px #d8dee8; }"
+            "background: var(--surface-1); border: 1px solid var(--border); }"
         ),
         (
-            "#workbench-grid:has(> #workbench-grid) .region { border-radius: 14px; "
+            "#workbench-grid:has(> #workbench-grid) .region { border-radius: 8px; "
             "padding: 16px; overflow: hidden; }"
         ),
         ".control-rail { background: var(--sidebar) !important; }",
-        ".diagnosis-canvas { border-top: 3px solid var(--failure) !important; }",
         ".result-workspace { border-top: 3px solid var(--primary) !important; }",
         (
             ".region > .styler, .region .gr-accordion, .region .tabs, .region .tabitem { "
@@ -171,8 +173,8 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".region input::placeholder, .region textarea::placeholder { color: var(--muted); }",
         (
-            ".region button { min-height: 40px; border-radius: 11px !important; "
-            "font-weight: 700 !important; box-shadow: 0 6px 16px #d8dee8; }"
+            ".region button { min-height: 40px; border-radius: 8px !important; "
+            "font-weight: 700 !important; }"
         ),
         (
             ".region button.primary { background: var(--primary) !important; "
@@ -198,19 +200,36 @@ WORKBENCH_CSS = "\n".join(
         (
             ".correction-panel { margin-top: 12px !important; background: var(--surface-1) "
             "!important; border: 1px solid var(--border) !important; "
-            "border-radius: 12px !important; }"
+            "border-radius: 8px !important; }"
         ),
         ".correction-panel summary { color: var(--text) !important; font-weight: 700; }",
         (
-            ".diagnosis-summary { padding: 16px 18px; background: var(--failure-surface); "
-            "border: 1px solid var(--border); border-left: 4px solid var(--failure); "
-            "border-radius: 14px; box-shadow: 0 8px 22px #d8dee8; "
+            ".diagnosis-summary { padding: 16px; background: var(--surface-2); "
+            "border: 1px solid var(--border); border-left: 4px solid var(--muted); "
+            "border-radius: 8px; "
             "color: var(--text) !important; }"
+        ),
+        ".diagnosis-summary.tone-neutral { border-left-color: var(--muted); }",
+        (
+            ".diagnosis-summary.tone-blue { border-left-color: var(--primary); "
+            "background: var(--primary-soft); }"
+        ),
+        (
+            ".diagnosis-summary.tone-green { border-left-color: var(--success); "
+            "background: var(--success-surface); }"
+        ),
+        (
+            ".diagnosis-summary.tone-amber { border-left-color: var(--warning); "
+            "background: var(--warning-surface); }"
+        ),
+        (
+            ".diagnosis-summary.tone-red { border-left-color: var(--failure); "
+            "background: var(--failure-surface); }"
         ),
         ".diagnosis-summary p { margin: 0; }",
         (
             ".next-steps { margin-top: 14px; padding: 14px 16px; background: var(--surface-2); "
-            "border: 1px solid var(--border); border-radius: 14px; }"
+            "border: 1px solid var(--border); border-radius: 8px; }"
         ),
         ".next-steps p, .next-steps li { color: var(--text) !important; }",
         ".evidence-kicker p { margin: 16px 0 8px; color: var(--muted); font-weight: 700; }",
@@ -240,6 +259,11 @@ WORKBENCH_CSS = "\n".join(
             "!important; border-color: var(--primary) !important; }"
         ),
         ".report-panel { max-height: 560px; overflow: auto; }",
+        (
+            ".report-summary { margin: 0 0 12px; padding: 12px 16px; "
+            "background: var(--success-surface); border: 1px solid var(--border); "
+            "border-radius: 8px; }"
+        ),
         ".report-panel, #fact-table, #citation-table { color: var(--text) !important; }",
         ".report-panel pre { max-width: 100%; overflow-x: auto; }",
         "#fact-table, #citation-table, #diagnostic-commands { max-width: 100%; overflow: auto; }",
@@ -681,6 +705,7 @@ class CallbackPayload:
     command_rows: tuple[tuple[str, str, str, str, str, str], ...] = ()
     recap_text: str = ""
     failure_details: tuple[tuple[str, str], ...] = ()
+    diagnosis: VerifiedDiagnosisPresentation | None = None
 
 
 def _capability_file_data(value: UiContentUrl | None) -> dict[str, object] | None:
@@ -821,64 +846,61 @@ class UiCallbacks:
         tuple[tuple[str, str, str, str], ...],
         tuple[tuple[str, str, str, str, str, str], ...],
         str,
+        VerifiedDiagnosisPresentation,
     ]:
         """Derive UI facts only from freshly verified public result members."""
 
-        try:
-            diagnosis = DiagnosisRecord.model_validate_json(
-                self._member(state, "diagnosis").read_bytes(), strict=True
+        diagnosis = DiagnosisRecord.model_validate_json(
+            self._member(state, "diagnosis").read_bytes(), strict=True
+        )
+        recap = self._member(state, "recap_text").read_bytes().decode("utf-8")
+        summary = "\n".join(f"{fact.field_id}：{fact.value}" for fact in diagnosis.observed_facts)
+        evidence_by_fact = {
+            fact_id: evidence_id
+            for link in diagnosis.support_links
+            for fact_id in link.fact_ids
+            for evidence_id in link.evidence_ids[:1]
+        }
+        facts = tuple(
+            (
+                fact.fact_id,
+                fact.value,
+                evidence_by_fact.get(fact.fact_id, ""),
+                str(fact.source_kind),
+                "有依据" if fact.fact_id in evidence_by_fact else "观察",
             )
-            recap = self._member(state, "recap_text").read_bytes().decode("utf-8")
-            summary = "\n".join(
-                f"{fact.field_id}：{fact.value}" for fact in diagnosis.observed_facts
+            for fact in diagnosis.observed_facts
+        )
+        citations = tuple(
+            (item.evidence_id, item.source_id, item.source_url, item.locator)
+            for item in diagnosis.evidence
+        )
+        commands = tuple(
+            (
+                section,
+                item.command,
+                str(item.platform),
+                item.impact,
+                item.expected_result,
+                item.rollback,
             )
-            evidence_by_fact = {
-                fact_id: evidence_id
-                for link in diagnosis.support_links
-                for fact_id in link.fact_ids
-                for evidence_id in link.evidence_ids[:1]
-            }
-            facts = tuple(
-                (
-                    fact.fact_id,
-                    fact.value,
-                    evidence_by_fact.get(fact.fact_id, ""),
-                    str(fact.source_kind),
-                    "有依据" if fact.fact_id in evidence_by_fact else "观察",
-                )
-                for fact in diagnosis.observed_facts
+            for section, items in (
+                ("检查", diagnosis.checks),
+                ("修复", diagnosis.fixes),
+                ("验证", diagnosis.verification_steps),
             )
-            citations = tuple(
-                (item.evidence_id, item.source_id, item.source_url, item.locator)
-                for item in diagnosis.evidence
-            )
-            commands = tuple(
-                (
-                    section,
-                    item.command,
-                    str(item.platform),
-                    item.impact,
-                    item.expected_result,
-                    item.rollback,
-                )
-                for section, items in (
-                    ("检查", diagnosis.checks),
-                    ("修复", diagnosis.fixes),
-                    ("验证", diagnosis.verification_steps),
-                )
-                for item in items
-            )
-            return (
-                summary,
-                str(diagnosis.category),
-                f"{diagnosis.confidence:.2f}",
-                facts,
-                citations,
-                commands,
-                recap,
-            )
-        except (KeyError, ResultServiceError, TypeError, ValueError, UnicodeError):
-            return "", "等待诊断", "暂无", (), (), (), ""
+            for item in items
+        )
+        return (
+            summary,
+            str(diagnosis.category),
+            f"{diagnosis.confidence:.2f}",
+            facts,
+            citations,
+            commands,
+            recap,
+            render_verified_diagnosis(diagnosis),
+        )
 
     def _render(self, state: ResultViewState) -> CallbackPayload:
         if state.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}:
@@ -918,8 +940,9 @@ class UiCallbacks:
                 command_rows=details[5],
                 recap_text=details[6],
                 failure_details=render_view_state(state).failure_details,
+                diagnosis=details[7],
             )
-        except (ResultServiceError, UnicodeError, OSError, ValueError):
+        except (KeyError, ResultServiceError, TypeError, UnicodeError, OSError, ValueError):
             failed = self._failure(state, "download_invalid")
             return CallbackPayload(
                 state=failed,
@@ -1118,6 +1141,48 @@ def _status_text(view: ComponentViewModel) -> str:
     return "\n\n".join(rows)
 
 
+def _overview_text(payload: CallbackPayload) -> str:
+    """Compose state truth with diagnosis facts only when strict parsing succeeded."""
+
+    view = payload.view
+    diagnosis = payload.diagnosis
+    rows = [f"### {view.overview_heading}", view.overview_body]
+    if diagnosis is not None:
+        rows.extend(
+            (
+                f"**类别：** {diagnosis.category}",
+                f"**置信度：** {diagnosis.confidence}",
+                f"**最可信原因：** {diagnosis.root_cause or '当前证据不足，未确认原因。'}",
+            )
+        )
+    return "\n\n".join(rows)
+
+
+def _next_action_text(payload: CallbackPayload) -> str:
+    diagnosis = payload.diagnosis
+    if diagnosis is None or diagnosis.next_action is None:
+        return "### 下一步怎么做\n\n完成诊断后，这里会显示从已验证结果中提取的第一步行动。"
+    return (
+        "### 下一步怎么做\n\n"
+        f"**{diagnosis.next_action_kind or '行动'}：** `{diagnosis.next_action}`\n\n"
+        "命令仅供查看，DebugMate 不会自动执行或安装软件。"
+    )
+
+
+def _report_summary_text(payload: CallbackPayload) -> str:
+    diagnosis = payload.diagnosis
+    if diagnosis is None:
+        return "### 结论速览\n\n完成诊断后显示学生可读结论。"
+    return "\n\n".join(
+        (
+            "### 结论速览",
+            f"**{diagnosis.category}** · 置信度 {diagnosis.confidence}",
+            f"**原因：** {diagnosis.root_cause or '当前证据不足，未确认原因。'}",
+            f"**先做：** `{diagnosis.next_action or '补充信息后重新诊断'}`",
+        )
+    )
+
+
 def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
     """Convert one already verified callback payload into atomic native updates."""
 
@@ -1169,11 +1234,11 @@ def _retry_control_updates(payload: CallbackPayload) -> tuple[object, str | None
         and view.retry_label is not None
     ):
         return (
-            gr.update(value=view.retry_label, interactive=True),
+            gr.update(value=view.retry_label, visible=True, interactive=True),
             state.identity.case_id,
             state.result_id,
         )
-    return gr.update(value="安全重试", interactive=False), None, None
+    return gr.update(value="安全重试", visible=False, interactive=False), None, None
 
 
 def build_app(
@@ -1213,7 +1278,6 @@ def build_app(
                 container=False,
                 padding=False,
             )
-            result_metadata = gr.Markdown("", elem_id="result-metadata", elem_classes="metadata")
         with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes=["region", "control-rail"]):
                 gr.Markdown("## 开始诊断")
@@ -1230,34 +1294,35 @@ def build_app(
                     value="请先生成本地脱敏预览。",
                 )
                 preview_button = gr.Button(
-                    "生成本地脱敏预览",
+                    "1. 生成脱敏预览",
                     variant="secondary",
                     elem_id="local-preview",
                 )
                 start_button = gr.Button(
-                    "确认预览并开始本地诊断",
+                    "2. 确认并开始诊断",
                     variant="primary",
                     interactive=False,
                     elem_id="local-approve",
                 )
                 gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
-                gr.Markdown("示例案例", elem_classes="section-kicker")
-                replay = gr.Dropdown(
-                    choices=[
-                        ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
-                        ("长报告与长命令：布局韧性", "long-content"),
-                    ],
-                    label="示例案例",
-                    value="module-not-found",
-                )
-                replay_button = gr.Button(
-                    "加载回放案例", variant="secondary", elem_id="replay-action"
-                )
+                with gr.Accordion("查看示例", open=False, elem_classes="example-panel"):
+                    replay = gr.Dropdown(
+                        choices=[
+                            ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
+                            ("长报告与长命令：布局韧性", "long-content"),
+                        ],
+                        label="示例案例",
+                        value="module-not-found",
+                    )
+                    replay_button = gr.Button(
+                        "加载回放案例", variant="secondary", elem_id="replay-action"
+                    )
                 with gr.Accordion(
                     "抽取字段与纠错",
                     open=False,
+                    visible=False,
                     elem_classes="correction-panel",
-                ):
+                ) as correction_panel:
                     fields = [
                         gr.Textbox(label=label, interactive=False, value="")
                         for label in _FIELD_LABELS
@@ -1285,24 +1350,28 @@ def build_app(
             with gr.Column(elem_classes=["region", "diagnosis-canvas"]):
                 gr.Markdown("## 问题概览")
                 category_confidence = gr.Markdown(
-                    "类别：等待诊断\n\n置信度：暂无",
-                    elem_classes="diagnosis-summary",
+                    "### 两步开始诊断\n\n1. 生成脱敏预览，确认隐私信息已处理。\n\n"
+                    "2. 确认并开始诊断，结果会显示在下方。",
+                    elem_classes=["diagnosis-summary", "tone-neutral"],
+                    elem_id="student-overview",
                 )
-                gr.Markdown(
-                    (
-                        "### 下一步怎么做\n\n"
-                        "1. 检查当前 Python 环境是否正确。\n"
-                        "2. 确认缺失依赖包名称，并按建议安装。\n"
-                        "3. 重新运行程序，验证问题是否解决。"
-                    ),
+                next_action = gr.Markdown(
+                    "### 下一步怎么做\n\n完成诊断后，这里会显示从已验证结果中提取的第一步行动。",
                     elem_classes="next-steps",
                 )
-                gr.Markdown("### 详细依据", elem_classes="evidence-kicker")
-                fact_table = gr.Markdown(
-                    _markdown_table("事实与证据", _FACT_HEADERS, ()),
-                    elem_id="fact-table",
-                )
-                with gr.Accordion("命令说明（仅供查看）", open=False):
+                with gr.Accordion(
+                    "技术详情与恢复信息",
+                    open=False,
+                    visible=False,
+                    elem_id="technical-details",
+                ) as technical_details:
+                    result_metadata = gr.Markdown(
+                        "", elem_id="result-metadata", elem_classes="metadata"
+                    )
+                    fact_table = gr.Markdown(
+                        _markdown_table("事实与证据", _FACT_HEADERS, ()),
+                        elem_id="fact-table",
+                    )
                     gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
                     command_table = gr.Markdown(
                         _markdown_table("已验证诊断命令", _COMMAND_HEADERS, ()),
@@ -1313,6 +1382,7 @@ def build_app(
                     "安全重试",
                     variant="secondary",
                     interactive=False,
+                    visible=False,
                     elem_id="partial-retry",
                 )
 
@@ -1320,14 +1390,18 @@ def build_app(
                 elem_classes=["region", "results-region", "result-workspace"]
             ):
                 gr.Markdown("## 结果查看")
-                with gr.Tabs():
-                    with gr.Tab("文字报告"):
+                with gr.Tabs(elem_id="result-tabs"):
+                    with gr.Tab("文字报告", interactive=False) as report_tab:
+                        report_summary = gr.Markdown(
+                            "### 结论速览\n\n完成诊断后显示学生可读结论。",
+                            elem_classes="report-summary",
+                        )
                         report = gr.Markdown(
                             "尚未生成诊断结果",
                             elem_id="diagnostic-report",
                             elem_classes="report-panel",
                         )
-                    with gr.Tab("诊断卡"):
+                    with gr.Tab("诊断卡", interactive=False) as card_tab:
                         card = gr.Image(
                             label="诊断卡",
                             elem_id="diagnostic-card",
@@ -1337,7 +1411,7 @@ def build_app(
                             sources=None,
                             buttons=[],
                         )
-                    with gr.Tab("语音复盘"):
+                    with gr.Tab("语音复盘", interactive=False) as audio_tab:
                         audio = gr.Audio(
                             label="语音复盘",
                             elem_id="diagnostic-audio",
@@ -1358,7 +1432,7 @@ def build_app(
                             lines=6,
                             value="复盘稿会与语音一并经过验证后显示。",
                         )
-                    with gr.Tab("引用与下载"):
+                    with gr.Tab("引用与下载", interactive=False) as download_tab:
                         citation_table = gr.Markdown(
                             _markdown_table("引用", _CITATION_HEADERS, ()),
                             elem_id="citation-table",
@@ -1414,6 +1488,14 @@ def build_app(
             audio_metadata,
             command_table,
             accessible_status,
+            correction_panel,
+            technical_details,
+            next_action,
+            report_summary,
+            report_tab,
+            card_tab,
+            audio_tab,
+            download_tab,
         ]
 
         def apply_payload(
@@ -1461,7 +1543,10 @@ def build_app(
                 gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
                 gr.update(value=payload.redacted_input),
                 gr.update(),
-                gr.update(value=f"类别：{payload.category}\n\n置信度：{payload.confidence}"),
+                gr.update(
+                    value=_overview_text(payload),
+                    elem_classes=["diagnosis-summary", f"tone-{payload.view.state_tone}"],
+                ),
                 gr.update(value=_markdown_table("事实与证据", _FACT_HEADERS, payload.fact_rows)),
                 gr.update(value=_markdown_table("引用", _CITATION_HEADERS, payload.citation_rows)),
                 gr.update(value=payload.recap_text),
@@ -1474,6 +1559,14 @@ def build_app(
                     value=_markdown_table("已验证诊断命令", _COMMAND_HEADERS, payload.command_rows)
                 ),
                 payload.view.accessible_status,
+                gr.update(visible=fields_enabled),
+                gr.update(visible=payload.view.secondary_disclosure_visible),
+                gr.update(value=_next_action_text(payload)),
+                gr.update(value=_report_summary_text(payload)),
+                *(
+                    gr.update(interactive=payload.view.tabs_enabled)
+                    for _tab in (report_tab, card_tab, audio_tab, download_tab)
+                ),
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):

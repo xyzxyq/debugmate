@@ -173,7 +173,7 @@ def test_verified_diagnosis_selects_highest_confidence_cause_and_first_safe_acti
         key=lambda candidate: candidate.confidence,
     ).cause
     first_action = (diagnosis.checks + diagnosis.fixes)[0]
-    assert presentation.category == str(diagnosis.category)
+    assert presentation.category == "依赖与环境问题"
     assert presentation.confidence == f"{diagnosis.confidence:.2f}"
     assert presentation.root_cause == expected_cause
     assert presentation.next_action == first_action.command

@@ -199,7 +199,7 @@ def _partial_state_for_app(failed_stage: str) -> ResultViewState:
     )
 
 
-def test_build_app_has_macos_student_learning_workbench_and_no_unsafe_components() -> None:
+def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components() -> None:
     app = build_app(_Service())
     config = app.get_config_file()
     rendered = repr(config)
@@ -243,6 +243,7 @@ def test_build_app_has_macos_student_learning_workbench_and_no_unsafe_components
     assert len(correction_panels) == 1
     assert correction_panels[0]["type"] == "accordion"
     assert correction_panels[0]["props"]["open"] is False
+    assert correction_panels[0]["props"]["visible"] is False
     assert any(
         "section-kicker" in component.get("props", {}).get("elem_classes", [])
         for component in config["components"]
@@ -272,16 +273,21 @@ def test_build_app_has_macos_student_learning_workbench_and_no_unsafe_components
         "individual-artifacts",
         "download-metadata",
         "download-result",
+        "result-tabs",
+        "student-overview",
+        "technical-details",
     } <= elem_ids
 
     for text in (
         "DebugMate 学习诊断助手",
-        "开始诊断",
+        "1. 生成脱敏预览",
+        "2. 确认并开始诊断",
+        "查看示例",
         "示例案例",
         "抽取字段与纠错",
         "问题概览",
         "下一步怎么做",
-        "详细依据",
+        "技术详情与恢复信息",
         "结果查看",
         "文字报告",
         "诊断卡",
@@ -346,11 +352,8 @@ def test_build_app_has_macos_student_learning_workbench_and_no_unsafe_components
     css_function_colors = re.findall(r"\b(?:rgb|rgba)\([^)]*\)", app.css, re.IGNORECASE)
     assert css_hex_colors == approved_colors
     assert css_function_colors == []
-    assert (
-        "minmax(280px, 0.72fr) minmax(360px, 0.95fr) minmax(460px, 1.35fr)"
-        in app.css
-    )
-    assert "gap: 14px;" in app.css
+    assert "minmax(280px, 0.8fr) minmax(360px, 1fr) minmax(460px, 1.3fr)" in app.css
+    assert "gap: 16px;" in app.css
     assert ".command-bar { position: sticky;" in app.css
     assert ".control-rail" in app.css
     assert ".diagnosis-canvas" in app.css
@@ -358,11 +361,33 @@ def test_build_app_has_macos_student_learning_workbench_and_no_unsafe_components
     assert ".section-kicker" in app.css
     assert ".correction-panel" in app.css
     assert "box-shadow:" in app.css
-    assert "backdrop-filter: blur(18px)" in app.css
+    assert "backdrop-filter" not in app.css
+    assert "tone-neutral" in app.css
+    assert "tone-blue" in app.css
+    assert "tone-green" in app.css
+    assert "tone-amber" in app.css
+    assert "tone-red" in app.css
     assert "@media (max-width: 1199px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "@media (max-width: 639px)" in app.css
     assert "overflow-x: hidden" not in app.css
+
+    result_tabs = next(
+        component
+        for component in config["components"]
+        if component.get("props", {}).get("elem_id") == "result-tabs"
+    )
+    tab_items = [
+        component
+        for component in config["components"]
+        if component["type"] == "tabitem"
+        and component["props"].get("label")
+        in {"文字报告", "诊断卡", "语音复盘", "引用与下载"}
+    ]
+    assert result_tabs["type"] == "tabs"
+    assert len(tab_items) == 4
+    assert all(component["props"]["interactive"] is False for component in tab_items)
+    assert "gr.Tabs(interactive=" not in source
 
 
 def test_production_app_has_no_qa_handler_route_selector_or_capability_surface() -> None:
@@ -564,9 +589,9 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
     }
     source = Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
 
-    assert "生成本地脱敏预览" in buttons
-    assert "确认预览并开始本地诊断" in buttons
-    assert buttons["确认预览并开始本地诊断"]["props"]["interactive"] is False
+    assert "1. 生成脱敏预览" in buttons
+    assert "2. 确认并开始诊断" in buttons
+    assert buttons["2. 确认并开始诊断"]["props"]["interactive"] is False
     assert any(
         component["type"] == "markdown"
         and component["props"].get("value") == "后端：local-rule-v1（本地规则，无云端调用）"
@@ -1024,8 +1049,70 @@ def test_replay_button_callback_streams_running_states_and_disables_repeat_actio
         all(update["interactive"] is False for update in frame[9:15]) for frame in frames[:-1]
     )
     assert all(frame[22]["interactive"] is False for frame in frames[:-1])
+    assert all(
+        all(update["interactive"] is False for update in frame[-5:-1])
+        for frame in frames[:-1]
+    )
     assert frames[-1][8].status is ResultStatus.COMPLETED
     assert all(update["interactive"] is True for update in frames[-1][9:15])
+    assert all(update["interactive"] is True for update in frames[-1][-5:-1])
+
+
+def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> None:
+    app = build_app(_Service())
+    callback = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
+    )
+    callbacks = app._debugmate_content_callbacks
+    completed = _completed_state()
+    assert completed.audio is not None
+    partial = completed.model_copy(
+        update={
+            "status": ResultStatus.PARTIAL,
+            "availability": ArtifactAvailability(
+                report=True, card=True, recap_text=True, audio=False
+            ),
+                "audio": AudioResult(
+                    identity=completed.identity,
+                    available=False,
+                    attempts=(
+                        AudioAttempt(
+                            backend="dify",
+                            rate_profile="normal",
+                            succeeded=False,
+                            safe_error_code="tts_failed",
+                        ),
+                    ),
+                failure=SafeFailure(
+                    code="tts_failed", failed_stage="audio", retry_scope="tts"
+                ),
+            ),
+            "failure": SafeFailure(
+                code="tts_failed", failed_stage="audio", retry_scope="tts"
+            ),
+        }
+    )
+    callbacks.load_replay_events = lambda _fixture_id, request=None: iter(  # type: ignore[method-assign]
+        (callbacks._render(partial),)
+    )
+
+    partial_frame = list(callback("module-not-found", None))[-1]
+    assert all(update["interactive"] is True for update in partial_frame[-5:-1])
+    assert partial_frame[31]["visible"] is True
+    assert partial_frame[31]["interactive"] is True
+
+    failed_app = build_app(_Service())
+    failed_callback = next(
+        block_fn.fn
+        for block_fn in failed_app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
+    )
+    failed_frame = list(failed_callback("../not-allowlisted", None))[-1]
+    assert all(update["interactive"] is False for update in failed_frame[-5:-1])
+    assert failed_frame[31]["visible"] is False
+    assert failed_frame[31]["interactive"] is False
 
 
 def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls() -> None:
