@@ -4,8 +4,8 @@ milestone: v0.1
 milestone_name: course-demo
 status: complete
 stopped_at: V0.1 course package generated and machine-verified
-last_updated: "2026-07-19T23:01:47+08:00"
-last_activity: 2026-07-19 -- Completed quick task 260719-r5a: refreshed final dark workbench course evidence
+last_updated: "2026-07-20T01:29:48.112Z"
+last_activity: 2026-07-20 -- Completed quick task 260720-d6u: merged and published the complete Phase 1 project
 progress:
   total_phases: 6
   completed_phases: 6
@@ -49,6 +49,7 @@ Progress: [██████████] 26/26 plans completed (100%)
 | 260719-gy7 | Create and synchronize private DebugMate GitHub repository | 2026-07-19 | Pending | Recorded | [260719-gy7-github-debugmate](./quick/260719-gy7-github-debugmate/) |
 | 260719-h5z | Author and publish DebugMate README | 2026-07-19 | Pending | Recorded | [260719-h5z-debugmate-readme](./quick/260719-h5z-debugmate-readme/) |
 | 260720-cmj | Synchronize local repository with GitHub and verify remote ref | 2026-07-20 | 76a431d | Verified | [260720-cmj-github](./quick/260720-cmj-github/) |
+| 260720-d6u | Merge and publish complete Phase 1 project | 2026-07-20 | 4b304b5 | Verified | [260720-d6u-codex-phase-1-foundation-platform-gate-m](./quick/260720-d6u-codex-phase-1-foundation-platform-gate-m/) |
 
 ## Final Human Check
 
