@@ -829,7 +829,7 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
             browser.close()
 
 
-def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
+def test_completed_learning_workbench_has_consistent_light_surfaces_in_real_edge(
     browser_base_url: str,
 ) -> None:
     with sync_playwright() as playwright:
@@ -908,7 +908,7 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                                 return false;
                             }
                             return !element.closest('img, canvas, video, svg') &&
-                                luminance(effectiveBackground(element)) > 0.45;
+                                luminance(effectiveBackground(element)) < 0.72;
                         })
                         .map(element => ({
                             selector: `${element.tagName.toLowerCase()}#${element.id}.` +
@@ -989,7 +989,7 @@ def test_completed_command_center_has_no_light_surface_leakage_in_real_edge(
                 if min(red, green, blue) >= 190:
                     light_pixels += 1
             assert unmasked_pixels > 0
-            assert light_pixels / unmasked_pixels < 0.08
+            assert light_pixels / unmasked_pixels > 0.60
         finally:
             context.close()
             browser.close()
@@ -1091,7 +1091,7 @@ def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
             browser.close()
 
 
-def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
+def test_completed_result_tabs_keep_visible_surfaces_light_in_real_edge(
     browser_base_url: str,
 ) -> None:
     with sync_playwright() as playwright:
@@ -1191,7 +1191,7 @@ def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
                                 const box = element.getBoundingClientRect();
                                 return visible(element) && box.width * box.height >= 2000 &&
                                     !element.closest('img, canvas, video, svg') &&
-                                    luminance(background(element)) > 0.45;
+                                    luminance(background(element)) < 0.72;
                             })
                             .map(element => (
                                 `${element.tagName.toLowerCase()}#${element.id}.${element.className}`
@@ -1201,7 +1201,7 @@ def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
                             : null;
                         const originalBackground = card?.style.backgroundColor;
                         if (card) card.style.setProperty(
-                            'background-color', 'rgb(255, 255, 255)', 'important'
+                            'background-color', 'rgb(15, 23, 42)', 'important'
                         );
                         const probeLeaks = findLeaks();
                         if (card) {
@@ -1251,7 +1251,7 @@ def test_completed_result_tabs_keep_visible_surfaces_dark_in_real_edge(
                     for target in metrics["text"]
                 ), metrics["text"]
                 assert all(
-                    target["visible"] and target["luminance"] <= 0.45
+                    target["visible"] and target["luminance"] >= 0.72
                     for target in metrics["audio"]
                 ), metrics["audio"]
         finally:
@@ -2268,15 +2268,15 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
             page = browser.new_page(viewport={"width": 1366, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("操作控制台", "诊断主画布", "结果工作区"):
+            for heading in ("开始诊断", "问题概览", "结果查看"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
+            page.get_by_text("示例案例", exact=True).wait_for(timeout=30_000)
             page.get_by_role("button", name="加载回放案例", exact=True).wait_for(timeout=30_000)
             visible_before_viewport = []
             for text, locator in (
-                ("操作控制台", page.get_by_role("heading", name="操作控制台", exact=True)),
-                ("诊断主画布", page.get_by_role("heading", name="诊断主画布", exact=True)),
-                ("结果工作区", page.get_by_role("heading", name="结果工作区", exact=True)),
+                ("开始诊断", page.get_by_role("heading", name="开始诊断", exact=True)),
+                ("问题概览", page.get_by_role("heading", name="问题概览", exact=True)),
+                ("结果查看", page.get_by_role("heading", name="结果查看", exact=True)),
             ):
                 box = locator.bounding_box()
                 visible_before_viewport.append(
@@ -2289,7 +2289,7 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
                         and box["y"] + box["height"] <= 768,
                     }
                 )
-            assert page.get_by_text("固定回放案例", exact=True).is_visible()
+            assert page.get_by_text("示例案例", exact=True).is_visible()
             assert page.get_by_role("button", name="加载回放案例", exact=True).is_visible()
             screenshot = _capture_failure_screenshot(page)
             metrics = page.evaluate(
@@ -2316,9 +2316,9 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
     )
     assert all(item["y"] < 768 for item in metrics["regions"])
     assert visible_before_viewport == [
-        {"text": "操作控制台", "visible": True},
-        {"text": "诊断主画布", "visible": True},
-        {"text": "结果工作区", "visible": True},
+        {"text": "开始诊断", "visible": True},
+        {"text": "问题概览", "visible": True},
+        {"text": "结果查看", "visible": True},
     ]
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
@@ -2477,9 +2477,9 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
             page = browser.new_page(viewport={"width": 1024, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("操作控制台", "诊断主画布", "结果工作区"):
+            for heading in ("开始诊断", "问题概览", "结果查看"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            page.get_by_text("固定回放案例", exact=True).wait_for(timeout=30_000)
+            page.get_by_text("示例案例", exact=True).wait_for(timeout=30_000)
             page.get_by_role("button", name="加载回放案例", exact=True).wait_for(timeout=30_000)
             metrics = page.evaluate(
                 """() => ({
@@ -2521,9 +2521,9 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             page = browser.new_page(viewport={"width": 768, "height": 1024})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("操作控制台", "诊断主画布", "结果工作区"):
+            for heading in ("开始诊断", "问题概览", "结果查看"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            replay_label = page.get_by_text("固定回放案例", exact=True)
+            replay_label = page.get_by_text("示例案例", exact=True)
             replay_label.wait_for(timeout=30_000)
             replay_button = page.get_by_role("button", name="加载回放案例", exact=True)
             replay_button.wait_for(timeout=30_000)

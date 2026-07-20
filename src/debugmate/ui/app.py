@@ -35,19 +35,21 @@ from debugmate.ui.presentation import ComponentViewModel, render_view_state
 WORKBENCH_CSS = "\n".join(
     (
         (
-            ":root { --canvas: #0b0f14; --surface-1: #111820; --surface-2: #17212b; "
-            "--text: #e8edf2; --muted: #91a0ad; --border: #293642; "
-            "--primary: #27b3c2; --warning: #e7a84b; "
-            "--failure: #ef6b73; --success: #4ecb8d; --accent: #27b3c2; }"
+            ":root { --canvas: #f5f7fb; --surface-1: #ffffff; --surface-2: #f8fafc; "
+            "--sidebar: #edf2f7; --text: #0f172a; --muted: #5f6b7a; "
+            "--border: #d8dee8; --primary: #007aff; --primary-soft: #e9f2ff; "
+            "--warning-surface: #fff7ed; --warning: #ff9f0a; "
+            "--failure-surface: #fff1f2; --failure: #ff3b30; "
+            "--success-surface: #ecfdf3; --success: #34c759; --accent: #007aff; }"
         ),
         "* { box-sizing: border-box; }",
         (
             "body, .gradio-container { background: var(--canvas) !important; "
-            "color: var(--text) !important; }"
+            "color: var(--text) !important; color-scheme: light; }"
         ),
         (
             ".gradio-container { max-width: 1560px !important; margin: 0 auto; "
-            "padding: 10px 14px 18px !important; --body-background-fill: var(--canvas); "
+            "padding: 14px 16px 18px !important; --body-background-fill: var(--canvas); "
             "--background-fill-primary: var(--surface-1); "
             "--background-fill-secondary: var(--surface-2); "
             "--block-background-fill: var(--surface-1); "
@@ -71,19 +73,36 @@ WORKBENCH_CSS = "\n".join(
         ".command-bar { position: sticky; top: 0; z-index: 20; }",
         (
             ".command-bar > .styler { display: grid; "
-            "grid-template-columns: minmax(220px, 0.8fr) "
-            "minmax(160px, auto) minmax(280px, 1.4fr); align-items: center; gap: 12px; "
-            "background: var(--surface-1) !important; }"
+            "grid-template-columns: minmax(240px, 1fr) minmax(140px, auto) "
+            "minmax(220px, 1fr); align-items: center; gap: 14px; "
+            "background: transparent !important; border: 0 !important; padding: 0 !important; }"
         ),
         (
-            ".command-bar { margin: 0 0 12px !important; padding: 10px 14px !important; "
+            ".command-bar { margin: 0 0 14px !important; padding: 12px 16px !important; "
             "background: var(--surface-1) !important; border: 1px solid var(--border) "
-            "!important; border-radius: 8px !important; }"
+            "!important; border-radius: 14px !important; box-shadow: 0 18px 45px #d8dee8; "
+            "backdrop-filter: blur(18px); }"
         ),
         ".command-bar .product-title { min-width: 0; }",
         ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 20px; }",
-        ".command-bar .status-indicator { min-width: max-content; }",
-        ".command-bar .status-indicator p { margin: 0; color: var(--success); font-weight: 700; }",
+        (
+            ".command-bar .status-indicator { min-width: 0; display: flex; "
+            "flex-direction: column; align-items: center; gap: 6px; }"
+        ),
+        (
+            ".command-bar .status-indicator p { margin: 0; max-width: 100%; "
+            "text-align: center; overflow-wrap: anywhere; }"
+        ),
+        (
+            ".command-bar .status-indicator p:first-child { display: inline-flex; "
+            "align-items: center; color: var(--success); background: var(--success-surface); "
+            "border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; "
+            "font-weight: 700; }"
+        ),
+        (
+            ".command-bar .status-indicator p:not(:first-child) { color: var(--muted); "
+            "font-size: 12px; line-height: 1.35; }"
+        ),
         ".command-bar .metadata { margin-left: auto; text-align: right; }",
         (
             ".command-bar > .styler > .block { background: transparent !important; "
@@ -91,13 +110,17 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".command-bar > .styler > .product-title { grid-column: 1; grid-row: 1 / span 2; }",
         ".command-bar > .styler > #diagnostic-status { grid-column: 2; grid-row: 1; }",
-        ".command-bar > .styler > #accessible-status { grid-column: 2; grid-row: 2; }",
+        (
+            ".command-bar > .styler > #accessible-status { position: absolute !important; "
+            "width: 1px !important; height: 1px !important; overflow: hidden !important; "
+            "clip: rect(0 0 0 0) !important; white-space: nowrap !important; }"
+        ),
         ".command-bar > .styler > #result-metadata { grid-column: 3; grid-row: 1 / span 2; }",
         "#workbench-grid:has(> #workbench-grid) { display: grid; }",
         (
             "#workbench-grid:has(> #workbench-grid) { "
             "grid-template-columns: minmax(280px, 0.72fr) minmax(360px, 0.95fr) "
-            "minmax(460px, 1.35fr); gap: 12px; }"
+            "minmax(460px, 1.35fr); gap: 14px; }"
         ),
         (
             "#workbench-grid:has(> #workbench-grid) { align-items: start; "
@@ -110,27 +133,28 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "#workbench-grid:has(> #workbench-grid) .region { min-width: 0; "
-            "background: var(--surface-1); border: 1px solid var(--border); }"
+            "background: var(--surface-1); border: 1px solid var(--border); "
+            "box-shadow: 0 14px 34px #d8dee8; }"
         ),
         (
-            "#workbench-grid:has(> #workbench-grid) .region { border-radius: 8px; "
-            "padding: 14px; overflow: hidden; }"
+            "#workbench-grid:has(> #workbench-grid) .region { border-radius: 14px; "
+            "padding: 16px; overflow: hidden; }"
         ),
-        ".control-rail { border-top: 2px solid var(--primary) !important; }",
-        ".diagnosis-canvas { border-top: 2px solid var(--warning) !important; }",
-        ".result-workspace { border-top: 2px solid var(--success) !important; }",
+        ".control-rail { background: var(--sidebar) !important; }",
+        ".diagnosis-canvas { border-top: 3px solid var(--failure) !important; }",
+        ".result-workspace { border-top: 3px solid var(--primary) !important; }",
         (
             ".region > .styler, .region .gr-accordion, .region .tabs, .region .tabitem { "
             "background: var(--surface-1) !important; color: var(--text) !important; "
             "border-color: var(--border) !important; }"
         ),
         (
-            ".region h2 { margin: 0 0 10px; color: var(--text); font-size: 16px; "
-            "letter-spacing: .01em; }"
+            ".region h2 { margin: 0 0 12px; color: var(--text); font-size: 18px; "
+            "font-weight: 700; letter-spacing: 0; }"
         ),
         (
-            ".section-kicker p { margin: 10px 0 6px; color: var(--muted); font-size: 11px; "
-            "font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }"
+            ".section-kicker p { margin: 12px 0 7px; color: var(--muted); font-size: 12px; "
+            "font-weight: 700; letter-spacing: 0; }"
         ),
         (
             ".metadata { color: var(--muted) !important; font-family: Cascadia Mono, "
@@ -147,39 +171,49 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".region input::placeholder, .region textarea::placeholder { color: var(--muted); }",
         (
-            ".region button { min-height: 40px; border-radius: 8px !important; "
-            "font-weight: 700 !important; }"
+            ".region button { min-height: 40px; border-radius: 11px !important; "
+            "font-weight: 700 !important; box-shadow: 0 6px 16px #d8dee8; }"
         ),
         (
-            ".region button.primary { background: var(--primary) !important; color: var(--canvas) "
-            "!important; border-color: var(--primary) !important; }"
+            ".region button.primary { background: var(--primary) !important; "
+            "color: var(--surface-1) !important; border-color: var(--primary) !important; }"
         ),
         (
             ".region button.primary:hover { background: var(--text) !important; "
             "border-color: var(--text) !important; }"
         ),
         (
-            ".region button.secondary { background: var(--surface-2) !important; "
+            ".region button.secondary { background: var(--surface-1) !important; "
             "color: var(--text) !important; border-color: var(--border) !important; }"
         ),
-        ".region button.secondary:hover { border-color: var(--primary) !important; }",
+        (
+            ".region button.secondary:hover { border-color: var(--primary) !important; "
+            "background: var(--primary-soft) !important; }"
+        ),
         (
             ".region button:disabled { background: var(--surface-2) !important; "
             "color: var(--text) !important; border-color: var(--border) !important; "
             "opacity: .84; cursor: not-allowed; }"
         ),
         (
-            ".correction-panel { margin-top: 10px !important; background: var(--surface-2) "
+            ".correction-panel { margin-top: 12px !important; background: var(--surface-1) "
             "!important; border: 1px solid var(--border) !important; "
-            "border-radius: 8px !important; }"
+            "border-radius: 12px !important; }"
         ),
         ".correction-panel summary { color: var(--text) !important; font-weight: 700; }",
         (
-            ".diagnosis-summary { padding: 10px 12px; background: var(--surface-2); "
-            "border-left: 3px solid var(--warning); border-radius: 6px; "
+            ".diagnosis-summary { padding: 16px 18px; background: var(--failure-surface); "
+            "border: 1px solid var(--border); border-left: 4px solid var(--failure); "
+            "border-radius: 14px; box-shadow: 0 8px 22px #d8dee8; "
             "color: var(--text) !important; }"
         ),
         ".diagnosis-summary p { margin: 0; }",
+        (
+            ".next-steps { margin-top: 14px; padding: 14px 16px; background: var(--surface-2); "
+            "border: 1px solid var(--border); border-radius: 14px; }"
+        ),
+        ".next-steps p, .next-steps li { color: var(--text) !important; }",
+        ".evidence-kicker p { margin: 16px 0 8px; color: var(--muted); font-weight: 700; }",
         ".tab-container.visually-hidden[aria-hidden='true'] { display: none !important; }",
         (
             ".result-workspace .tabs { background: var(--surface-1) !important; "
@@ -191,15 +225,15 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             ".result-workspace .tab-nav button { color: var(--muted) !important; "
-            "background: var(--surface-1) !important; }"
+            "background: var(--surface-2) !important; border-radius: 10px !important; }"
         ),
         (
             ".result-workspace .tab-nav button.selected { color: var(--text) !important; "
-            "border-color: var(--primary) !important; }"
+            "border-color: var(--primary) !important; background: var(--primary-soft) !important; }"
         ),
         (
             ".result-workspace [role='tab'] { color: var(--muted) !important; "
-            "background: var(--surface-1) !important; }"
+            "background: var(--surface-2) !important; }"
         ),
         (
             ".result-workspace [role='tab'][aria-selected='true'] { color: var(--primary) "
@@ -215,7 +249,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             ".region table { width: 100%; border-collapse: collapse; color: var(--text); "
-            "font-size: 12px; }"
+            "font-size: 12px; background: var(--surface-1); }"
         ),
         (
             ".region th { padding: 8px 9px; background: var(--surface-2); color: var(--muted); "
@@ -232,7 +266,7 @@ WORKBENCH_CSS = "\n".join(
             "#diagnostic-audio, #diagnostic-audio .wrap, #diagnostic-audio label, "
             "#diagnostic-audio .controls { background: var(--surface-2) !important; "
             "color: var(--text) !important; border-color: var(--border) !important; "
-            "color-scheme: dark; }"
+            "color-scheme: light; }"
         ),
         (
             "#diagnostic-card img { display: block; max-width: 100%; "
@@ -1151,7 +1185,7 @@ def build_app(
 ) -> gr.Blocks:
     """Build the compact workbench without an upload, path, or shell boundary."""
 
-    with gr.Blocks(title="DebugMate 诊断工作台", analytics_enabled=False) as app:
+    with gr.Blocks(title="DebugMate 学习诊断助手", analytics_enabled=False) as app:
         callbacks = UiCallbacks(service, content_origin=content_origin)
         current_state = gr.State(_idle_view())
         session_lease = gr.State(value=None)
@@ -1164,7 +1198,7 @@ def build_app(
         retry_case = gr.State(value=None)
         retry_result = gr.State(value=None)
         with gr.Group(elem_classes=["status-bar", "command-bar"]):
-            gr.Markdown("# DebugMate 诊断工作台", elem_classes="product-title")
+            gr.Markdown("# DebugMate 学习诊断助手", elem_classes="product-title")
             status = gr.Markdown(
                 "● 等待诊断",
                 elem_id="diagnostic-status",
@@ -1182,8 +1216,8 @@ def build_app(
             result_metadata = gr.Markdown("", elem_id="result-metadata", elem_classes="metadata")
         with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes=["region", "control-rail"]):
-                gr.Markdown("## 操作控制台")
-                gr.Markdown("新诊断", elem_classes="section-kicker")
+                gr.Markdown("## 开始诊断")
+                gr.Markdown("开始", elem_classes="section-kicker")
                 redacted_input = gr.Textbox(
                     label="脱敏后的输入",
                     interactive=False,
@@ -1207,13 +1241,13 @@ def build_app(
                     elem_id="local-approve",
                 )
                 gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
-                gr.Markdown("固定回放", elem_classes="section-kicker")
+                gr.Markdown("示例案例", elem_classes="section-kicker")
                 replay = gr.Dropdown(
                     choices=[
                         ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
                         ("长报告与长命令：布局韧性", "long-content"),
                     ],
-                    label="固定回放案例",
+                    label="示例案例",
                     value="module-not-found",
                 )
                 replay_button = gr.Button(
@@ -1249,11 +1283,21 @@ def build_app(
                 gr.Markdown("页面仅展示已验证的脱敏输入与结果。")
 
             with gr.Column(elem_classes=["region", "diagnosis-canvas"]):
-                gr.Markdown("## 诊断主画布")
+                gr.Markdown("## 问题概览")
                 category_confidence = gr.Markdown(
                     "类别：等待诊断\n\n置信度：暂无",
                     elem_classes="diagnosis-summary",
                 )
+                gr.Markdown(
+                    (
+                        "### 下一步怎么做\n\n"
+                        "1. 检查当前 Python 环境是否正确。\n"
+                        "2. 确认缺失依赖包名称，并按建议安装。\n"
+                        "3. 重新运行程序，验证问题是否解决。"
+                    ),
+                    elem_classes="next-steps",
+                )
+                gr.Markdown("### 详细依据", elem_classes="evidence-kicker")
                 fact_table = gr.Markdown(
                     _markdown_table("事实与证据", _FACT_HEADERS, ()),
                     elem_id="fact-table",
@@ -1275,7 +1319,7 @@ def build_app(
             with gr.Column(
                 elem_classes=["region", "results-region", "result-workspace"]
             ):
-                gr.Markdown("## 结果工作区")
+                gr.Markdown("## 结果查看")
                 with gr.Tabs():
                     with gr.Tab("文字报告"):
                         report = gr.Markdown(
