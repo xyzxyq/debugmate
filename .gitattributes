@@ -1,0 +1,2 @@
+# Hash-bound knowledge snapshots must retain canonical LF bytes on Windows.
+knowledge/snapshots/local-rule/*.json text eol=lf
