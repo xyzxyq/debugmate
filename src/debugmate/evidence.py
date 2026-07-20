@@ -1,0 +1,826 @@
+"""Atomic, tamper-evident evidence bundles for DebugMate runs."""
+
+from __future__ import annotations
+
+import hmac
+import json
+import re
+import shutil
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
+from enum import StrEnum
+from io import BytesIO
+from pathlib import Path, PurePosixPath
+from typing import Annotated, Any
+
+from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from debugmate.contracts import CapabilityStatus, CaseId
+from debugmate.hashing import (
+    UnsafeArtifactPath,
+    artifact_metadata,
+    canonical_json_bytes,
+    resolve_artifact_path,
+    sha256_bytes,
+)
+from debugmate.privacy.output_scan import UnsafeExport, assert_export_safe
+
+MANIFEST_VERSION = "1.0.0"
+SHA256_PATTERN = r"^[0-9a-f]{64}$"
+Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
+
+
+class UnsafeEvidenceContent(ValueError):
+    """Raised when caller-provided failure text could expose sensitive data."""
+
+
+class AudioEvidenceNotReady(UnsafeEvidenceContent):
+    """Phase 2 cannot prove that generated audio is semantically derived safely."""
+
+
+class RunStatus(StrEnum):
+    RUNNING = "running"
+    PASSED = "passed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+
+
+class EvidenceRecord(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class ArtifactEntry(EvidenceRecord):
+    path: str
+    mime_type: str
+    bytes: Annotated[int, Field(ge=0)]
+    sha256: Sha256
+
+    @field_validator("path")
+    @classmethod
+    def validate_portable_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            not value
+            or "\\" in value
+            or value.startswith("/")
+            or re.match(r"^[A-Za-z]:", value)
+            or ".." in path.parts
+            or path.as_posix() != value
+        ):
+            raise ValueError("artifact path must be a normalized relative POSIX path")
+        return value
+
+
+class CapabilityEvidence(EvidenceRecord):
+    capability_id: Annotated[str, Field(pattern=r"^C0[1-7]$")]
+    status: CapabilityStatus
+    evidence_path: str | None = None
+    sha256: Sha256 | None = None
+
+    @model_validator(mode="after")
+    def require_evidence_for_pass(self) -> CapabilityEvidence:
+        if self.status is CapabilityStatus.PASS and not (self.evidence_path and self.sha256):
+            raise ValueError("passed capability requires an evidence path and SHA-256")
+        if self.evidence_path is not None:
+            ArtifactEntry.validate_portable_path(self.evidence_path)
+        return self
+
+
+class RunManifest(EvidenceRecord):
+    manifest_version: Annotated[str, Field(pattern=r"^1\.0\.0$")]
+    case_id: CaseId
+    status: RunStatus
+    created_at_utc: datetime
+    completed_at_utc: datetime
+    backend: str
+    workflow_version: str
+    prompt_version: str
+    schema_version: str
+    knowledge_version: str
+    input_sha256: Sha256
+    run_id: str
+    node_states: dict[str, str]
+    latency_ms: Annotated[int, Field(ge=0)]
+    token_usage: dict[str, Annotated[int, Field(ge=0)]]
+    estimated_cost: Annotated[float, Field(ge=0.0)]
+    artifacts: list[ArtifactEntry]
+    probe_capabilities: list[CapabilityEvidence]
+    error_code: Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{1,63}$")] | None = None
+    safe_message: str | None = None
+    facts_revision: Annotated[int, Field(ge=0)] | None = None
+    facts_sha256: Sha256 | None = None
+    routing_rule_version: str | None = None
+    knowledge_build_id: Sha256 | None = None
+    generation_attempts: Annotated[int, Field(ge=0)] | None = None
+    transport_attempts: Annotated[int, Field(ge=0)] | None = None
+    source_run_id: str | None = Field(default=None, pattern=r"^run_[0-9a-f]{32}$")
+
+    @model_validator(mode="after")
+    def validate_manifest_state(self) -> RunManifest:
+        for timestamp in (self.created_at_utc, self.completed_at_utc):
+            if timestamp.tzinfo is None or timestamp.utcoffset() != UTC.utcoffset(timestamp):
+                raise ValueError("manifest timestamps must be UTC aware")
+        if self.completed_at_utc < self.created_at_utc:
+            raise ValueError("completed_at_utc cannot precede created_at_utc")
+        if len({artifact.path for artifact in self.artifacts}) != len(self.artifacts):
+            raise ValueError("artifact paths must be unique")
+        artifact_hashes = {artifact.path: artifact.sha256 for artifact in self.artifacts}
+        for capability in self.probe_capabilities:
+            if (
+                capability.status is CapabilityStatus.PASS
+                and artifact_hashes.get(capability.evidence_path or "") != capability.sha256
+            ):
+                raise ValueError(
+                    "passed capability evidence must match a manifest artifact and SHA-256"
+                )
+        if self.status is RunStatus.FAILED and not (self.error_code and self.safe_message):
+            raise ValueError("failed manifests require an error code and safe message")
+        phase3 = (
+            self.facts_revision,
+            self.facts_sha256,
+            self.routing_rule_version,
+            self.knowledge_build_id,
+            self.generation_attempts,
+            self.transport_attempts,
+        )
+        if any(value is not None for value in phase3) and any(value is None for value in phase3):
+            raise ValueError("diagnosis manifests require complete lineage metadata")
+        return self
+
+
+class BundleVerification(EvidenceRecord):
+    ok: bool
+    issues: list[str]
+    manifest: RunManifest | None = None
+
+
+class EvidenceBundle:
+    """Build one case under a temporary sibling and publish it atomically."""
+
+    def __init__(self, root: Path, case_id: str, temp_path: Path, final_path: Path) -> None:
+        self.root = root
+        self.case_id = case_id
+        self.temp_path = temp_path
+        self.final_path = final_path
+        self._mime_types: dict[str, str] = {}
+        self._sealed_binary_hashes: dict[str, str] = {}
+        self._created_at = datetime.now(UTC)
+
+    @classmethod
+    def begin(cls, root: Path, case_id: str) -> EvidenceBundle:
+        if re.fullmatch(r"case_[0-9a-f]{32}", case_id) is None:
+            raise ValueError("invalid case_id")
+        root.mkdir(parents=True, exist_ok=True)
+        temp_path = root / f".tmp-{case_id}"
+        final_path = root / case_id
+        if temp_path.exists() or final_path.exists():
+            raise FileExistsError(f"evidence bundle already exists for {case_id}")
+        temp_path.mkdir()
+        return cls(root, case_id, temp_path, final_path)
+
+    @classmethod
+    def begin_run(cls, root: Path, case_id: str, run_id: str) -> EvidenceBundle:
+        """Begin an immutable run-specific bundle below its stable case directory."""
+
+        if re.fullmatch(r"case_[0-9a-f]{32}", case_id) is None:
+            raise ValueError("invalid case_id")
+        if re.fullmatch(r"run_[0-9a-f]{32}", run_id) is None:
+            raise ValueError("invalid run_id")
+        case_root = root / case_id
+        case_root.mkdir(parents=True, exist_ok=True)
+        temp_path = case_root / f".tmp-{run_id}"
+        final_path = case_root / run_id
+        if temp_path.exists() or final_path.exists():
+            raise FileExistsError(f"evidence bundle already exists for {case_id}/{run_id}")
+        temp_path.mkdir()
+        return cls(root, case_id, temp_path, final_path)
+
+    def abort(self) -> None:
+        """Remove only this unpublished temporary sibling after a fail-closed error."""
+
+        if self.temp_path.exists() and not self.final_path.exists():
+            shutil.rmtree(self.temp_path)
+
+    def write_json(self, relative_path: str | Path, value: Any) -> Path:
+        _assert_safe_export(value)
+        return self.write_bytes(relative_path, canonical_json_bytes(value), "application/json")
+
+    def write_retrieval_trace(self, trace: Any) -> Path:
+        """Store the bounded retrieval contract, never provider raw chunks."""
+
+        from debugmate.knowledge.retrieval import RetrievalTrace
+
+        if not isinstance(trace, RetrievalTrace):
+            raise TypeError("trace must be a validated RetrievalTrace")
+        validated = RetrievalTrace.model_validate(trace.model_dump(), strict=True)
+        return self.write_json("retrieval.json", validated.model_dump(mode="json"))
+
+    def write_bytes(self, relative_path: str | Path, value: bytes, mime_type: str) -> Path:
+        path = Path(relative_path)
+        normalized_mime = mime_type.lower().split(";", 1)[0].strip()
+        binary_kind = _binary_kind(value)
+        if normalized_mime == "image/png" or path.suffix.lower() == ".png" or binary_kind == "PNG":
+            _assert_binary_safe(value)
+            raise UnsafeEvidenceContent("PNG evidence must be written with write_png")
+        if (
+            normalized_mime.startswith("audio/")
+            or path.suffix.lower() == ".mp3"
+            or binary_kind == "audio"
+        ):
+            _assert_binary_safe(value)
+            raise AudioEvidenceNotReady("audio evidence is not publishable until Phase 4")
+        if not _is_safe_text_contract(path, normalized_mime):
+            # Scan common embedded-text encodings before rejecting an unknown
+            # type. The scan reports only rules/locations, never matched values.
+            _assert_binary_safe(value)
+            raise UnsafeEvidenceContent("unsupported evidence type")
+        _assert_text_payload_safe(value, normalized_mime)
+        return self._write_validated_bytes(path, value, mime_type)
+
+    def write_png(self, relative_path: str | Path, value: bytes) -> Path:
+        """Decode and deterministically re-encode a PNG without ancillary metadata."""
+
+        sanitized = _sanitize_png(value)
+        _assert_binary_safe(sanitized)
+        path = Path(relative_path)
+        if path.suffix.lower() != ".png":
+            raise UnsafeEvidenceContent("PNG evidence path must use the .png extension")
+        written = self._write_validated_bytes(path, sanitized, "image/png")
+        self._sealed_binary_hashes[path.as_posix()] = sha256_bytes(sanitized)
+        return written
+
+    def write_generated_audio(
+        self,
+        relative_path: str | Path,
+        recap_text: str,
+        generate: Callable[[str], tuple[bytes, str]],
+    ) -> Path:
+        """Fail closed until Phase 4 can prove audio semantic derivation."""
+
+        _assert_safe_export(recap_text)
+        del relative_path, generate
+        raise AudioEvidenceNotReady("audio evidence is deferred to Phase 4")
+
+    def _write_validated_bytes(
+        self, relative_path: str | Path, value: bytes, mime_type: str
+    ) -> Path:
+        path = Path(relative_path)
+        target = resolve_artifact_path(self.temp_path, path)
+        portable = path.as_posix()
+        ArtifactEntry.validate_portable_path(portable)
+        if portable == "manifest.json":
+            raise UnsafeArtifactPath("manifest.json is reserved and written only during finalize")
+        if target.exists():
+            raise FileExistsError(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(value)
+        self._mime_types[portable] = mime_type
+        return target
+
+    def finalize(self, manifest: RunManifest) -> Path:
+        if manifest.case_id != self.case_id:
+            raise ValueError("manifest case_id does not match bundle")
+        if manifest.status is RunStatus.RUNNING:
+            raise ValueError("a running manifest cannot be published")
+        if self.final_path.exists():
+            raise FileExistsError(self.final_path)
+
+        actual_paths = {
+            path.relative_to(self.temp_path).as_posix()
+            for path in self.temp_path.rglob("*")
+            if path.is_file()
+        }
+        if actual_paths != set(self._mime_types):
+            raise ValueError("temporary bundle contains untracked artifacts")
+        for path, mime_type in self._mime_types.items():
+            normalized_mime = mime_type.lower().split(";", 1)[0].strip()
+            artifact_bytes = (self.temp_path / Path(path)).read_bytes()
+            binary_kind = _binary_kind(artifact_bytes)
+            artifact_path = Path(path)
+            is_png = (
+                binary_kind == "PNG"
+                or normalized_mime == "image/png"
+                or artifact_path.suffix.lower() == ".png"
+            )
+            is_audio = (
+                binary_kind == "audio"
+                or normalized_mime.startswith("audio/")
+                or artifact_path.suffix.lower() == ".mp3"
+            )
+            if is_audio:
+                raise AudioEvidenceNotReady("audio evidence is deferred to Phase 4")
+            if is_png:
+                if (
+                    binary_kind != "PNG"
+                    or normalized_mime != "image/png"
+                    or artifact_path.suffix.lower() != ".png"
+                    or path not in self._sealed_binary_hashes
+                ):
+                    raise UnsafeEvidenceContent(
+                        "binary evidence is missing a validated safe contract"
+                    )
+                if sha256_bytes(artifact_bytes) != self._sealed_binary_hashes[path]:
+                    raise UnsafeEvidenceContent("sealed binary evidence was modified")
+                _assert_sanitized_png(artifact_bytes)
+                continue
+            if not _is_safe_text_contract(artifact_path, normalized_mime):
+                _assert_binary_safe(artifact_bytes)
+                raise UnsafeEvidenceContent("unsupported evidence type")
+            _assert_text_payload_safe(artifact_bytes, normalized_mime)
+
+        artifacts = [
+            ArtifactEntry.model_validate(
+                artifact_metadata(self.temp_path, Path(path), self._mime_types[path])
+            )
+            for path in sorted(self._mime_types)
+        ]
+        final_manifest = RunManifest.model_validate(
+            {**manifest.model_dump(), "artifacts": artifacts}
+        )
+        _assert_safe_export(final_manifest.model_dump(mode="json"))
+        if _unsafe_manifest_value(final_manifest.model_dump(mode="json")):
+            raise UnsafeEvidenceContent("manifest contains a forbidden sensitive marker or path")
+        manifest_path = self.temp_path / "manifest.json"
+        manifest_path.write_bytes(
+            canonical_json_bytes(final_manifest.model_dump(mode="json")) + b"\n"
+        )
+        self.temp_path.replace(self.final_path)
+        return self.final_path
+
+    def fail(self, error_code: str, safe_message: str) -> Path:
+        if re.search(r"authorization|bearer\s|traceback|api[_ -]?key|secret", safe_message, re.I):
+            raise UnsafeEvidenceContent("failure message contains a forbidden sensitive marker")
+        now = datetime.now(UTC)
+        manifest = RunManifest(
+            manifest_version=MANIFEST_VERSION,
+            case_id=self.case_id,
+            status=RunStatus.FAILED,
+            created_at_utc=self._created_at,
+            completed_at_utc=now,
+            backend="local",
+            workflow_version="unknown",
+            prompt_version="unknown",
+            schema_version="1.0.0",
+            knowledge_version="unknown",
+            input_sha256="0" * 64,
+            run_id=f"local:{self.case_id}",
+            node_states={},
+            latency_ms=max(0, int((now - self._created_at).total_seconds() * 1000)),
+            token_usage={},
+            estimated_cost=0.0,
+            artifacts=[],
+            probe_capabilities=[],
+            error_code=error_code,
+            safe_message=safe_message,
+        )
+        return self.finalize(manifest)
+
+
+def verify_bundle(path: Path) -> BundleVerification:
+    """Recompute every listed artifact and reject missing or unlisted files."""
+
+    manifest_path = path / "manifest.json"
+    if not manifest_path.is_file():
+        return BundleVerification(ok=False, issues=["manifest.json is missing"])
+
+    try:
+        manifest = RunManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return BundleVerification(ok=False, issues=["manifest.json is invalid"])
+
+    issues: list[str] = []
+    run_directory = re.fullmatch(r"run_[0-9a-f]{32}", path.name) is not None
+    expected_case_directory = path.parent.name if run_directory else path.name
+    if manifest.case_id != expected_case_directory:
+        issues.append("manifest case_id does not match directory")
+    if run_directory and manifest.run_id != path.name:
+        issues.append("manifest run_id does not match directory")
+    if manifest.status is RunStatus.RUNNING:
+        issues.append("published manifest cannot have running status")
+
+    listed = {entry.path for entry in manifest.artifacts}
+    actual = {
+        item.relative_to(path).as_posix()
+        for item in path.rglob("*")
+        if item.is_file() and item.name != "manifest.json"
+    }
+    for entry in manifest.artifacts:
+        try:
+            candidate = resolve_artifact_path(path, Path(entry.path))
+        except UnsafeArtifactPath:
+            issues.append(f"unsafe artifact path: {entry.path}")
+            continue
+        if not candidate.is_file():
+            issues.append(f"missing artifact: {entry.path}")
+            continue
+        metadata = artifact_metadata(path, Path(entry.path), entry.mime_type)
+        if metadata["bytes"] != entry.bytes:
+            issues.append(f"byte count mismatch: {entry.path}")
+        if metadata["sha256"] != entry.sha256:
+            issues.append(f"sha256 mismatch: {entry.path}")
+        normalized_mime = entry.mime_type.lower().split(";", 1)[0].strip()
+        artifact_bytes = candidate.read_bytes()
+        binary_kind = _binary_kind(artifact_bytes)
+        try:
+            is_png = (
+                binary_kind == "PNG"
+                or normalized_mime == "image/png"
+                or candidate.suffix.lower() == ".png"
+            )
+            is_audio = (
+                binary_kind == "audio"
+                or normalized_mime.startswith("audio/")
+                or candidate.suffix.lower() == ".mp3"
+            )
+            if is_audio:
+                _assert_binary_safe(artifact_bytes)
+                raise AudioEvidenceNotReady("audio evidence is deferred to Phase 4")
+            if is_png:
+                if not (
+                    binary_kind == "PNG"
+                    and normalized_mime == "image/png"
+                    and candidate.suffix.lower() == ".png"
+                ):
+                    raise UnsafeEvidenceContent("PNG evidence contract is inconsistent")
+                _assert_sanitized_png(artifact_bytes)
+            elif _is_safe_text_contract(Path(entry.path), normalized_mime):
+                _assert_text_payload_safe(artifact_bytes, normalized_mime)
+            else:
+                _assert_binary_safe(artifact_bytes)
+                issues.append(f"unsupported evidence artifact: {entry.path}")
+        except UnsafeEvidenceContent:
+            label = "PNG" if is_png else "audio" if is_audio else "binary"
+            issues.append(f"unsafe {label} artifact: {entry.path}")
+    for unlisted in sorted(actual - listed):
+        issues.append(f"unlisted artifact: {unlisted}")
+
+    return BundleVerification(ok=not issues, issues=issues, manifest=manifest)
+
+
+def _strict_diagnosis_outcome(value: Any) -> Any:
+    from debugmate.diagnosis.workflow import DiagnosisRunOutcome
+
+    if not isinstance(value, DiagnosisRunOutcome):
+        raise TypeError("outcome must be a DiagnosisRunOutcome")
+    return DiagnosisRunOutcome.model_validate(value.model_dump(), strict=True)
+
+
+def _validate_diagnosis_lineage(outcome: Any) -> None:
+    """Recheck the validated local graph immediately before evidence publication."""
+
+    from debugmate.diagnosis.workflow import WorkflowStatus, validate_diagnosis_outcome
+
+    validate_diagnosis_outcome(outcome)
+
+    if outcome.facts.facts_sha256 != outcome.facts_sha256:
+        raise ValueError("outcome facts hash does not match the immutable facts revision")
+    if outcome.facts.revision != outcome.revision:
+        raise ValueError("outcome revision does not match the immutable facts revision")
+    if any(anchor.knowledge_build_id != outcome.knowledge_build_id for anchor in outcome.evidence):
+        raise ValueError("evidence anchor does not match the workflow knowledge build")
+    if outcome.status is WorkflowStatus.COMPLETED:
+        if outcome.diagnosis is None or outcome.generation_failure is not None:
+            raise ValueError("completed outcome requires only a validated diagnosis")
+        if outcome.diagnosis.case_id != outcome.case_id:
+            raise ValueError("diagnosis case ID does not match workflow outcome")
+        if outcome.diagnosis.category != outcome.routing.category:
+            raise ValueError("diagnosis routing does not match workflow outcome")
+        diagnosis_evidence = [item.model_dump(mode="json") for item in outcome.diagnosis.evidence]
+        outcome_evidence = [item.model_dump(mode="json") for item in outcome.evidence]
+        if diagnosis_evidence != outcome_evidence:
+            raise ValueError("diagnosis evidence does not match workflow evidence anchors")
+        facts = {item.fact_id: item.value for item in outcome.facts.facts}
+        observed = {item.fact_id: item.value for item in outcome.diagnosis.observed_facts}
+        if facts != observed:
+            raise ValueError("diagnosis facts do not match workflow facts")
+    elif outcome.diagnosis is not None:
+        raise ValueError("non-completed outcome cannot publish a diagnosis")
+    if outcome.status is WorkflowStatus.GENERATION_FAILED:
+        if outcome.generation_failure is None:
+            raise ValueError("generation-failed outcome requires a typed failure")
+    elif outcome.generation_failure is not None:
+        raise ValueError("only generation-failed outcomes can publish a generation failure")
+
+
+def _extraction_summary(outcome: Any) -> dict[str, Any]:
+    extraction = outcome.extraction
+    return {
+        "case_id": outcome.case_id,
+        "extraction_id": extraction.extraction_id if extraction is not None else None,
+        "source_hashes": [
+            {"source": source, "sha256": digest}
+            for source, digest in sorted(extraction.source_hashes.items())
+        ]
+        if extraction
+        else [],
+        "candidates": [
+            {
+                "candidate_id": item.candidate_id,
+                "field_id": item.field_id.value,
+                "source_kind": item.source_kind.value,
+                "confidence": item.confidence,
+                "locator": item.locator.model_dump(mode="json"),
+            }
+            for item in (extraction.candidates if extraction is not None else [])
+        ],
+    }
+
+
+def _facts_summary(outcome: Any) -> dict[str, Any]:
+    return {
+        "case_id": outcome.case_id,
+        "revision": outcome.revision,
+        "facts_sha256": outcome.facts_sha256,
+        "facts": [
+            {
+                "fact_id": item.fact_id,
+                "field_id": item.field_id.value,
+                "value_sha256": sha256_bytes(item.value.encode("utf-8")),
+                "source_kinds": [source.value for source in item.source_kinds],
+                "confidence": item.confidence,
+                "provenance_candidate_ids": item.provenance_candidate_ids,
+            }
+            for item in outcome.facts.facts
+        ],
+        "applied_corrections": [
+            {key: value for key, value in item.model_dump(mode="json").items() if key != "reason"}
+            for item in outcome.facts.applied_corrections
+        ],
+    }
+
+
+def _validate_correction_source_bundle(outcome: Any, root: Path) -> None:
+    """Bind imported correction lineage to an already verified immutable source bundle."""
+
+    if not outcome.inherited_stages:
+        return
+    source_path = Path(root) / outcome.case_id / outcome.source_run_id
+    verification = verify_bundle(source_path)
+    manifest = verification.manifest
+    if not verification.ok or manifest is None:
+        raise ValueError("corrected outcome source bundle is missing or invalid")
+    if (
+        manifest.case_id != outcome.case_id
+        or manifest.run_id != outcome.source_run_id
+        or manifest.facts_revision != outcome.source_revision
+        or manifest.facts_sha256 != outcome.source_facts_sha256
+    ):
+        raise ValueError("corrected outcome source bundle does not match lineage")
+
+    try:
+        source_facts = json.loads((source_path / "case-facts.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("corrected outcome source facts are unreadable") from error
+    corrections = outcome.facts.applied_corrections
+    latest = corrections[-1]
+    correction_summaries = [
+        {key: value for key, value in item.model_dump(mode="json").items() if key != "reason"}
+        for item in corrections
+    ]
+    if source_facts.get("applied_corrections") != correction_summaries[:-1]:
+        raise ValueError("corrected outcome history does not extend the verified source")
+    if latest.base_revision != outcome.source_revision or not hmac.compare_digest(
+        latest.base_facts_sha256, outcome.source_facts_sha256
+    ):
+        raise ValueError("latest correction does not bind the verified source state")
+
+    source_items = source_facts.get("facts")
+    if not isinstance(source_items, list):
+        raise ValueError("corrected outcome source fact inventory is invalid")
+    source_target = next(
+        (
+            item
+            for item in source_items
+            if isinstance(item, dict)
+            and item.get("fact_id") == latest.fact_id
+            and item.get("field_id") == latest.field_id.value
+        ),
+        None,
+    )
+    if source_target is None or not hmac.compare_digest(
+        str(source_target.get("value_sha256", "")), latest.old_value_sha256
+    ):
+        raise ValueError("latest correction does not match its verified source fact")
+    if (
+        source_target.get("provenance_candidate_ids")
+        != latest.source_provenance_candidate_ids
+        or source_target.get("source_kinds")
+        != [item.value for item in latest.source_source_kinds]
+        or source_target.get("confidence") != latest.source_confidence
+    ):
+        raise ValueError("latest correction provenance does not match its verified source fact")
+
+    final_summary = _facts_summary(outcome)
+    final_items = final_summary["facts"]
+    final_target = next(
+        (
+            item
+            for item in final_items
+            if item["field_id"] == latest.field_id.value
+            and hmac.compare_digest(item["value_sha256"], latest.new_value_sha256)
+        ),
+        None,
+    )
+    if final_target is None:
+        raise ValueError("latest correction does not match the resulting fact state")
+    expected_sources = sorted({*source_target["source_kinds"], "user"})
+    if (
+        final_target["provenance_candidate_ids"] != source_target["provenance_candidate_ids"]
+        or final_target["source_kinds"] != expected_sources
+        or final_target["confidence"] != 1.0
+    ):
+        raise ValueError("latest correction changed data outside the allowed transition")
+    unaffected_source = [item for item in source_items if item is not source_target]
+    unaffected_final = [item for item in final_items if item is not final_target]
+    if unaffected_source != unaffected_final:
+        raise ValueError("latest correction changed unrelated verified source facts")
+
+
+def publish_diagnosis_evidence(outcome: Any, root: Path) -> Path:
+    """Publish one workflow outcome as an atomic, summary-only immutable bundle."""
+
+    from debugmate.diagnosis.workflow import WorkflowStatus
+
+    outcome = _strict_diagnosis_outcome(outcome)
+    _validate_diagnosis_lineage(outcome)
+    _validate_correction_source_bundle(outcome, Path(root))
+    bundle = EvidenceBundle.begin_run(Path(root), outcome.case_id, outcome.run_id)
+    try:
+        if outcome.extraction is not None:
+            bundle.write_json("extraction.json", _extraction_summary(outcome))
+        bundle.write_json("case-facts.json", _facts_summary(outcome))
+        bundle.write_json("sufficiency.json", outcome.sufficiency.model_dump(mode="json"))
+        bundle.write_json("routing.json", outcome.routing.model_dump(mode="json"))
+        if outcome.evidence:
+            bundle.write_json(
+                "retrieval.json",
+                {
+                    "case_id": outcome.case_id,
+                    "knowledge_build_id": outcome.knowledge_build_id,
+                    "anchors": [item.model_dump(mode="json") for item in outcome.evidence],
+                },
+            )
+        if outcome.status is WorkflowStatus.COMPLETED:
+            bundle.write_json("diagnosis.json", outcome.diagnosis.model_dump(mode="json"))
+        elif outcome.status is WorkflowStatus.GENERATION_FAILED:
+            bundle.write_json("failure.json", outcome.generation_failure.model_dump(mode="json"))
+
+        now = datetime.now(UTC)
+        status = {
+            WorkflowStatus.COMPLETED: RunStatus.PASSED,
+            WorkflowStatus.GENERATION_FAILED: RunStatus.FAILED,
+            WorkflowStatus.NEEDS_INFORMATION: RunStatus.BLOCKED,
+            WorkflowStatus.INSUFFICIENT_INFORMATION: RunStatus.BLOCKED,
+        }[outcome.status]
+        node_states = {stage: "inherited" for stage in outcome.inherited_stages}
+        node_states.update({stage: "completed" for stage in outcome.completed_stages})
+        manifest = RunManifest(
+            manifest_version=MANIFEST_VERSION,
+            case_id=outcome.case_id,
+            status=status,
+            created_at_utc=bundle._created_at,
+            completed_at_utc=now,
+            backend=outcome.backend,
+            workflow_version=outcome.workflow_version,
+            prompt_version=outcome.prompt_version,
+            schema_version=outcome.schema_version,
+            knowledge_version=(
+                "local-rule-v1"
+                if outcome.backend == "local-rule-v1"
+                else outcome.knowledge_build_id
+            ),
+            input_sha256=outcome.facts_sha256,
+            run_id=outcome.run_id,
+            node_states=node_states,
+            latency_ms=max(0, int((now - bundle._created_at).total_seconds() * 1000)),
+            token_usage={},
+            estimated_cost=0.0,
+            artifacts=[],
+            probe_capabilities=[],
+            error_code="E_GENERATION_FAILED" if status is RunStatus.FAILED else None,
+            safe_message=(
+                "diagnosis generation failed safely" if status is RunStatus.FAILED else None
+            ),
+            facts_revision=outcome.revision,
+            facts_sha256=outcome.facts_sha256,
+            routing_rule_version=outcome.routing.rule_version,
+            knowledge_build_id=outcome.knowledge_build_id,
+            generation_attempts=outcome.generation_attempts,
+            transport_attempts=outcome.transport_attempts,
+            source_run_id=outcome.source_run_id,
+        )
+        return bundle.finalize(manifest)
+    except Exception:
+        bundle.abort()
+        raise
+
+
+def _unsafe_manifest_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(
+            re.search(r"authorization|bearer\s|api[_ -]?key|secret|traceback", value, re.I)
+            or re.search(r"(?:^|\s)[A-Za-z]:[\\/]", value)
+            or "/Users/" in value
+            or "/home/" in value
+        )
+    if isinstance(value, Mapping):
+        return any(_unsafe_manifest_value(nested) for nested in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return any(_unsafe_manifest_value(nested) for nested in value)
+    return False
+
+
+def _assert_safe_export(value: Any) -> None:
+    try:
+        assert_export_safe(value)
+    except UnsafeExport as error:
+        raise UnsafeEvidenceContent(str(error)) from None
+
+
+_SAFE_TEXT_SUFFIXES = frozenset({".txt", ".md", ".log", ".csv", ".yaml", ".yml"})
+
+
+def _is_safe_text_contract(path: Path, normalized_mime: str) -> bool:
+    suffix = path.suffix.lower()
+    if normalized_mime == "application/json":
+        return suffix == ".json"
+    return normalized_mime.startswith("text/") and suffix in _SAFE_TEXT_SUFFIXES
+
+
+def _assert_text_payload_safe(value: bytes, normalized_mime: str) -> None:
+    try:
+        text = value.decode("utf-8")
+    except UnicodeDecodeError:
+        raise UnsafeEvidenceContent("text evidence must be valid UTF-8") from None
+    if normalized_mime == "application/json":
+        try:
+            parsed = json.loads(text)
+        except (UnicodeError, json.JSONDecodeError):
+            raise UnsafeEvidenceContent("JSON evidence must be valid JSON") from None
+        _assert_safe_export(parsed)
+    else:
+        _assert_safe_export(text)
+
+
+def _sanitize_png(value: bytes) -> bytes:
+    try:
+        with Image.open(BytesIO(value)) as source:
+            if source.format != "PNG" or getattr(source, "n_frames", 1) != 1:
+                raise UnsafeEvidenceContent("evidence image must be a single-frame PNG")
+            source.load()
+            clean = source.copy()
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise UnsafeEvidenceContent("evidence image is not a valid PNG") from error
+    clean.info.clear()
+    output = BytesIO()
+    clean.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _assert_sanitized_png(value: bytes) -> None:
+    try:
+        with Image.open(BytesIO(value)) as image:
+            if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
+                raise UnsafeEvidenceContent("evidence image must be a single-frame PNG")
+            image.load()
+            if image.info:
+                raise UnsafeEvidenceContent("PNG evidence contains ancillary metadata")
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise UnsafeEvidenceContent("evidence image is not a valid PNG") from error
+    _assert_binary_safe(value)
+
+
+def _assert_binary_safe(value: bytes) -> None:
+    """Scan printable embedded strings without ever including their values in errors."""
+
+    printable = "\n".join(match.decode("ascii") for match in re.findall(rb"[\x20-\x7e]{4,}", value))
+    if printable:
+        _assert_safe_export(printable)
+    for width, codecs in (
+        (2, ("utf-16-le", "utf-16-be")),
+        (4, ("utf-32-le", "utf-32-be")),
+    ):
+        for offset in range(width):
+            aligned = value[offset : len(value) - ((len(value) - offset) % width)]
+            for codec in codecs:
+                if not aligned:
+                    continue
+                decoded = aligned.decode(codec, errors="ignore")
+                printable_wide = "\n".join(re.findall(r"[\x20-\x7e]{4,}", decoded))
+                if printable_wide:
+                    _assert_safe_export(printable_wide)
+
+
+def _is_mp3(value: bytes) -> bool:
+    return value.startswith(b"ID3") or (
+        len(value) >= 2 and value[0] == 0xFF and value[1] & 0xE0 == 0xE0
+    )
+
+
+def _binary_kind(value: bytes) -> str | None:
+    if value.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "PNG"
+    if _is_mp3(value):
+        return "audio"
+    return None

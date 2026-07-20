@@ -1,0 +1,25 @@
+{
+  "schema_version": "debugmate-course-video-1.0",
+  "generated_on": "2026-07-19",
+  "video": {
+    "path": "deliverables/DebugMate-V0.1-demo.mp4",
+    "bytes": 10469035,
+    "sha256": "78464aadd30599bbc2d6776f062b001be6022f34b56000fb0fe021cd4aaecb1b",
+    "duration_seconds": 358.923,
+    "resolution": "1920x1080",
+    "fps": 30,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "tts_backend": "Windows SAPI",
+    "voice": "Microsoft Huihui Desktop"
+  },
+  "subtitles": {
+    "path": "deliverables/DebugMate-V0.1-subtitles.srt",
+    "bytes": 5513,
+    "sha256": "ad9b17d0e27eb5b63d416b99c1860e44fdeab54ea727e9d3a964671f32e7552a"
+  },
+  "scenes": 8,
+  "source_script": "docs/course/video-script.md",
+  "visual_identity": "video/DESIGN.md",
+  "hyperframes_attempt": "timed_out_during_doctor; deterministic local fallback used"
+}

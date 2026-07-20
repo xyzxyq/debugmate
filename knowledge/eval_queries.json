@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "cases": [
+    {
+      "case_id": "case_00000000000000000000000000000001",
+      "category": "dependency_environment",
+      "query": "虚构学生新建环境后导入已安装的包仍提示 ModuleNotFoundError，应检查哪些环境与安装位置？",
+      "expected_anchors": [
+        {"source_id": "python-venv", "locator": "#creating-virtual-environments"},
+        {"source_id": "pip-user-guide", "locator": "#installing-packages"}
+      ]
+    },
+    {
+      "case_id": "case_00000000000000000000000000000002",
+      "category": "path_permission",
+      "query": "虚构 Windows 账号运行激活脚本时被执行策略阻止，如何确认策略范围而不修改真实系统？",
+      "expected_anchors": [
+        {"source_id": "windows-policy", "locator": "#manage-the-execution-policy"}
+      ]
+    },
+    {
+      "case_id": "case_00000000000000000000000000000003",
+      "category": "python_runtime",
+      "query": "虚构训练脚本抛出 ValueError 并显示 traceback，应该怎样定位异常类型与触发语句？",
+      "expected_anchors": [
+        {"source_id": "python-errors", "locator": "#exceptions"},
+        {"source_id": "python-errors", "locator": "#handling-exceptions"}
+      ]
+    },
+    {
+      "case_id": "case_00000000000000000000000000000004",
+      "category": "tensor_shape_dtype",
+      "query": "虚构张量调用 view 时提示尺寸与步长不兼容，应核对哪些连续性和形状约束？",
+      "expected_anchors": [
+        {"source_id": "pytorch-tensor-view", "locator": "#torch-tensor-view"}
+      ]
+    },
+    {
+      "case_id": "case_00000000000000000000000000000005",
+      "category": "cuda_memory",
+      "query": "虚构 CUDA 训练任务出现 out of memory，如何区分已分配显存与缓存分配器保留显存？",
+      "expected_anchors": [
+        {"source_id": "pytorch-cuda", "locator": "#memory-management"}
+      ]
+    },
+    {
+      "case_id": "case_00000000000000000000000000000006",
+      "category": "model_loading",
+      "query": "虚构 PyTorch 检查点加载失败并涉及 weights_only，应该检查哪些序列化兼容约束？",
+      "expected_anchors": [
+        {"source_id": "pytorch-serialization", "locator": "#torch-load-with-weights-only-true"}
+      ]
+    },
+    {
+      "case_id": "case_00000000000000000000000000000007",
+      "category": "unknown",
+      "query": "虚构报错信息不足且只有异常名称，首次诊断应从哪里确认 Python 异常与 traceback 的基本结构？",
+      "expected_anchors": [
+        {"source_id": "python-errors", "locator": "#exceptions"}
+      ]
+    }
+  ]
+}

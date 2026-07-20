@@ -1,0 +1,17 @@
+# 不可运行：仅记录预期变量，不是 Dify 导出文件，也不是云端通过证据。
+kind: debugmate-dsl-placeholder
+version: placeholder-v1
+inputs:
+  - error_text
+  - error_image
+  - code
+  - environment
+outputs:
+  - diagnosis_json
+required_nodes:
+  - vision_extraction
+  - knowledge_retrieval
+  - strict_diagnosis_output
+notes:
+  replace_with_real_export: true
+  reimport_evidence_required: true

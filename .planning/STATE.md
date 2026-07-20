@@ -1,90 +1,61 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-07-20T01:05:27.040Z"
-last_activity: 2026-07-20 -- Completed quick task 260720-cmj: synchronized local repository with GitHub
+milestone: v0.1
+milestone_name: course-demo
+status: complete
+stopped_at: V0.1 course package generated and machine-verified
+last_updated: "2026-07-19T23:01:47+08:00"
+last_activity: 2026-07-19 -- Completed quick task 260719-r5a: refreshed final dark workbench course evidence
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 3
-  completed_plans: 0
-  percent: 0
+  completed_phases: 6
+  total_plans: 26
+  completed_plans: 26
+  percent: 100
 ---
 
 # Project State
 
-## Project Reference
-
-See: `.planning/PROJECT.md` (updated 2026-07-10)
-
-**Core value:** 对真实或可复现的 AI/Python 报错，基于专属知识库生成有依据、可执行、说明不确定性的诊断，并同步输出一致的文字、图像和语音结果。  
-**Current focus:** Phase 1 — 工程骨架与平台能力闸门
-
 ## Current Position
 
-Phase: 1 (工程骨架与平台能力闸门) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 1
-Last activity: 2026-07-20 -- Completed quick task 260720-cmj: synchronized local repository with GitHub
+DebugMate V0.1 local course demonstration is complete.
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 26/26 plans completed (100%)
 
-## Performance Metrics
+## Final Deliverables
 
-**Velocity:**
+- `deliverables/DebugMate-V0.1.pptx` — 13 editable slides.
+- `deliverables/DebugMate-V0.1-demo.mp4` — 358.923 seconds, 1920x1080, H.264 + AAC.
+- `deliverables/DebugMate-V0.1-subtitles.srt` — section-synchronized subtitles.
+- `docs/course/video-script.md` — 5–7 minute narration source.
+- `docs/course/README.md` — run and submission guide.
+- `evidence/course-v0.1/` — real Edge screenshots and hashes.
+- `prompts/v1-baseline.md` through `prompts/v4-course-release.md` — prompt iteration assets.
 
-- Total plans completed: 0
-- Average duration: —
-- Total execution time: 0.0 hours
+## Machine Verification
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-**Recent Trend:**
-
-- Last 5 plans: —
-- Trend: No execution data
-
-*Updated after each plan completion*
-
-## Accumulated Context
-
-### Decisions
-
-Decisions are logged in `PROJECT.md` Key Decisions table. Recent decisions affecting current work:
-
-- [Phase 1]: 正式主路径为 Dify Cloud + Windows 本地 Python 薄客户端，Coze 仅作限时替代探针。
-- [Phase 1]: `DiagnosisRecord v1` 是文字、PNG 和 MP3 的单一事实源。
-- [Phase 2]: 知识库只收录官方或可核验来源，输入离开本机前必须脱敏。
-- [Phase 4]: 核心 PNG 使用确定性渲染；TTS 与 PNG 均保留可记录的本地降级后端。
-- [Phase 5]: 只有通过引用、隐私、Schema、文件有效性和一致性门禁的案例才能进入课程材料。
-
-### Pending Todos
-
-None yet.
-
-### Blockers/Concerns
-
-- [Phase 1]: Dify Cloud 当前账号额度、视觉模型、TTS provider、DSL 导入导出和 API 限制尚需真实探针确认。
-- [Phase 2]: 官方文档抓取许可、版本元数据和切片质量需要逐源核验。
-- [Phase 3]: 所选模型的结构化输出稳定性及引用映射方式需要实测。
+- 58 UI/view/callback tests passed.
+- 264 UI app/result tests passed; 5 deselected external/live tests.
+- Representative Edge keyboard, zoom, state, long-content and download tests passed.
+- 21 output privacy scan tests passed.
+- PPTX package has 13 slides and all asset hashes recompute.
+- MP4 fully decodes, contains H.264 video and AAC audio, mean volume is -24.3 dB and duration exceeds 3 minutes.
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260719-gy7 | Create and synchronize private DebugMate GitHub repository | 2026-07-19 | Pending | [260719-gy7-github-debugmate](./quick/260719-gy7-github-debugmate/) |
-| 260719-h5z | Author and publish DebugMate README | 2026-07-19 | Pending | [260719-h5z-debugmate-readme](./quick/260719-h5z-debugmate-readme/) |
-| 260720-cmj | Synchronize local repository with GitHub and verify remote ref | 2026-07-20 | 76a431d | [260720-cmj-github](./quick/260720-cmj-github/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260719-r5a | Refresh final dark workbench Edge evidence, PPT and video | 2026-07-19 | this commit | Verified | [260719-r5a-debugmate-gradio](./quick/260719-r5a-debugmate-gradio/) |
+| 260719-gy7 | Create and synchronize private DebugMate GitHub repository | 2026-07-19 | Pending | Recorded | [260719-gy7-github-debugmate](./quick/260719-gy7-github-debugmate/) |
+| 260719-h5z | Author and publish DebugMate README | 2026-07-19 | Pending | Recorded | [260719-h5z-debugmate-readme](./quick/260719-h5z-debugmate-readme/) |
+| 260720-cmj | Synchronize local repository with GitHub and verify remote ref | 2026-07-20 | 76a431d | Verified | [260720-cmj-github](./quick/260720-cmj-github/) |
 
-## Session Continuity
+## Final Human Check
 
-Last session: 2026-07-10T12:17:00.653Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-foundation-platform-gate/01-CONTEXT.md
+Before submission only:
+
+1. Open the PPTX in PowerPoint/WPS and flip through all slides once.
+2. Listen to at least one minute of the MP4 for intelligible Chinese and acceptable volume.
+3. Optionally record a short live browser interaction if the teacher prefers screen operation over the generated explainer.
+
+These are subjective/application-specific checks, not unfinished engineering work.

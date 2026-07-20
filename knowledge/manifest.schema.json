@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://debugmate.local/schemas/knowledge-source-manifest-v1.json",
+  "title": "DebugMate Knowledge Source Manifest",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "source_id",
+      "title",
+      "url",
+      "final_url",
+      "product",
+      "version_scope",
+      "platform",
+      "allowed_domain",
+      "heading_patterns",
+      "error_categories",
+      "retrieved_at",
+      "status_code",
+      "etag",
+      "last_modified",
+      "sha256",
+      "license_or_terms_note",
+      "selection_reason"
+    ],
+    "properties": {
+      "source_id": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "title": {"type": "string", "minLength": 1},
+      "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+      "final_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+      "product": {
+        "enum": [
+          "python",
+          "pip",
+          "pytorch",
+          "cuda",
+          "huggingface",
+          "ultralytics",
+          "windows"
+        ]
+      },
+      "version_scope": {"type": "string", "minLength": 1},
+      "platform": {"type": "string", "minLength": 1},
+      "allowed_domain": {"type": "string", "minLength": 1},
+      "heading_patterns": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      },
+      "error_categories": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "enum": [
+            "dependency_environment",
+            "path_permission",
+            "python_runtime",
+            "tensor_shape_dtype",
+            "cuda_memory",
+            "model_loading",
+            "unknown"
+          ]
+        }
+      },
+      "retrieved_at": {"type": "string", "format": "date-time"},
+      "status_code": {"type": "integer", "minimum": 200, "maximum": 299},
+      "etag": {
+        "anyOf": [
+          {"type": "string", "minLength": 1},
+          {"type": "null"}
+        ]
+      },
+      "last_modified": {
+        "anyOf": [
+          {"type": "string", "minLength": 1},
+          {"type": "null"}
+        ]
+      },
+      "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "license_or_terms_note": {"type": "string", "minLength": 1},
+      "selection_reason": {"type": "string", "minLength": 1}
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"candidates":[{"category":"dependency_environment","fact_ids":["fact_d15385d635ae0944ba6ae5c3efc9d0f7"],"rule_id":"exception.module-not-found","score":1.0}],"category":"dependency_environment","decision_stage":"final","model_category":null,"reason":"matched deterministic local rule","rule_version":"router-v1"}

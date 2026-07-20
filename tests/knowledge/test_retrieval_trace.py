@@ -1,0 +1,661 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+from datetime import UTC, datetime
+from pathlib import Path
+
+import httpx
+import pytest
+from pydantic import ValidationError
+
+from debugmate.cli import main
+from debugmate.contracts import ErrorCategory, new_case_id
+from debugmate.evidence import EvidenceBundle
+from debugmate.knowledge.build import ImmutableBuildCollision, build_knowledge
+from debugmate.knowledge.models import SourceRegistry, load_registry
+from debugmate.knowledge.retrieval import (
+    EvaluationCase,
+    ExpectedAnchor,
+    RetrievalHit,
+    RetrievalTrace,
+    evaluate_retrieval_cases,
+    load_evaluation_cases,
+    load_retrieval_traces,
+    run_offline_retrieval,
+    validate_retrieval_trace,
+    write_offline_retrieval_evidence,
+)
+from debugmate.privacy.output_scan import UnsafeExport
+
+
+def _query_hash(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
+def _canonical_hash(value: object) -> str:
+    payload = (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
+        "utf-8"
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _trusted_identity(build_path: Path) -> tuple[str, str]:
+    manifest = json.loads((build_path / "manifest.json").read_text(encoding="utf-8"))
+    return manifest["build_id"], manifest["content_hash"]
+
+
+def _manifest(tmp_path: Path) -> Path:
+    build_id = "b" * 64
+    manifest = {
+        "build_id": build_id,
+        "content_hash": "c" * 64,
+        "sources": [
+            {
+                "source_id": "python-errors",
+                "url": "https://docs.python.org/3/tutorial/errors.html",
+                "retrieved_at": "2026-07-10T08:00:00Z",
+            },
+            {
+                "source_id": "pytorch-cuda",
+                "url": "https://docs.pytorch.org/docs/2.13/notes/cuda.html",
+                "retrieved_at": "2026-07-11T08:00:00Z",
+            },
+        ],
+        "notes": [
+            {
+                "source_id": "python-errors",
+                "locators": ["#exceptions", "#handling-exceptions"],
+            },
+            {
+                "source_id": "pytorch-cuda",
+                "locators": ["#memory-management"],
+            },
+        ],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    return path
+
+
+def _case(
+    category: ErrorCategory = ErrorCategory.DEPENDENCY_ENVIRONMENT,
+) -> EvaluationCase:
+    return EvaluationCase(
+        case_id=new_case_id(),
+        category=category,
+        query="虚构学生环境中导入包失败，但不包含任何真实路径",
+        expected_anchors=[ExpectedAnchor(source_id="python-errors", locator="#exceptions")],
+    )
+
+
+def _trace(case: EvaluationCase, *, hits: list[RetrievalHit]) -> RetrievalTrace:
+    return RetrievalTrace(
+        case_id=case.case_id,
+        query_sha256=_query_hash(case.query),
+        knowledge_build_id="b" * 64,
+        retrieved_at_utc=datetime(2026, 7, 11, 9, 0, tzinfo=UTC),
+        hits=hits,
+    )
+
+
+def _hit(
+    *,
+    chunk_id: str = "python-errors:0",
+    content_summary: str = "Traceback anatomy",
+    source_id: str = "python-errors",
+    source_url: str = "https://docs.python.org/3/tutorial/errors.html",
+    locator: str = "#exceptions",
+    relevance_score: float = 0.91,
+) -> RetrievalHit:
+    return RetrievalHit(
+        chunk_id=chunk_id,
+        content_summary=content_summary,
+        source_id=source_id,
+        source_url=source_url,
+        locator=locator,
+        relevance_score=relevance_score,
+    )
+
+
+def test_retrieval_hit_keeps_only_auditable_bounded_source_fields() -> None:
+    hit = _hit()
+
+    assert hit.relevance_score == 0.91
+    assert "content" not in hit.model_dump()
+    with pytest.raises(ValidationError):
+        _hit(content_summary="x" * 501)
+    with pytest.raises(ValidationError):
+        _hit(source_url="http://docs.python.org/3/tutorial/errors.html")
+    with pytest.raises(ValidationError):
+        _hit(relevance_score=1)  # type: ignore[arg-type]
+
+
+def test_trace_rejects_duplicate_chunks_and_unsorted_scores() -> None:
+    case = _case()
+
+    with pytest.raises(ValidationError, match="duplicate"):
+        _trace(case, hits=[_hit(), _hit()])
+    with pytest.raises(ValidationError, match="descending"):
+        _trace(
+            case,
+            hits=[
+                _hit(relevance_score=0.2),
+                _hit(chunk_id="python-errors#exceptions-1", relevance_score=0.9),
+            ],
+        )
+
+
+def test_trace_validation_binds_registry_build_url_and_query(tmp_path: Path) -> None:
+    case = _case()
+    manifest = _manifest(tmp_path)
+    registry = load_registry(Path("knowledge/sources.json"))
+    trace = _trace(case, hits=[_hit()])
+
+    assert validate_retrieval_trace(trace, manifest, registry, case) == trace
+
+    wrong_url = _trace(
+        case,
+        hits=[_hit(source_url="https://docs.python.org/3/library/venv.html")],
+    )
+    with pytest.raises(ValueError, match="URL"):
+        validate_retrieval_trace(wrong_url, manifest, registry, case)
+
+    unknown = _trace(
+        case,
+        hits=[
+            _hit(
+                source_id="missing-source",
+                source_url="https://docs.python.org/3/missing.html",
+            )
+        ],
+    )
+    with pytest.raises(ValueError, match="absent"):
+        validate_retrieval_trace(unknown, manifest, registry, case)
+
+    changed_query = case.model_copy(update={"query": case.query + " changed"})
+    with pytest.raises(ValueError, match="query"):
+        validate_retrieval_trace(trace, manifest, registry, changed_query)
+
+
+def test_validation_and_evidence_reject_model_copy_bypass(tmp_path: Path) -> None:
+    case = _case()
+    invalid_hit = _hit().model_copy(update={"content_summary": "raw" * 200})
+    invalid_trace = _trace(case, hits=[_hit()]).model_copy(update={"hits": [invalid_hit]})
+
+    with pytest.raises(ValidationError):
+        validate_retrieval_trace(invalid_trace, _manifest(tmp_path), case=case)
+
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case.case_id)
+    with pytest.raises(ValidationError):
+        bundle.write_retrieval_trace(invalid_trace)
+
+
+def test_trace_rejects_locator_borrowed_from_another_source(tmp_path: Path) -> None:
+    case = _case()
+    cross_paired = _trace(
+        case,
+        hits=[_hit(locator="#memory-management")],
+    )
+
+    with pytest.raises(ValueError, match="locator"):
+        validate_retrieval_trace(cross_paired, _manifest(tmp_path), case=case)
+
+    result = evaluate_retrieval_cases([case], [cross_paired])
+    assert result.by_category[ErrorCategory.DEPENDENCY_ENVIRONMENT].hit_rate == 0.0
+
+
+def test_evaluation_strictly_revalidates_model_copies_and_direct_dicts(
+    tmp_path: Path,
+) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+
+    valid = evaluate_retrieval_cases(
+        [case.model_dump()],
+        [trace.model_dump()],
+        build_manifest=_manifest(tmp_path),
+    )
+    assert valid.by_category[case.category].hit_rate == 1.0
+
+    invalid_case = case.model_copy(update={"query": ""})
+    with pytest.raises(ValidationError):
+        evaluate_retrieval_cases([invalid_case], [trace])
+    with pytest.raises(ValidationError):
+        evaluate_retrieval_cases([{"case_id": case.case_id}], [trace])
+
+
+def test_category_hit_rate_and_blind_spot_are_reported(tmp_path: Path) -> None:
+    dependency = _case(ErrorCategory.DEPENDENCY_ENVIRONMENT)
+    cuda = _case(ErrorCategory.CUDA_MEMORY).model_copy(
+        update={
+            "expected_anchors": [
+                ExpectedAnchor(source_id="pytorch-cuda", locator="#memory-management")
+            ],
+        }
+    )
+    traces = [_trace(dependency, hits=[_hit()]), _trace(cuda, hits=[])]
+
+    result = evaluate_retrieval_cases(
+        [cuda, dependency], traces, build_manifest=_manifest(tmp_path), top_k=3
+    )
+
+    assert result.by_category[ErrorCategory.DEPENDENCY_ENVIRONMENT].hit_rate == 1.0
+    assert result.by_category[ErrorCategory.CUDA_MEMORY].hit_rate == 0.0
+    assert ErrorCategory.CUDA_MEMORY.value in result.blind_spots
+    assert result.blind_spots == sorted(result.blind_spots)
+    assert result.by_category[ErrorCategory.CUDA_MEMORY].uncovered_expected_sources == [
+        "pytorch-cuda"
+    ]
+    assert (
+        result.by_category[ErrorCategory.CUDA_MEMORY].last_source_update_utc
+        == "2026-07-11T08:00:00Z"
+    )
+
+
+def test_evaluation_rejects_missing_duplicate_or_wrong_build_traces(
+    tmp_path: Path,
+) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+
+    with pytest.raises(ValueError, match="exactly one"):
+        evaluate_retrieval_cases([case], [], build_manifest=_manifest(tmp_path))
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_retrieval_cases([case], [trace, trace], build_manifest=_manifest(tmp_path))
+    with pytest.raises(ValueError, match="build"):
+        evaluate_retrieval_cases(
+            [case],
+            [trace.model_copy(update={"knowledge_build_id": "d" * 64})],
+            build_manifest=_manifest(tmp_path),
+        )
+
+
+def test_fixed_query_set_covers_every_category_and_known_registry_sources() -> None:
+    cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    registry = load_registry(Path("knowledge/sources.json"))
+    known_ids = {source.source_id for source in registry.sources}
+
+    assert {case.category for case in cases} == set(ErrorCategory)
+    assert len({case.case_id for case in cases}) == len(cases)
+    assert all(
+        {anchor.source_id for anchor in case.expected_anchors} <= known_ids for case in cases
+    )
+    assert all(case.expected_anchors for case in cases)
+
+
+def test_retrieval_evidence_contains_summary_but_never_raw_chunk(tmp_path: Path) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+    bundle = EvidenceBundle.begin(tmp_path / "evidence", case.case_id)
+
+    output = bundle.write_retrieval_trace(trace)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert output.name == "retrieval.json"
+    assert payload["hits"][0]["content_summary"] == "Traceback anatomy"
+    assert "content" not in payload["hits"][0]
+
+
+def test_coverage_cli_includes_retrieval_evaluation_when_fixtures_are_given(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _case()
+    trace = _trace(case, hits=[_hit()])
+    _manifest(tmp_path)
+    queries = tmp_path / "queries.json"
+    queries.write_text(
+        json.dumps({"version": "1.0.0", "cases": [case.model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+    traces = tmp_path / "traces.json"
+    traces.write_text(
+        json.dumps({"traces": [trace.model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "knowledge-coverage",
+                str(tmp_path),
+                "--eval-queries",
+                str(queries),
+                "--retrieval-traces",
+                str(traces),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    evaluation = payload["retrieval_evaluation"]
+    assert evaluation["knowledge_build_id"] == "b" * 64
+    assert evaluation["by_category"]["dependency_environment"]["hit_rate"] == 1.0
+
+
+def _fixture_build(tmp_path: Path) -> Path:
+    registry = load_registry(Path("knowledge/sources.json"))
+    source = next(item for item in registry.sources if item.source_id == "python-errors")
+    fixture = Path("tests/fixtures/knowledge/python-errors.html").read_bytes()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Last-Modified": "Fri, 10 Jul 2026 08:00:00 GMT",
+            },
+            content=fixture,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = build_knowledge(
+            SourceRegistry(registry_version=registry.registry_version, sources=[source]),
+            tmp_path,
+            client,
+        )
+    return result.path
+
+
+@pytest.mark.parametrize(
+    "tampered_text",
+    [
+        "- #invented-locator：This locator was never published.\n",
+        "- #exceptions：Contact leaked.student@example.com for access.\n",
+    ],
+    ids=["locator", "email"],
+)
+def test_offline_runner_rejects_tampered_note_before_trace_creation(
+    tmp_path: Path,
+    tampered_text: str,
+) -> None:
+    build_path = _fixture_build(tmp_path / "source")
+    copied_build = tmp_path / "copied" / build_path.name
+    copied_build.parent.mkdir()
+    shutil.copytree(build_path, copied_build)
+    note_path = copied_build / "notes" / "python-errors.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8") + tampered_text,
+        encoding="utf-8",
+    )
+    original_build_id = json.loads(
+        (copied_build / "manifest.json").read_text(encoding="utf-8")
+    )["build_id"]
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(ImmutableBuildCollision, match="note bytes"):
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(copied_build),
+                "--expected-build-id",
+                original_build_id,
+                "--expected-content-hash",
+                _trusted_identity(copied_build)[1],
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert copied_build.name == original_build_id
+    assert not output.exists()
+
+
+def test_offline_runner_rejects_self_authorized_recomputed_build(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path / "source")
+    trusted_build_id, trusted_content_hash = _trusted_identity(build_path)
+    copied_build = tmp_path / "copied" / build_path.name
+    copied_build.parent.mkdir()
+    shutil.copytree(build_path, copied_build)
+
+    note_path = copied_build / "notes" / "python-errors.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8")
+        + "\n- #exceptions: attacker-authored but internally self-consistent.\n",
+        encoding="utf-8",
+    )
+    manifest_path = copied_build / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["notes"][0]["note_sha256"] = hashlib.sha256(note_path.read_bytes()).hexdigest()
+    source_fields = (
+        "source_id",
+        "title",
+        "url",
+        "product",
+        "version_scope",
+        "platform",
+        "allowed_domain",
+        "heading_patterns",
+        "error_categories",
+        "license_or_terms_note",
+        "selection_reason",
+        "sha256",
+        "final_url",
+        "status_code",
+    )
+    build_identity = {
+        "registry_version": manifest["registry_version"],
+        "source_hashes": [
+            {
+                "source_id": source["source_id"],
+                "sha256": _canonical_hash(
+                    {field: source[field] for field in source_fields}
+                ),
+            }
+            for source in manifest["sources"]
+        ],
+        "note_hashes": [
+            {"source_id": note["source_id"], "sha256": note["note_sha256"]}
+            for note in manifest["notes"]
+        ],
+        "failed_sources": manifest["failures"],
+        "extractor_version": manifest["extractor_version"],
+        "generator_version": manifest["generator_version"],
+        "chunk_settings": manifest["chunk_settings"],
+    }
+    manifest["build_id"] = _canonical_hash(build_identity)
+    manifest["content_hash"] = _canonical_hash(
+        {
+            "build_id": manifest["build_id"],
+            "status": manifest["status"],
+            "notes": [note["note_sha256"] for note in manifest["notes"]],
+            "failures": manifest["failures"],
+        }
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    renamed_build = copied_build.with_name(manifest["build_id"])
+    copied_build.rename(renamed_build)
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(ImmutableBuildCollision, match="trusted build identity"):
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(renamed_build),
+                "--expected-build-id",
+                trusted_build_id,
+                "--expected-content-hash",
+                trusted_content_hash,
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert not output.exists()
+
+
+def test_retrieval_eval_cli_rejects_path_only_invocation_before_artifacts(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path / "source")
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(build_path),
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert not output.exists()
+
+
+def test_retrieval_evidence_rejects_secret_before_creating_any_artifact(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path / "build")
+    cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    build_id, content_hash = _trusted_identity(build_path)
+    run = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+    )
+    first_trace = next(trace for trace in run.traces if trace.hits)
+    unsafe_hit = first_trace.hits[0].model_copy(
+        update={"content_summary": "Contact leaked.student@example.com for access."}
+    )
+    unsafe_trace = first_trace.model_copy(update={"hits": [unsafe_hit]})
+    unsafe_run = run.model_copy(
+        update={"traces": [unsafe_trace, *run.traces[1:]]}
+    )
+    output = tmp_path / "retrieval-evidence"
+
+    with pytest.raises(UnsafeExport):
+        write_offline_retrieval_evidence(unsafe_run, output)
+
+    assert not output.exists()
+
+
+def test_offline_runner_reads_published_notes_and_keeps_honest_misses(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path)
+    cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    build_id, content_hash = _trusted_identity(build_path)
+
+    run = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+        top_k=3,
+    )
+
+    assert run.backend == "offline_fixture"
+    assert {trace.case_id for trace in run.traces} == {case.case_id for case in cases}
+    assert len(run.traces) == len(ErrorCategory)
+    python_case = next(case for case in cases if case.category is ErrorCategory.PYTHON_RUNTIME)
+    python_trace = next(trace for trace in run.traces if trace.case_id == python_case.case_id)
+    assert python_trace.hits
+    assert python_trace.hits[0].source_id == "python-errors"
+    assert python_trace.hits[0].chunk_id == "python-errors:0"
+    assert python_trace.hits[0].locator.startswith("#")
+    assert len(python_trace.hits[0].content_summary) <= 500
+    dependency_case = next(
+        case for case in cases if case.category is ErrorCategory.DEPENDENCY_ENVIRONMENT
+    )
+    dependency_trace = next(
+        trace for trace in run.traces if trace.case_id == dependency_case.case_id
+    )
+    assert dependency_trace.hits == []
+    assert ErrorCategory.DEPENDENCY_ENVIRONMENT.value in run.evaluation.blind_spots
+    assert (
+        run.evaluation.by_category[ErrorCategory.DEPENDENCY_ENVIRONMENT].last_source_update_utc
+        is None
+    )
+
+
+def test_offline_retrieval_evidence_is_reproducible_and_contains_no_raw_notes(
+    tmp_path: Path,
+) -> None:
+    build_path = _fixture_build(tmp_path)
+    cases = load_evaluation_cases(Path("knowledge/eval_queries.json"))
+    build_id, content_hash = _trusted_identity(build_path)
+    first = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+    )
+    second = run_offline_retrieval(
+        cases,
+        build_path,
+        expected_build_id=build_id,
+        expected_content_hash=content_hash,
+    )
+
+    first_paths = write_offline_retrieval_evidence(first, tmp_path / "one")
+    second_paths = write_offline_retrieval_evidence(second, tmp_path / "two")
+
+    assert first_paths.run.read_bytes() == second_paths.run.read_bytes()
+    assert first_paths.traces.read_bytes() == second_paths.traces.read_bytes()
+    assert load_retrieval_traces(first_paths.traces) == first.traces
+    payload = json.loads(first_paths.run.read_text(encoding="utf-8"))
+    assert payload["backend"] == "offline_fixture"
+    assert "raw_chunk" not in first_paths.run.read_text(encoding="utf-8")
+    assert "SECRET_RAW_NOTE_BODY" not in first_paths.run.read_text(encoding="utf-8")
+
+
+def test_retrieval_eval_cli_generates_actual_offline_evidence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    build_path = _fixture_build(tmp_path)
+    output = tmp_path / "retrieval-evidence"
+    build_id, content_hash = _trusted_identity(build_path)
+
+    assert (
+        main(
+            [
+                "knowledge-retrieval-eval",
+                str(build_path),
+                "--expected-build-id",
+                build_id,
+                "--expected-content-hash",
+                content_hash,
+                "--eval-queries",
+                "knowledge/eval_queries.json",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["backend"] == "offline_fixture"
+    assert summary["trace_count"] == len(ErrorCategory)
+    assert Path(summary["run_path"]).is_file()
+    assert Path(summary["traces_path"]).is_file()
+
+
+def test_default_knowledge_wrapper_runs_retrieval_before_coverage() -> None:
+    script = Path("scripts/build_knowledge.ps1").read_text(encoding="utf-8")
+
+    retrieval = script.index("knowledge-retrieval-eval")
+    coverage = script.index("knowledge-coverage")
+    assert retrieval < coverage
+    assert "knowledge\\eval_queries.json" in script
+    assert "--retrieval-traces" in script
+    assert "offline_fixture" in script
+    assert "--expected-build-id $build.build_id" in script
+    assert "--expected-content-hash $build.content_hash" in script

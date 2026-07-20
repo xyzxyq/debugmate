@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "case_key": "module_not_found",
+  "case_id": "case_00000000000000000000000000000000",
+  "facts": {
+    "exception_type": "ModuleNotFoundError",
+    "traceback_key_line": "ModuleNotFoundError: No module named 'demo_missing_pkg'",
+    "package": "demo_missing_pkg",
+    "version": "3.13.5"
+  },
+  "expected_category": "dependency_environment",
+  "expected_status": "completed"
+}
