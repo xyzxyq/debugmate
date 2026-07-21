@@ -557,9 +557,9 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
             card_tab = page.get_by_role("tab", name="诊断卡", exact=True)
             assert preview.is_enabled()
             assert approve.is_disabled()
-            assert report_tab.is_disabled()
-            assert card_tab.is_disabled()
-            expect(page.locator("#student-overview")).to_contain_text("两步开始诊断")
+            assert report_tab.is_hidden()
+            assert card_tab.is_hidden()
+            expect(page.locator("#student-overview")).to_contain_text("发生了什么")
             expect(page.get_by_text("查看示例", exact=True)).to_be_visible()
             assert page.locator("#replay-action").is_hidden()
             assert page.locator("#technical-details").is_hidden()
@@ -584,7 +584,7 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
             report_tab.focus()
             report_tab.press("Enter")
             expect(report_tab).to_have_attribute("aria-selected", "true")
-            expect(page.locator("#student-overview")).to_contain_text("最可信原因")
+            expect(page.locator("#student-overview")).to_contain_text("最可能原因")
             expect(page.locator("#student-overview")).to_have_class(re.compile(r"tone-green"))
             expect(page.get_by_text("技术详情与恢复信息", exact=True)).to_be_visible()
             desktop_geometry = page.evaluate(
@@ -1097,7 +1097,7 @@ def test_completed_learning_workbench_has_consistent_light_surfaces_in_real_edge
             browser.close()
 
 
-def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
+def test_completed_command_bar_keeps_title_and_truthful_status_in_real_edge(
     browser_base_url: str,
 ) -> None:
     with sync_playwright() as playwright:
@@ -1113,7 +1113,7 @@ def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
             geometry = page.evaluate(
                 r"""() => {
                     const carrier = [...document.querySelectorAll('.command-bar > .styler')]
-                        .find(element => element.children.length >= 4);
+                        .find(element => element.children.length >= 3);
                     if (!carrier) return {missing: true};
                     const rect = selector => {
                         const element = carrier.querySelector(selector);
@@ -1128,20 +1128,19 @@ def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
                         title: rect('.product-title'),
                         status: rect('#diagnostic-status'),
                         accessibleStatus: rect('#accessible-status'),
-                        metadata: rect('#result-metadata'),
+                        statusClass: carrier.querySelector('#diagnostic-status')?.className || '',
                     };
                 }"""
             )
             assert not geometry.get("missing"), geometry
             assert geometry["display"] == "grid", geometry
-            assert geometry["columns"] == 3, geometry
+            assert geometry["columns"] == 2, geometry
             assert all(
                 geometry[name] and geometry[name]["width"] > 0
-                for name in ("title", "status", "accessibleStatus", "metadata")
+                for name in ("title", "status", "accessibleStatus")
             ), geometry
             assert geometry["title"]["right"] <= geometry["status"]["x"]
-            assert geometry["status"]["right"] <= geometry["metadata"]["x"]
-            assert abs(geometry["accessibleStatus"]["x"] - geometry["status"]["x"]) <= 2
+            assert "tone-green" in geometry["statusClass"]
 
             mobile_context = browser.new_context(viewport={"width": 768, "height": 1024})
             try:
@@ -1154,7 +1153,7 @@ def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
                 mobile_geometry = mobile_page.evaluate(
                     r"""() => {
                         const carrier = [...document.querySelectorAll('.command-bar > .styler')]
-                            .find(element => element.children.length >= 4);
+                            .find(element => element.children.length >= 3);
                         if (!carrier) return {missing: true};
                         const rect = selector => {
                             const element = carrier.querySelector(selector);
@@ -1170,8 +1169,6 @@ def test_completed_command_bar_uses_three_horizontal_regions_in_real_edge(
                             items: [
                                 rect('.product-title'),
                                 rect('#diagnostic-status'),
-                                rect('#accessible-status'),
-                                rect('#result-metadata'),
                             ],
                         };
                     }"""
@@ -1841,15 +1838,9 @@ def test_vq_11_vq_12_completed_responsive_geometry_in_real_edge(
             assert all(box is not None for box in boxes)
             first, second, third = boxes
             assert first is not None and second is not None and third is not None
-            if width == 1024:
-                assert abs(first["width"] - 300) <= 1
-                assert abs(first["y"] - second["y"]) < 4
-                assert first["x"] + first["width"] <= second["x"] + 1
-                assert abs(second["x"] - third["x"]) <= 1
-                assert third["y"] > second["y"]
-                assert abs(second["width"] - third["width"]) <= 1
-            else:
-                assert first["y"] < second["y"] < third["y"]
+            assert abs(first["x"] - second["x"]) <= 1
+            assert abs(second["x"] - third["x"]) <= 1
+            assert first["y"] < second["y"] < third["y"]
             assert page.locator("#replay-action").is_visible()
             assert page.locator("#diagnostic-status").is_visible()
             assert _body_overflow(page) is False
@@ -2365,10 +2356,10 @@ def test_failure_screenshot_capture_is_opt_in_and_uses_only_ignored_temp_path(
     assert _FAILURE_SCREENSHOT.name != "GAP-01-VQ-01-failing.png"
 
 
-def test_gap_01_real_loopback_workbench_has_three_usable_regions(
+def test_gap_01_real_loopback_workbench_has_two_student_zones(
     browser_base_url: str,
 ) -> None:
-    """RED: the first screen must keep its three regions usable at 1366px."""
+    """The first screen is a narrow input rail beside one wide result zone."""
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="msedge", headless=True)
@@ -2376,14 +2367,13 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
             page = browser.new_page(viewport={"width": 1366, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("开始诊断", "问题概览", "结果查看"):
+            for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             page.get_by_text("查看示例", exact=True).wait_for(timeout=30_000)
             visible_before_viewport = []
             for text, locator in (
                 ("开始诊断", page.get_by_role("heading", name="开始诊断", exact=True)),
-                ("问题概览", page.get_by_role("heading", name="问题概览", exact=True)),
-                ("结果查看", page.get_by_role("heading", name="结果查看", exact=True)),
+                ("诊断结果", page.get_by_role("heading", name="诊断结果", exact=True)),
             ):
                 box = locator.bounding_box()
                 visible_before_viewport.append(
@@ -2401,9 +2391,7 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
             screenshot = _capture_failure_screenshot(page)
             metrics = page.evaluate(
                 """() => ({
-                    regions: [
-                        '.control-rail', '.diagnosis-canvas', '.result-workspace'
-                    ].map((selector) => {
+                    regions: ['.control-rail', '.diagnosis-canvas'].map((selector) => {
                         const element = document.querySelector(`#workbench-grid ${selector}`);
                         const box = element.getBoundingClientRect();
                         return { selector, width: box.width, y: box.y };
@@ -2416,16 +2404,14 @@ def test_gap_01_real_loopback_workbench_has_three_usable_regions(
             browser.close()
     if screenshot is not None:
         assert screenshot.is_file()
-    assert len(metrics["regions"]) == 3
-    assert all(
-        item["width"] >= minimum
-        for item, minimum in zip(metrics["regions"], (280, 360, 440), strict=True)
-    )
+    assert len(metrics["regions"]) == 2
+    control_rail, result_zone = metrics["regions"]
+    assert 320 <= control_rail["width"] <= 360
+    assert result_zone["width"] > control_rail["width"]
     assert all(item["y"] < 768 for item in metrics["regions"])
     assert visible_before_viewport == [
         {"text": "开始诊断", "visible": True},
-        {"text": "问题概览", "visible": True},
-        {"text": "结果查看", "visible": True},
+        {"text": "诊断结果", "visible": True},
     ]
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
@@ -2573,10 +2559,10 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             browser.close()
 
 
-def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1024px(
+def test_gap_01_real_loopback_workbench_stacks_student_zones_at_1024px(
     browser_base_url: str,
 ) -> None:
-    """The tablet breakpoint keeps inputs/evidence together and spans results below."""
+    """The compact breakpoint keeps a single, result-oriented reading column."""
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="msedge", headless=True)
@@ -2584,14 +2570,12 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
             page = browser.new_page(viewport={"width": 1024, "height": 768})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("开始诊断", "问题概览", "结果查看"):
+            for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             page.get_by_text("查看示例", exact=True).wait_for(timeout=30_000)
             metrics = page.evaluate(
                 """() => ({
-                    regions: [
-                        '.control-rail', '.diagnosis-canvas', '.result-workspace'
-                    ].map((selector) => {
+                    regions: ['.control-rail', '.diagnosis-canvas'].map((selector) => {
                         const element = document.querySelector(`#workbench-grid ${selector}`);
                         const box = element.getBoundingClientRect();
                         return {
@@ -2605,14 +2589,11 @@ def test_gap_01_real_loopback_workbench_keeps_two_columns_and_spans_results_at_1
             )
         finally:
             browser.close()
-    assert len(metrics["regions"]) == 3
-    control_rail, diagnosis_canvas, result_workspace = metrics["regions"]
-    assert abs(control_rail["width"] - 300) <= 1
-    assert abs(control_rail["y"] - diagnosis_canvas["y"]) <= 1
-    assert control_rail["x"] + control_rail["width"] <= diagnosis_canvas["x"] + 1
-    assert abs(diagnosis_canvas["x"] - result_workspace["x"]) <= 1
-    assert result_workspace["y"] > diagnosis_canvas["y"]
-    assert abs(diagnosis_canvas["width"] - result_workspace["width"]) <= 1
+    assert len(metrics["regions"]) == 2
+    control_rail, diagnosis_canvas = metrics["regions"]
+    assert abs(control_rail["x"] - diagnosis_canvas["x"]) <= 1
+    assert diagnosis_canvas["y"] > control_rail["y"]
+    assert abs(control_rail["width"] - diagnosis_canvas["width"]) <= 1
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
@@ -2627,7 +2608,7 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             page = browser.new_page(viewport={"width": 768, "height": 1024})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("开始诊断", "问题概览", "结果查看"):
+            for heading in ("开始诊断", "诊断结果", "多模态与完整报告"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             example_disclosure = _tab_to(page, expected_name="查看示例", limit=20)
             example_disclosure.press("Space")

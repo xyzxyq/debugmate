@@ -245,7 +245,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert correction_panels[0]["type"] == "accordion"
     assert correction_panels[0]["props"]["open"] is False
     assert correction_panels[0]["props"]["visible"] is False
-    assert any(
+    assert not any(
         "section-kicker" in component.get("props", {}).get("elem_classes", [])
         for component in config["components"]
     )
@@ -286,6 +286,8 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "查看示例",
         "示例案例",
         "抽取字段与纠错",
+        "粘贴报错，获得原因、步骤与复盘材料。",
+        "运行与隐私说明",
         "发生了什么",
         "最可能原因",
         "先做什么",
@@ -370,7 +372,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert "tone-green" in app.css
     assert "tone-amber" in app.css
     assert "tone-red" in app.css
-    assert "@media (max-width: 1199px)" in app.css
+    assert "@media (max-width: 1099px)" in app.css
     assert "@media (max-width: 899px)" in app.css
     assert "@media (max-width: 639px)" in app.css
     assert "overflow-x: hidden" not in app.css
