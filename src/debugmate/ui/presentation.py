@@ -132,6 +132,10 @@ class VerifiedDiagnosisPresentation:
     root_cause: str | None
     next_action: str | None
     next_action_kind: str | None
+    what_happened: str
+    most_likely_reason: str
+    first_action: str
+    how_to_verify: str
 
 
 def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPresentation:
@@ -154,12 +158,25 @@ def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPr
     else:
         action = None
         action_kind = None
+    reason = "当前证据不足，未确认原因。" if strongest is None else strongest.cause
+    first_action = "补充信息后重新诊断。" if action is None else action.command
+    verification = (
+        "完成检查后重新诊断并对照结果。"
+        if not diagnosis.verification_steps
+        else diagnosis.verification_steps[0].command
+    )
+    category = _CATEGORY_LABELS[str(diagnosis.category)]
+    confidence = f"{diagnosis.confidence:.2f}"
     return VerifiedDiagnosisPresentation(
-        category=_CATEGORY_LABELS[str(diagnosis.category)],
-        confidence=f"{diagnosis.confidence:.2f}",
+        category=category,
+        confidence=confidence,
         root_cause=None if strongest is None else strongest.cause,
         next_action=None if action is None else action.command,
         next_action_kind=action_kind,
+        what_happened=f"{category}（置信度 {confidence}）",
+        most_likely_reason=reason,
+        first_action=first_action,
+        how_to_verify=verification,
     )
 
 

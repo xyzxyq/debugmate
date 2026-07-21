@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from gradio.state_holder import SessionState
 
 import debugmate.ui.app as app_module
+from debugmate.contracts import DiagnosisRecord
 from debugmate.privacy.models import ApprovedRedactedInput
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -32,7 +33,7 @@ from debugmate.results.service import ServiceStageEvent
 from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui import serve as serve_module
 from debugmate.ui.app import CallbackPayload, _UiSessionStateStore, build_app
-from debugmate.ui.presentation import render_view_state
+from debugmate.ui.presentation import render_verified_diagnosis, render_view_state
 from debugmate.ui.serve import _local_service
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -285,10 +286,12 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "查看示例",
         "示例案例",
         "抽取字段与纠错",
-        "问题概览",
-        "下一步怎么做",
+        "发生了什么",
+        "最可能原因",
+        "先做什么",
+        "如何验证",
         "技术详情与恢复信息",
-        "结果查看",
+        "诊断结果",
         "文字报告",
         "诊断卡",
         "语音复盘",
@@ -352,7 +355,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     css_function_colors = re.findall(r"\b(?:rgb|rgba)\([^)]*\)", app.css, re.IGNORECASE)
     assert css_hex_colors == approved_colors
     assert css_function_colors == []
-    assert "minmax(280px, 0.8fr) minmax(360px, 1fr) minmax(460px, 1.3fr)" in app.css
+    assert "minmax(320px, 360px) minmax(0, 1fr)" in app.css
     assert "gap: 16px;" in app.css
     assert ".command-bar { position: sticky;" in app.css
     assert ".control-rail" in app.css
@@ -360,7 +363,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert ".result-workspace" in app.css
     assert ".section-kicker" in app.css
     assert ".correction-panel" in app.css
-    assert "box-shadow:" in app.css
+    assert "box-shadow: none" in app.css
     assert "backdrop-filter" not in app.css
     assert "tone-neutral" in app.css
     assert "tone-blue" in app.css
@@ -388,6 +391,48 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert len(tab_items) == 4
     assert all(component["props"]["interactive"] is False for component in tab_items)
     assert "gr.Tabs(interactive=" not in source
+
+
+def test_verified_diagnosis_presentation_has_four_student_sections_without_identity_noise() -> None:
+    diagnosis = DiagnosisRecord.model_validate_json(
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(
+            encoding="utf-8"
+        ),
+        strict=True,
+    )
+
+    presentation = render_verified_diagnosis(diagnosis)
+    student_copy = "\n".join(
+        (
+            presentation.what_happened,
+            presentation.most_likely_reason,
+            presentation.first_action,
+            presentation.how_to_verify,
+        )
+    )
+
+    assert presentation.what_happened.startswith("依赖与环境问题")
+    assert presentation.most_likely_reason
+    assert presentation.first_action == diagnosis.checks[0].command
+    assert presentation.how_to_verify == diagnosis.verification_steps[0].command
+    assert not re.search(r"(?:case|run|result|fixture|hash|schema|fact|evidence)_", student_copy)
+
+
+def test_verified_diagnosis_presentation_fails_closed_when_student_steps_are_missing() -> None:
+    diagnosis = DiagnosisRecord.model_validate_json(
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(
+            encoding="utf-8"
+        ),
+        strict=True,
+    ).model_copy(
+        update={"root_cause_candidates": [], "checks": [], "fixes": [], "verification_steps": []}
+    )
+
+    presentation = render_verified_diagnosis(diagnosis)
+
+    assert presentation.most_likely_reason == "当前证据不足，未确认原因。"
+    assert presentation.first_action == "补充信息后重新诊断。"
+    assert presentation.how_to_verify == "完成检查后重新诊断并对照结果。"
 
 
 def test_production_app_has_no_qa_handler_route_selector_or_capability_surface() -> None:
