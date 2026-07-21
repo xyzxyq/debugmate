@@ -26,7 +26,7 @@ patterns-established:
 requirements-completed:
   - 将已核验仅本地领先的 master 连同本次 GSD 同步记录以非强制方式发布到 origin/master，并用实时远端引用与差异计数证明同步完成
 started: 2026-07-21T13:19:09Z
-completed: pending
+completed: 2026-07-21T13:24:00Z
 ---
 
 # Quick Task 260721-tdz: GitHub master 安全发布摘要
@@ -71,7 +71,14 @@ completed: pending
 
 ## 首次推送验证
 
-待首次普通 push 成功并通过实时远端 OID 与 fetched `0 0` 验证后填写。本节的验证记录将通过第二个新增提交发布，不 amend 已发布提交。
+- 第一个 GSD 文档提交（完整 OID）：`5ecc77f3b652e02c3c02a4ff77ef8267f245d514`
+- 第一个 GSD 文档提交（短 OID）：`5ecc77f`
+- 普通推送命令：`git push origin HEAD:refs/heads/master`
+- 推送前 fetch 后差异：`6 0`；remote-only 仍为零。
+- 推送后 `git ls-remote --heads origin refs/heads/master`：`5ecc77f3b652e02c3c02a4ff77ef8267f245d514`
+- 推送后再次 fetch 的 `HEAD...origin/master` 差异：`0 0`
+- 原始五提交范围保持为 `f031c6b4c78d6d16e046b34f9b0addac240fdfd0..41362891ed75634224fc1f4d2f5a144ae0de9580`，其后只追加本任务的 GSD 文档提交。
+- 未使用 force 或任何历史改写操作。本验证记录通过第二个新增提交发布，不 amend 已发布提交。
 
 ## 最终验证
 
@@ -79,8 +86,14 @@ completed: pending
 
 ## Deviations from Plan
 
-None - plan execution is in progress exactly as specified.
+None - plan executed exactly as written. 提交前 cached diff 检查发现并移除了 SUMMARY 末尾多余空行；该机械格式修正发生在任何提交或 push 之前，未改变范围、历史或发布策略。
 
 ## Threat Surface Scan
 
 未新增网络端点、认证路径、文件访问模式或 schema 信任边界；本任务仅发布已有 Git 历史和 GSD 文档。
+
+## Self-Check: PASSED
+
+- PLAN、SUMMARY 与 STATE 三个授权文档均存在，第一个文档提交 `5ecc77f3b652e02c3c02a4ff77ef8267f245d514` 可从当前 HEAD 到达。
+- GitHub `refs/heads/master` 在首次 push 后与该提交一致，随后 fetch 的双向差异为 `0 0`。
+- 未发现阻止目标达成的占位实现或新安全边界。
