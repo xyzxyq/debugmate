@@ -1,5 +1,5 @@
 ---
-status: human_needed
+status: complete
 phase: 04-multimodal-results-ui
 source:
   - 04-01-SUMMARY.md
@@ -15,14 +15,14 @@ source:
   - 04-11-SUMMARY.md
   - 04-12-SUMMARY.md
   - 04-VERIFICATION.md
-updated: 2026-08-08T10:10:44Z
+updated: 2026-08-08T10:18:34Z
 ---
 
 # Phase 04 UAT Reconciliation
 
 ## Current Test
 
-[automated acceptance reconciled — one physical-device listening check remains]
+[testing complete]
 
 The 2026-07-16 file recorded 11 browser/evidence issues before Plans 04-10 through 04-12, the student-first UI quick task, the full explicit Edge run, and the review fixes existed. Those stale issue rows are reconciled below against current code and evidence. No row is upgraded from historical assertions alone: each automated pass is backed by a current contract test, real Edge check, result E2E, or hash-verified course evidence.
 
@@ -55,9 +55,8 @@ evidence: Completed result E2E and real Edge ZIP download verify manifest/checks
 ### 5. Local SAPI recap human listening quality
 
 expected: A human listener confirms the generated Chinese recap is understandable, non-silent, unclipped and free from obvious mojibake or severe pronunciation failure.
-result: blocked
-blocked_by: physical-device
-reason: Machine evidence proves a 45.144-second mono, decodable, non-silent MP3 with no detected clipping samples, but cannot honestly judge Chinese intelligibility or real-device listening quality.
+result: pass
+evidence: On 2026-08-08 the user listened to the current 50.580-second Local SAPI MP3 on a physical playback device and explicitly reported `听验通过`; the checked file SHA-256 was `f5c8cd13f4d12f8c2e42fb3fe58bdb3b2aeed7f7a03fbb7e0b91b72bb8173374`.
 
 ### 6. Completed replay truth labels
 
@@ -134,20 +133,19 @@ evidence: 04-11/04-12 acceptance, current quick UI verification, full explicit E
 ## Summary
 
 total: 17
-passed: 16
+passed: 17
 issues: 0
 pending: 0
 skipped: 0
-blocked: 1
+blocked: 0
 
-## Remaining Human Check
+## Completed Human Check
 
 - truth: "Local SAPI 中文复盘在实体播放设备上可懂且无明显主观音质问题。"
-  status: human_needed
-  blocked_by: physical-device
-  missing:
-    - "在最终课程录制前，用扬声器或耳机完整听一段当前 Local SAPI 复盘。"
-    - "确认中文可懂、无明显乱码或严重错读、无静音、无主观明显削波。"
+  status: passed
+  confirmed_by: user
+  confirmed_on: 2026-08-08
+  result: "听验通过"
 
 ## Explicit Boundaries
 

@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: course-demo
-status: human_needed
-stopped_at: Awaiting physical-device Local SAPI Chinese listening acceptance
-last_updated: "2026-08-08T10:10:44Z"
-last_activity: 2026-08-08 -- Phase 4 verified 5/5 with one physical-device listening check remaining
+status: complete
+stopped_at: Phase 4 UAT complete after user-approved physical-device Local SAPI listening
+last_updated: "2026-08-08T10:18:34Z"
+last_activity: 2026-08-08 -- User approved Local SAPI listening; Phase 4 verification passed
 progress:
   total_phases: 6
   completed_phases: 6
@@ -22,7 +22,7 @@ DebugMate V0.1 的路线图功能范围为 `status: complete`：6/6 phases compl
 
 GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24 份对应 SUMMARY，即 24/24（100%）。Phase 4 的 `04-11-SUMMARY.md` 与 `04-12-SUMMARY.md` 已补齐；不得再使用旧的 22/24 或无法解释的 “26/26 plans completed” 口径。
 
-当前位置：Phase 4 的 12/12 计划、代码审查修复和独立验证均已完成；5/5 路线图目标与 9/9 Phase 4 requirements 已由自动化证据满足。状态为 `human_needed`，仅等待实体播放设备上的 Local SAPI 中文人耳听验。
+当前位置：Phase 4 的 12/12 计划、代码审查修复、独立验证和实体设备 Local SAPI 中文人耳听验均已完成；5/5 路线图目标与 9/9 Phase 4 requirements 已满足，状态为 `complete`。
 
 ## Current Verification Baseline
 
@@ -37,9 +37,7 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 
 ## Remaining UAT Debt
 
-唯一显式 UAT 债务是 **Local SAPI recap human listening quality**：`blocked_by: physical-device`。
-
-机器证据能够证明现有 MP3 可解码、非静音等客观属性，但不能替代人在实体播放设备上对中文可懂度、截断、乱码和明显发音问题的主观听验。
+当前无未解决的 Phase 4 UAT 债务。用户已于 2026-08-08 在实体播放设备上完成 Local SAPI 中文复盘听验并明确回复“听验通过”。
 
 ## Course Deliverables Boundary
 
@@ -56,7 +54,7 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 
 1. 先维护本地课程演示、事实证据、README 与 STATE 的一致性。
 2. 再按演示需要真实执行 Dify C01–C07；在能力矩阵仍为 `not-tested` 时不得宣称云端完成。
-3. 安排 `physical-device` 上的 Local SAPI 中文复盘人耳听验。
+3. 保持课程材料冻结，直到 Dify 实测和事实口径稳定。
 4. 最后才统一更新 PPTX、视频、字幕和最终截图。
 
 ## Quick Tasks Completed

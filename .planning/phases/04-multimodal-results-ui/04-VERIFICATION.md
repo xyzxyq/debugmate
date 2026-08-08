@@ -1,7 +1,7 @@
 ---
 phase: 04-multimodal-results-ui
-verified: 2026-08-08T10:10:44Z
-status: human_needed
+verified: 2026-08-08T10:18:34Z
+status: passed
 score: 5/5 must-haves verified
 overrides_applied: 0
 re_verification:
@@ -14,23 +14,26 @@ re_verification:
     - "WR-03 contradictory ResultViewState rejection"
   gaps_remaining: []
   regressions: []
-human_verification:
+human_verification: []
+completed_human_verification:
   - test: "Local SAPI 中文复盘实体设备人耳听验"
-    expected: "使用扬声器或耳机播放一次当前 Local SAPI MP3，确认中文可懂、无明显乱码或严重错读、无静音、无主观明显削波。"
-    why_human: "ffprobe/PCM 探针只能证明可解码、非静音、时长和客观峰值，不能替代真实设备上的中文可懂度与主观听感。"
+    result: passed
+    confirmed_by: user
+    confirmed_on: 2026-08-08
+    response: "听验通过"
 ---
 
 # Phase 4: 三模态产物与统一结果页 Verification Report
 
 **Phase Goal:** 用户可在单一界面查看并下载由同一已校验诊断对象派生的一致文字、PNG 与 MP3 结果。
-**Verified:** 2026-08-08T10:10:44Z
-**Status:** human_needed
+**Verified:** 2026-08-08T10:18:34Z
+**Status:** passed
 **Re-verification:** Yes — after 04-11/04-12 closure and review fixes
 **Scope:** 本地 Windows 课程演示 V0.1；不是生产、公网、跨平台或云能力就绪声明。
 
 ## Verdict
 
-Phase 04 的代码、数据流、结果包和代表性真实 Edge 行为达到本地课程演示目标。5/5 roadmap success criteria 与 9/9 Phase 04 requirements 均有实现和自动化证据。唯一未完成的验收是 Local SAPI 中文复盘在实体播放设备上的一次人耳听验，因此按状态决策树必须为 `human_needed`，不能标为 `passed`。
+Phase 04 的代码、数据流、结果包和代表性真实 Edge 行为达到本地课程演示目标。5/5 roadmap success criteria 与 9/9 Phase 04 requirements 均有实现和自动化证据；用户又在实体播放设备上完成 Local SAPI 中文复盘听验并明确回复“听验通过”，因此 Phase 04 状态更新为 `passed`。
 
 Dify C01-C07 在 `platform/dify/capability-matrix.json` 中仍全部为 `not-tested`。本地规则、固定回放和 Local SAPI 证据没有被升级为云端视觉、检索、工作流或 TTS 通过证据。
 
@@ -129,13 +132,13 @@ No orphaned Phase 04 requirements were found.
 
 未发现会阻止目标的 TODO/FIXME、空 handler、静态空结果或孤立核心产物。
 
-## Human Verification Required
+## Human Verification Completed
 
 ### 1. Local SAPI 中文复盘实体设备听验
 
-**Test:** 用实际扬声器或耳机播放 `evidence/media/phase4/local-sapi.json` 所描述的当前 Local SAPI 复盘样本，至少完整听一段技术术语与修复步骤。
-**Expected:** 中文可懂；无明显乱码、严重错读、静音或主观明显削波。
-**Why human:** 自动证据只证明 45.144 秒、mono MP3、ffmpeg decode exit 0、非静音、无检测到的 clipping samples；无法感知中文可懂度和真实设备听感。
+**Test:** 用实际扬声器或耳机完整播放当前 Local SAPI 复盘样本。
+**Result:** 用户于 2026-08-08 明确回复“听验通过”。被检查样本时长 50.580 秒，SHA-256 为 `f5c8cd13f4d12f8c2e42fb3fe58bdb3b2aeed7f7a03fbb7e0b91b72bb8173374`。
+**Conclusion:** 中文可懂度、明显乱码或严重错读、异常静音和主观明显削波的人类验收门禁已关闭。
 
 ## Residual Risks and Boundaries
 
@@ -147,9 +150,9 @@ No orphaned Phase 04 requirements were found.
 
 ## Gaps Summary
 
-没有自动化实现 gap。Escalation gate 仅保留一个不可由机器诚实解决的 physical-device 人耳听验；完成后可把 Phase 04 从 `human_needed` 复验为 `passed`。Dify 未测试状态属于明确能力边界，不是本地 V0.1 Phase 04 的替代通过项。
+没有自动化实现 gap，physical-device 人耳听验也已由用户完成。Dify 未测试状态属于明确能力边界，不是本地 V0.1 Phase 04 的替代通过项。
 
 ---
 
-_Verified: 2026-08-08T10:10:44Z_
+_Verified: 2026-08-08T10:18:34Z_
 _Verifier: Codex (gsd-verifier)_
