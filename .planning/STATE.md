@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: course-demo
-status: complete
-stopped_at: Phase 4 closure plans recorded and README probe contract restored
-last_updated: "2026-08-08T09:52:00Z"
-last_activity: 2026-08-08 -- Completed quick task 260808-opt README probe CLI truth repair
+status: human_needed
+stopped_at: Awaiting physical-device Local SAPI Chinese listening acceptance
+last_updated: "2026-08-08T10:10:44Z"
+last_activity: 2026-08-08 -- Phase 4 verified 5/5 with one physical-device listening check remaining
 progress:
   total_phases: 6
   completed_phases: 6
@@ -22,7 +22,7 @@ DebugMate V0.1 的路线图功能范围为 `status: complete`：6/6 phases compl
 
 GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24 份对应 SUMMARY，即 24/24（100%）。Phase 4 的 `04-11-SUMMARY.md` 与 `04-12-SUMMARY.md` 已补齐；不得再使用旧的 22/24 或无法解释的 “26/26 plans completed” 口径。
 
-当前位置：Phase 4 收尾计划已形成可审计记录，根 README 已补回真实 `fixture-probe` / `cloud-probe` 合同；正在关闭阶段代码审查与最终验证门禁。
+当前位置：Phase 4 的 12/12 计划、代码审查修复和独立验证均已完成；5/5 路线图目标与 9/9 Phase 4 requirements 已由自动化证据满足。状态为 `human_needed`，仅等待实体播放设备上的 Local SAPI 中文人耳听验。
 
 ## Current Verification Baseline
 
@@ -31,6 +31,8 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 - 普通 UI 合同：`tests/ui/test_app.py` — 34 passed。
 - 显式 Microsoft Edge 套件：39 passed、7 environment-gated skipped、0 failed。
 - quick verifier：5/5 must-haves verified。
+- 默认离线回归：845 passed、73 deselected、0 failed（1 个既有依赖弃用警告）。
+- Phase 4 review fixes：102 passed，Ruff passed；3 个 Warning 已全部关闭。
 - Dify 能力矩阵：C01–C07 共 7 项全部为 `not-tested`；本地规则和固定回放不能作为云端视觉、检索、工作流或 TTS 的通过证据。
 
 ## Remaining UAT Debt
