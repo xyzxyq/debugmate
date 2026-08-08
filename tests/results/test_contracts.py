@@ -363,6 +363,106 @@ def _successful_audio(identity: ArtifactIdentity | None = None, *, sha256: str =
     )
 
 
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"availability": ArtifactAvailability(report=True)},
+        {
+            "failure": SafeFailure(
+                code="source_bundle_invalid", failed_stage="source", retry_scope="source"
+            )
+        },
+        {"current_stage": "source"},
+        {"completed_stages": ("source",)},
+        {"inherited_stages": ("source",)},
+    ],
+)
+def test_idle_view_rejects_progress_and_result_state(changes: dict[str, object]) -> None:
+    payload: dict[str, object] = {
+        "mode": ResultMode.LIVE,
+        "status": ResultStatus.IDLE,
+        "availability": ArtifactAvailability(),
+    }
+    payload.update(changes)
+    with pytest.raises(ValidationError, match="idle view"):
+        ResultViewState(**payload)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"availability": ArtifactAvailability(report=True)},
+        {
+            "failure": SafeFailure(
+                code="source_bundle_invalid", failed_stage="source", retry_scope="source"
+            )
+        },
+        {"current_stage": None},
+    ],
+)
+def test_running_view_rejects_terminal_state(changes: dict[str, object]) -> None:
+    payload: dict[str, object] = {
+        "mode": ResultMode.LIVE,
+        "status": ResultStatus.RUNNING,
+        "availability": ArtifactAvailability(),
+        "current_stage": "source",
+        "completed_stages": ("input",),
+    }
+    payload.update(changes)
+    with pytest.raises(ValidationError, match="running view"):
+        ResultViewState(**payload)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [ResultStatus.COMPLETED, ResultStatus.PARTIAL, ResultStatus.FAILED],
+)
+def test_terminal_view_rejects_stale_current_stage(status: ResultStatus) -> None:
+    identity = _identity()
+    payload: dict[str, object] = {
+        "mode": ResultMode.LIVE,
+        "status": status,
+        "availability": ArtifactAvailability(),
+        "current_stage": "audio",
+    }
+    if status is ResultStatus.COMPLETED:
+        payload.update(
+            identity=identity,
+            result_id="result_" + "6" * 32,
+            availability=ArtifactAvailability(
+                report=True, card=True, recap_text=True, audio=True
+            ),
+            audio=_successful_audio(identity),
+        )
+    elif status is ResultStatus.PARTIAL:
+        failure = SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="audio")
+        payload.update(
+            identity=identity,
+            result_id="result_" + "6" * 32,
+            availability=ArtifactAvailability(report=True, card=True, recap_text=True),
+            failure=failure,
+            audio=AudioResult(
+                identity=identity,
+                available=False,
+                attempts=(
+                    AudioAttempt(
+                        backend="edge_tts",
+                        rate_profile="default",
+                        succeeded=False,
+                        safe_error_code="tts_backend_failed",
+                    ),
+                ),
+                failure=failure,
+            ),
+        )
+    else:
+        payload["failure"] = SafeFailure(
+            code="source_bundle_invalid", failed_stage="source", retry_scope="source"
+        )
+    with pytest.raises(ValidationError, match="terminal view"):
+        ResultViewState(**payload)
+
+
 def _completed_manifest(**changes: object) -> ResultManifest:
     identity = _identity()
     payload = {

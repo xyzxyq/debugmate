@@ -389,8 +389,24 @@ class ResultViewState(StrictFrozenModel):
             value is not None for value in (self.identity, self.result_id, self.audio)
         ):
             raise ValueError("nonterminal view cannot expose unverified result metadata")
-        if self.status is ResultStatus.RUNNING and not self.current_stage:
-            raise ValueError("running view requires a current stage")
+        if self.status is ResultStatus.IDLE and (
+            self.availability.any()
+            or self.failure is not None
+            or self.current_stage is not None
+            or self.completed_stages
+            or self.inherited_stages
+        ):
+            raise ValueError("idle view cannot expose progress or result state")
+        if self.status is ResultStatus.RUNNING and (
+            self.availability.any() or self.failure is not None or not self.current_stage
+        ):
+            raise ValueError("running view requires only progress state")
+        if self.status in {
+            ResultStatus.COMPLETED,
+            ResultStatus.PARTIAL,
+            ResultStatus.FAILED,
+        } and self.current_stage is not None:
+            raise ValueError("terminal view cannot retain a current stage")
         return self
 
 
