@@ -86,6 +86,28 @@ python -m venv .venv
 
 Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依赖专用 QA server 或特定根环境的案例会以 `environment-gated` skip 明确记录，而不是伪装为通过。
 
+## 能力探针
+
+在仓库根目录可分别运行固定 fixture 探针与真实云端探针；两个命令都必须提供 `--output`：
+
+```powershell
+.\.venv\Scripts\python.exe -m debugmate.cli fixture-probe --output .artifacts\phase1-probe
+.\.venv\Scripts\python.exe -m debugmate.cli cloud-probe --output .artifacts\phase1-probe
+```
+
+`fixture-probe` 不需要云凭据，只验证固定输入下的探针合同与 evidence bundle 生成。它退出 0 时，C01–C07 七项云能力仍全部是 `not-tested`；这不能证明 Dify 认证、文件上传、视觉、知识检索、工作流、DSL 导入导出或云端 TTS 已通过。
+
+`cloud-probe` 仅在用户自行配置所需环境变量（例如 `DIFY_API_KEY`）后发起真实云调用。本仓库当前没有已成功执行该命令的声明。其退出码 0/1/2 分别表示探针完成、探针合同/传输/结果验证失败、因凭据等前置条件受阻；退出 0 也不表示七项能力全部通过，当前实现只会把有真实证据的 C01、C02、C05 标为 `pass`，其他能力仍可为 `not-tested`。
+
+两个命令输出的 JSON 都包含 `backend`、`bundle_path` 和 `status_counts`：`bundle_path` 指向可审计证据包，`status_counts` 汇总该次逐能力状态。最终结论必须以 bundle 内每项状态、证据路径和 SHA-256 为准：
+
+- `pass`：仅表示该项具体能力有真实执行证据支撑，并且应有证据路径与 SHA-256。
+- `fail`：该项已经尝试，但合同、传输或结果验证失败。
+- `blocked`：凭据、账号、配额或其他前置条件阻止了真实测试。
+- `not-tested`：该项本次没有真实执行，不能从本地、fixture 或其他能力的成功推断为通过。
+
+[`scripts/run_phase1_probe.ps1`](scripts/run_phase1_probe.ps1) 是包装入口：它先运行 fixture 探针，仅在凭据存在时运行 cloud 探针，然后执行离线测试与 Ruff。包装脚本成功同样不能替代 bundle 内逐能力证据；当前能力矩阵仍是 C01–C07 全部 `not-tested`。
+
 ## 固定回放与真值标签
 
 固定回放用于稳定复现完成、长内容、部分失败和降级等已保存结果，便于课堂讲解与回归检查。它只读取 [`fixtures/replay/index.json`](fixtures/replay/index.json) allowlist 中的脱敏证据目录，不接受浏览器任意文件路径。
