@@ -60,11 +60,13 @@ _MARKDOWN_ESCAPES = re.compile(r"([\[\]()!#*|])")
 def _safe_text(value: str) -> str:
     """Escape structure while leaving ordinary technical literals byte-identical."""
 
-    escaped = value.replace("<", "&lt;").replace(">", "&gt;")
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+    escaped = normalized.replace("<", "&lt;").replace(">", "&gt;")
     escaped = escaped.replace("`", "&#96;")
     escaped = re.sub(r"(?i)javascript:", "javascript&#58;", escaped)
     escaped = re.sub(r"(?i)data:", "data&#58;", escaped)
-    return _MARKDOWN_ESCAPES.sub(r"\\\1", escaped)
+    escaped = _MARKDOWN_ESCAPES.sub(r"\\\1", escaped)
+    return escaped.replace("\n", "<br>")
 
 
 def _items(values: tuple[str, ...], *, empty: str = "无。") -> list[str]:
