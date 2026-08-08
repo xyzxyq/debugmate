@@ -95,6 +95,13 @@ def test_committed_replay_fixture_strictly_validates_and_verifies(
 
 def test_replay_fixture_regeneration_is_canonical(tmp_path: Path) -> None:
     target = tmp_path / "replay"
+    target.mkdir()
+    committed_index = json.loads(
+        (ROOT / "fixtures/replay/index.json").read_text(encoding="utf-8")
+    )
+    (target / "index.json").write_text(
+        json.dumps(committed_index, ensure_ascii=False), encoding="utf-8"
+    )
     subprocess.run(
         [sys.executable, str(ROOT / "scripts/generate-replay-fixture.py"), str(target)],
         cwd=ROOT,
@@ -114,6 +121,12 @@ def test_replay_fixture_regeneration_is_canonical(tmp_path: Path) -> None:
         source_prefix + "manifest.json",
     ):
         assert (target / "module-not-found" / name).read_bytes() == (committed / name).read_bytes()
+    regenerated_index = json.loads((target / "index.json").read_text(encoding="utf-8"))
+    assert [item["fixture_id"] for item in regenerated_index["fixtures"]] == [
+        "module-not-found",
+        "long-content",
+    ]
+    assert regenerated_index["fixtures"][1] == committed_index["fixtures"][1]
 
 
 def test_artifact_identity_is_strict_frozen_and_version_locked() -> None:

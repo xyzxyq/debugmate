@@ -61,20 +61,31 @@ def generate(root: Path) -> Path:
         source.parent.mkdir(parents=True)
         shutil.copytree(published, source)
 
-    index = {
-        "index_version": "1.0.0",
-        "fixtures": [
-            {
-                "fixture_id": FIXTURE_ID,
-                "display_label": "ModuleNotFoundError：缺少虚构依赖包",
-                "case_id": outcome.case_id,
-                "run_id": outcome.run_id,
-                "outcome_path": f"{FIXTURE_ID}/outcome.json",
-                "source_path": f"{FIXTURE_ID}/source/{outcome.case_id}/{outcome.run_id}",
-            }
-        ],
+    module_entry = {
+        "fixture_id": FIXTURE_ID,
+        "display_label": "ModuleNotFoundError：缺少虚构依赖包",
+        "case_id": outcome.case_id,
+        "run_id": outcome.run_id,
+        "outcome_path": f"{FIXTURE_ID}/outcome.json",
+        "source_path": f"{FIXTURE_ID}/source/{outcome.case_id}/{outcome.run_id}",
     }
-    (root / "index.json").write_bytes(canonical_json_bytes(index))
+    index_path = root / "index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        if not isinstance(index, dict) or index.get("index_version") != "1.0.0":
+            raise TypeError("replay index must be a version 1.0.0 object")
+        fixtures = index.get("fixtures")
+        if not isinstance(fixtures, list) or not all(
+            isinstance(item, dict) and isinstance(item.get("fixture_id"), str)
+            for item in fixtures
+        ):
+            raise TypeError("replay index fixtures must be fixture objects")
+    else:
+        index = {"index_version": "1.0.0", "fixtures": []}
+        fixtures = []
+    retained = [item for item in fixtures if item["fixture_id"] != FIXTURE_ID]
+    index["fixtures"] = [module_entry, *retained]
+    index_path.write_bytes(canonical_json_bytes(index))
     return target
 
 
