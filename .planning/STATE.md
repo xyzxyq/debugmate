@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: course-demo
 status: complete
-stopped_at: V0.1 course package generated and machine-verified
-last_updated: "2026-07-20T08:25:45Z"
-last_activity: 2026-07-21 -- Completed quick task 260721-tdz: recorded and safely published local master to GitHub
+stopped_at: Student-first two-region diagnosis UI implemented and verified
+last_updated: "2026-08-08T08:53:38Z"
+last_activity: 2026-08-08 -- Completed quick task 260721-uf9: redesigned and verified the student diagnosis UI
 progress:
   total_phases: 6
   completed_phases: 6
@@ -40,6 +40,7 @@ Progress: [██████████] 26/26 plans completed (100%)
 - 21 output privacy scan tests passed.
 - PPTX package has 13 slides and all asset hashes recompute.
 - MP4 fully decodes, contains H.264 video and AAC audio, mean volume is -24.3 dB and duration exceeds 3 minutes.
+- Latest student UI verification: 34 application tests passed; full explicit Edge suite passed 39 tests with 7 environment-gated skips and 0 failures.
 
 ### Quick Tasks Completed
 
@@ -53,6 +54,7 @@ Progress: [██████████] 26/26 plans completed (100%)
 | 260720-jac | Synchronize GitHub updates into local worktrees | 2026-07-20 | f031c6b | Verified | [260720-jac-github-master-worktree](./quick/260720-jac-github-master-worktree/) |
 | 260720-ksx | Optimize the student-friendly diagnosis UI | 2026-07-20 | 97cf1c4 | Verified | [260720-ksx-phase-4-ui-debugmate-windows](./quick/260720-ksx-phase-4-ui-debugmate-windows/) |
 | 260721-tdz | Record remote verification and safely publish local master | 2026-07-21 | 5ecc77f | Verified | [260721-tdz-github-master](./quick/260721-tdz-github-master/) |
+| 260721-uf9 | Redesign DebugMate as a student-first two-region diagnosis guide | 2026-08-08 | 0490535 | Verified | [260721-uf9-debugmate](./quick/260721-uf9-debugmate/) |
 
 ## Final Human Check
 
