@@ -72,3 +72,4 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 | 260721-uf9 | Redesign DebugMate as a student-first two-region diagnosis guide | 2026-08-08 | 0490535 | Verified | [260721-uf9-debugmate](./quick/260721-uf9-debugmate/) |
 | 260808-nrg | Synchronize README and STATE with the current local course-demo truth | 2026-08-08 | 82a8d82 | Verified | [260808-nrg-readme-ui](./quick/260808-nrg-readme-ui/) |
 | 260808-opt | Restore truthful README probe CLI commands and capability states | 2026-08-08 | 2dc5a83 | Verified | [260808-opt-readme-probe-cli](./quick/260808-opt-readme-probe-cli/) |
+| 260808-kmd | Add a versioned Dify-uploadable ModuleNotFoundError knowledge note | 2026-08-08 | this commit | Verified | [debugmate-module-not-found.md](../knowledge/notes/debugmate-module-not-found.md) |
