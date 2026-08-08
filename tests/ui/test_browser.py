@@ -559,10 +559,14 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
             assert approve.is_disabled()
             assert report_tab.is_hidden()
             assert card_tab.is_hidden()
-            expect(page.locator("#student-overview")).to_contain_text("发生了什么")
+            expect(page.locator("#student-overview")).to_contain_text("两步开始诊断")
             expect(page.get_by_text("查看示例", exact=True)).to_be_visible()
             assert page.locator("#replay-action").is_hidden()
             assert page.locator("#technical-details").is_hidden()
+            assert page.locator(".block.next-steps").is_hidden()
+            assert page.get_by_role(
+                "heading", name="多模态与完整报告", exact=True
+            ).is_hidden()
             idle_geometry = page.evaluate(
                 "() => ({scroll: document.documentElement.scrollWidth, "
                 "client: document.documentElement.clientWidth})"
@@ -586,7 +590,18 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
             expect(report_tab).to_have_attribute("aria-selected", "true")
             expect(page.locator("#student-overview")).to_contain_text("最可能原因")
             expect(page.locator("#student-overview")).to_have_class(re.compile(r"tone-green"))
+            expect(page.locator("#student-overview")).not_to_contain_text(
+                "python -c \"print(__import__('sys').executable)\""
+            )
+            expect(page.locator(".next-steps").first).to_contain_text(
+                "python -c \"print(__import__('sys').executable)\""
+            )
             expect(page.get_by_text("技术详情与恢复信息", exact=True)).to_be_visible()
+            expect(page.get_by_role(
+                "heading", name="多模态与完整报告", exact=True
+            )).to_be_visible()
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_timeout(250)
             desktop_geometry = page.evaluate(
                 "() => ({scroll: document.documentElement.scrollWidth, "
                 "client: document.documentElement.clientWidth})"
@@ -602,6 +617,18 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
                 "client: document.documentElement.clientWidth})"
             )
             assert mobile_geometry["scroll"] == mobile_geometry["client"]
+            command_geometry = page.locator(
+                "#student-overview code, .next-steps code"
+            ).evaluate_all(
+                "elements => elements.map(element => ({"
+                "text: element.textContent, scroll: element.scrollWidth, "
+                "client: element.clientWidth, userSelect: getComputedStyle(element).userSelect"
+                "}))"
+            )
+            assert command_geometry
+            assert all(item["scroll"] <= item["client"] + 1 for item in command_geometry)
+            assert all(item["text"].strip() for item in command_geometry)
+            assert all(item["userSelect"] != "none" for item in command_geometry)
             title_box = page.get_by_role(
                 "heading", name="DebugMate 学习诊断助手", exact=True
             ).bounding_box()
@@ -1217,6 +1244,7 @@ def test_completed_result_tabs_keep_visible_surfaces_light_in_real_edge(
                 tab.click()
                 expect(tab).to_have_attribute("aria-selected", "true")
                 page.locator(surface_selector).wait_for(state="visible", timeout=30_000)
+                page.locator(surface_selector).scroll_into_view_if_needed()
                 metrics = page.evaluate(
                     r"""selectors => {
                         const parse = value => {
@@ -1367,10 +1395,12 @@ def test_v01_download_matches_visible_source_run_in_real_edge(
         try:
             page = context.new_page()
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
-            page.locator(".gradio-container").wait_for(timeout=30_000)
+            page.locator(".gradio-container").wait_for(timeout=60_000)
             _click_replay(page)
             _wait_for_terminal_status(page, "✓ 已完成")
 
+            page.get_by_text("技术详情与恢复信息", exact=True).click()
+            expect(page.locator("#result-metadata")).to_be_visible()
             metadata = page.locator("#result-metadata").first.inner_text()
             visible_match = re.search(r"来源运行：(run_[0-9a-f]{32})", metadata)
             assert visible_match is not None
@@ -2204,6 +2234,7 @@ def _controlled_runner_failure() -> tuple[dict[str, object], subprocess.Complete
     sentinel = "http://127.0.0.1:61234"
     command = f"""
 $ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
 $summary = [ordered]@{{ error = $null; base_url = $null; debugmate_server_count = $null }}
 try {{
     & '{runner_path}' -FailOwnershipAuditForSmoke
@@ -2224,6 +2255,8 @@ $summary | ConvertTo-Json -Compress
         env={**os.environ, _UI_BASE_URL_ENV: sentinel},
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
         check=False,
     )
@@ -2250,6 +2283,8 @@ def test_runner_cleanup_contract_restores_context_after_cleanup_errors() -> None
 
 
 def test_runner_controlled_failure_cleans_server_and_restores_base_url() -> None:
+    if not (_ROOT / ".venv" / "Scripts" / "python.exe").is_file():
+        pytest.skip("runner requires root .venv; this plan uses the verified worktree Python")
     summary, completed = _controlled_runner_failure()
 
     assert completed.returncode == 0, completed.stderr
@@ -2452,9 +2487,13 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             card_image = page.locator("#diagnostic-card img").first
             card_image.wait_for(state="visible", timeout=10_000)
             page.get_by_role("tab", name="引用与下载", exact=True).click()
-            download_button = page.locator("text=下载完整证据包").first
-            body_text = page.locator("body").inner_text()
+            download_button = page.get_by_text("下载完整证据包", exact=True).first
+            page.get_by_text("运行与隐私说明", exact=True).click()
+            page.get_by_text("技术详情与恢复信息", exact=True).click()
+            expect(page.locator("#result-metadata")).to_be_visible()
             result_metadata = page.locator("#result-metadata").first.inner_text()
+            expect(download_button).to_be_visible(timeout=30_000)
+            body_text = page.locator("body").inner_text()
             citation_table = page.get_by_text("引用", exact=True).last
             citations_visible = citation_table.is_visible()
             assert download_button.count() == 1, body_text
@@ -2475,7 +2514,8 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             assert "fixture_id=null" in result_metadata
             assert "fixture_name=null" in result_metadata
             assert "回放" not in result_metadata
-            assert body_text.count(result_metadata.strip()) == 1
+            assert body_text.count(result_metadata.strip()) == 2
+            assert result_metadata.strip() in page.locator("#download-metadata").inner_text()
             assert "module-not-found" not in result_metadata
             assert "ModuleNotFoundError：缺少虚构依赖包" not in result_metadata
             assert report_visible
@@ -2484,11 +2524,13 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             assert page.get_by_text("ModuleNotFoundError", exact=True).first.is_visible()
             assert re.search(r"evidence_[0-9a-f]{32}", body_text) is not None
             assert "https://docs.python.org/3/library/exceptions.html" in body_text
-            assert page.get_by_role(
-                "button",
+            citation_link = page.locator("#citation-table").get_by_role(
+                "link",
                 name="https://docs.python.org/3/library/exceptions.html",
                 exact=True,
-            ).is_visible()
+            )
+            citation_link.scroll_into_view_if_needed()
+            assert citation_link.is_visible()
             assert download_enabled
             assert body_horizontal_overflow is False
 
@@ -2608,7 +2650,7 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             page = browser.new_page(viewport={"width": 768, "height": 1024})
             page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
             page.locator(".gradio-container").wait_for(timeout=30_000)
-            for heading in ("开始诊断", "诊断结果", "多模态与完整报告"):
+            for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
             example_disclosure = _tab_to(page, expected_name="查看示例", limit=20)
             example_disclosure.press("Space")
@@ -2626,6 +2668,9 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             )
             keyboard_replay.press("Enter")
             _wait_for_terminal_status(page, "✓ 已完成")
+            page.get_by_role(
+                "heading", name="多模态与完整报告", exact=True
+            ).wait_for(timeout=30_000)
             metrics = page.evaluate(
                 """() => ({
                     regions: [

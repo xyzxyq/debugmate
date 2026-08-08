@@ -53,7 +53,8 @@ WORKBENCH_CSS = "\n".join(
             "color: var(--text) !important; color-scheme: light; }"
         ),
         (
-            ".gradio-container { max-width: 1560px !important; margin: 0 auto; "
+            ".gradio-container { width: 100% !important; max-width: 1440px !important; "
+            "margin: 0 auto; "
             "padding: 14px 16px 18px !important; --body-background-fill: var(--canvas); "
             "--background-fill-primary: var(--surface-1); "
             "--background-fill-secondary: var(--surface-2); "
@@ -83,12 +84,16 @@ WORKBENCH_CSS = "\n".join(
             "background: transparent !important; border: 0 !important; padding: 0 !important; }"
         ),
         (
-            ".command-bar { margin: 0 0 16px !important; padding: 12px 16px !important; "
+            ".command-bar { margin: 0 0 12px !important; padding: 8px 12px !important; "
             "background: var(--surface-1) !important; border: 1px solid var(--border) "
             "!important; border-radius: 8px !important; box-shadow: none; }"
         ),
         ".command-bar .product-title { min-width: 0; }",
-        ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 20px; }",
+        ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 18px; }",
+        (
+            ".command-bar .product-title p { margin: 2px 0 0; color: var(--muted); "
+            "font-size: 13px; line-height: 1.35; }"
+        ),
         (
             ".command-bar .status-indicator { min-width: 0; display: flex; "
             "flex-direction: column; align-items: center; gap: 6px; }"
@@ -109,8 +114,8 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".command-bar .metadata { margin-left: auto; text-align: right; }",
         (
-            ".command-bar > .styler > .block { background: transparent !important; "
-            "border: 0 !important; padding: 0 !important; }"
+            ".command-bar .styler, .command-bar .block { background: transparent !important; "
+            "border: 0 !important; padding: 0 !important; min-height: 0 !important; }"
         ),
         ".command-bar > .styler > .product-title { grid-column: 1; grid-row: 1 / span 2; }",
         ".command-bar > .styler > #diagnostic-status { grid-column: 2; grid-row: 1; }",
@@ -125,7 +130,8 @@ WORKBENCH_CSS = "\n".join(
             "grid-template-columns: minmax(320px, 360px) minmax(0, 1fr); gap: 16px; }"
         ),
         (
-            "#workbench-grid:has(> #workbench-grid) { align-items: start; "
+            "#workbench-grid:has(> #workbench-grid) { width: 100% !important; "
+            "max-width: none !important; align-items: start; "
             "background: var(--canvas) !important; border: 0 !important; }"
         ),
         "#workbench-grid:has(> #workbench-grid) > #workbench-grid { display: contents; }",
@@ -202,7 +208,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".correction-panel summary { color: var(--text) !important; font-weight: 700; }",
         (
-            ".diagnosis-summary { padding: 16px; background: var(--surface-2); "
+            ".block.diagnosis-summary { padding: 16px; background: var(--surface-2); "
             "border: 1px solid var(--border); border-left: 4px solid var(--muted); "
             "border-radius: 8px; "
             "color: var(--text) !important; }"
@@ -227,29 +233,42 @@ WORKBENCH_CSS = "\n".join(
             ".status-indicator.tone-red p:first-child { background: var(--failure-surface); "
             "color: var(--failure) !important; }"
         ),
-        ".diagnosis-summary.tone-neutral { border-left-color: var(--muted); }",
         (
-            ".diagnosis-summary.tone-blue { border-left-color: var(--primary); "
+            ".prose.diagnosis-summary { border: 0 !important; padding: 0 !important; "
+            "background: transparent !important; }"
+        ),
+        (
+            ".block.diagnosis-summary.tone-neutral { border: 0; padding: 0; "
+            "background: transparent; }"
+        ),
+        (
+            ".block.diagnosis-summary.tone-blue { border-left-color: var(--primary); "
             "background: var(--primary-soft); }"
         ),
         (
-            ".diagnosis-summary.tone-green { border-left-color: var(--success); "
+            ".block.diagnosis-summary.tone-green { border-left-color: var(--success); "
             "background: var(--success-surface); }"
         ),
         (
-            ".diagnosis-summary.tone-amber { border-left-color: var(--warning); "
+            ".block.diagnosis-summary.tone-amber { border-left-color: var(--warning); "
             "background: var(--warning-surface); }"
         ),
         (
-            ".diagnosis-summary.tone-red { border-left-color: var(--failure); "
+            ".block.diagnosis-summary.tone-red { border-left-color: var(--failure); "
             "background: var(--failure-surface); }"
         ),
         ".diagnosis-summary p { margin: 0; }",
         (
-            ".next-steps { margin-top: 12px; padding: 12px 16px; background: var(--surface-2); "
+            ".block.next-steps { margin-top: 12px; padding: 12px 16px; "
+            "background: var(--surface-2); "
             "border: 1px solid var(--border); border-radius: 8px; }"
         ),
         ".next-steps p, .next-steps li { color: var(--text) !important; }",
+        (
+            ".prose.next-steps, .next-steps > .styler { border: 0 !important; "
+            "padding: 0 !important; "
+            "background: transparent !important; }"
+        ),
         ".evidence-kicker p { margin: 16px 0 8px; color: var(--muted); font-weight: 700; }",
         ".tab-container.visually-hidden[aria-hidden='true'] { display: none !important; }",
         (
@@ -286,6 +305,11 @@ WORKBENCH_CSS = "\n".join(
         (
             ".report-panel pre { max-width: 100%; white-space: pre-wrap; "
             "overflow-wrap: anywhere; overflow-x: auto; }"
+        ),
+        (
+            ".diagnosis-summary code, .next-steps code, .report-summary code { "
+            "white-space: pre-wrap !important; overflow-wrap: anywhere; "
+            "word-break: break-word; }"
         ),
         "#fact-table, #citation-table, #diagnostic-commands { max-width: 100%; overflow: auto; }",
         (
@@ -1152,14 +1176,7 @@ def correction_draft_from_fields(
 
 def _status_text(view: ComponentViewModel) -> str:
     status_badge = view.status_badge
-    rows = [f"### {status_badge}", view.mode_badge]
-    if view.fallback_badge:
-        rows.append(view.fallback_badge)
-    if view.running_copy:
-        rows.append(view.running_copy)
-    if view.safe_failure_copy:
-        rows.extend((view.safe_failure_copy, f"安全错误码：{view.failure_code}"))
-    return "\n\n".join(rows)
+    return "\n\n".join((f"### {status_badge}", view.mode_badge))
 
 
 def _overview_text(payload: CallbackPayload) -> str:
@@ -1175,10 +1192,12 @@ def _overview_text(payload: CallbackPayload) -> str:
             "### 最可能原因",
             diagnosis.most_likely_reason,
             "### 先做什么",
-            f"`{diagnosis.first_action}`",
+            diagnosis.first_action_summary,
             "### 如何验证",
             f"`{diagnosis.how_to_verify}`",
         ]
+    if view.fallback_badge:
+        rows.extend(("### 语音状态", view.fallback_badge))
     return "\n\n".join(rows)
 
 
@@ -1188,7 +1207,7 @@ def _next_action_text(payload: CallbackPayload) -> str:
         return "### 现在就做这一步\n\n完成诊断后，这里会显示唯一的建议行动。"
     return (
         "### 现在就做这一步\n\n"
-        f"**{diagnosis.next_action_kind or '行动'}：** `{diagnosis.first_action}`\n\n"
+        f"**完整命令（可选择复制）：** `{diagnosis.first_action}`\n\n"
         "命令仅供查看，DebugMate 不会自动执行或安装软件。"
     )
 
@@ -1278,7 +1297,11 @@ def build_app(
 ) -> gr.Blocks:
     """Build the compact workbench without an upload, path, or shell boundary."""
 
-    with gr.Blocks(title="DebugMate 学习诊断助手", analytics_enabled=False) as app:
+    with gr.Blocks(
+        title="DebugMate 学习诊断助手",
+        analytics_enabled=False,
+        fill_width=True,
+    ) as app:
         callbacks = UiCallbacks(service, content_origin=content_origin)
         current_state = gr.State(_idle_view())
         session_lease = gr.State(value=None)
@@ -1291,7 +1314,10 @@ def build_app(
         retry_case = gr.State(value=None)
         retry_result = gr.State(value=None)
         with gr.Group(elem_classes=["status-bar", "command-bar"]):
-            gr.Markdown("# DebugMate 学习诊断助手", elem_classes="product-title")
+            gr.Markdown(
+                "# DebugMate 学习诊断助手\n\n粘贴报错，先看原因与下一步。",
+                elem_classes="product-title",
+            )
             status = gr.Markdown(
                 "● 等待诊断",
                 elem_id="diagnostic-status",
@@ -1379,14 +1405,14 @@ def build_app(
             with gr.Column(elem_classes=["region", "diagnosis-canvas"]):
                 gr.Markdown("## 诊断结果")
                 category_confidence = gr.Markdown(
-                    "### 发生了什么\n\n等待诊断。\n\n### 最可能原因\n\n等待诊断。\n\n"
-                    "### 先做什么\n\n先完成左侧两步隐私确认。\n\n### 如何验证\n\n诊断后显示。",
+                    "### 两步开始诊断\n\n先在左侧生成脱敏预览，再确认并开始诊断。",
                     elem_classes=["diagnosis-summary", "tone-neutral"],
                     elem_id="student-overview",
                 )
                 next_action = gr.Markdown(
                     "### 现在就做这一步\n\n完成诊断后，这里会显示唯一的建议行动。",
                     elem_classes="next-steps",
+                    visible=False,
                 )
                 with gr.Accordion(
                     "技术详情与恢复信息",
@@ -1416,8 +1442,9 @@ def build_app(
                 )
 
             with gr.Column(
-                elem_classes=["region", "results-region", "result-workspace"]
-            ):
+                elem_classes=["region", "results-region", "result-workspace"],
+                visible=False,
+            ) as result_workspace:
                 gr.Markdown("## 多模态与完整报告")
                 with gr.Tabs(elem_id="result-tabs", visible=False) as result_tabs:
                     with gr.Tab("文字报告", interactive=False) as report_tab:
@@ -1521,6 +1548,7 @@ def build_app(
             technical_details,
             next_action,
             report_summary,
+            result_workspace,
             result_tabs,
             report_tab,
             card_tab,
@@ -1591,8 +1619,16 @@ def build_app(
                 payload.view.accessible_status,
                 gr.update(visible=fields_enabled),
                 gr.update(visible=payload.view.secondary_disclosure_visible),
-                gr.update(value=_next_action_text(payload)),
+                gr.update(
+                    value=_next_action_text(payload),
+                    visible=payload.state.status
+                    in {ResultStatus.COMPLETED, ResultStatus.PARTIAL},
+                ),
                 gr.update(value=_report_summary_text(payload)),
+                gr.update(
+                    visible=payload.state.status
+                    in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+                ),
                 gr.update(
                     visible=payload.state.status
                     in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}

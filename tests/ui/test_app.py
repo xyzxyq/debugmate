@@ -288,10 +288,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "抽取字段与纠错",
         "粘贴报错，获得原因、步骤与复盘材料。",
         "运行与隐私说明",
-        "发生了什么",
-        "最可能原因",
-        "先做什么",
-        "如何验证",
+        "两步开始诊断",
         "技术详情与恢复信息",
         "诊断结果",
         "文字报告",
@@ -416,6 +413,7 @@ def test_verified_diagnosis_presentation_has_four_student_sections_without_ident
     assert presentation.what_happened.startswith("依赖与环境问题")
     assert presentation.most_likely_reason
     assert presentation.first_action == diagnosis.checks[0].command
+    assert presentation.first_action_summary == "先完成第一项检查，再根据结果继续。"
     assert presentation.how_to_verify == diagnosis.verification_steps[0].command
     assert not re.search(r"(?:case|run|result|fixture|hash|schema|fact|evidence)_", student_copy)
 
@@ -434,6 +432,7 @@ def test_verified_diagnosis_presentation_fails_closed_when_student_steps_are_mis
 
     assert presentation.most_likely_reason == "当前证据不足，未确认原因。"
     assert presentation.first_action == "补充信息后重新诊断。"
+    assert presentation.first_action_summary == "补充信息后重新诊断。"
     assert presentation.how_to_verify == "完成检查后重新诊断并对照结果。"
 
 

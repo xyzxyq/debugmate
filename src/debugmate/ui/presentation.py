@@ -135,6 +135,7 @@ class VerifiedDiagnosisPresentation:
     what_happened: str
     most_likely_reason: str
     first_action: str
+    first_action_summary: str
     how_to_verify: str
 
 
@@ -160,6 +161,11 @@ def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPr
         action_kind = None
     reason = "当前证据不足，未确认原因。" if strongest is None else strongest.cause
     first_action = "补充信息后重新诊断。" if action is None else action.command
+    first_action_summary = (
+        "补充信息后重新诊断。"
+        if action is None
+        else f"先完成第一项{action_kind}，再根据结果继续。"
+    )
     verification = (
         "完成检查后重新诊断并对照结果。"
         if not diagnosis.verification_steps
@@ -176,6 +182,7 @@ def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPr
         what_happened=f"{category}（置信度 {confidence}）",
         most_likely_reason=reason,
         first_action=first_action,
+        first_action_summary=first_action_summary,
         how_to_verify=verification,
     )
 
