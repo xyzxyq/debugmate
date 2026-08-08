@@ -160,10 +160,12 @@ def _probe_generation_request(case_id: str) -> GenerationRequest:
 
 
 def _validated_probe_diagnosis(
-    backend: CandidateBackend, candidate: CandidateRunResult, case_id: str
+    backend: CandidateBackend,
+    candidate: CandidateRunResult,
+    request: GenerationRequest,
 ) -> DiagnosisRecord:
     outcome = DiagnosisGenerator(backend).generate(
-        _probe_generation_request(case_id),
+        request,
         initial_candidate=candidate,
     )
     if outcome.status != "completed":
@@ -179,10 +181,9 @@ def run_fixture_probe(output_root: Path) -> ProbeOutcome:
         (fixture_root / "module_not_found" / "input.json").read_text(encoding="utf-8")
     )
     backend = FixtureBackend(fixture_root)
-    candidate = backend.run_workflow(
-        {"case_id": case_id}, user="debugmate-local"
-    )
-    diagnosis = _validated_probe_diagnosis(backend, candidate, case_id)
+    request = _probe_generation_request(case_id)
+    candidate = backend.run_workflow({"case_id": case_id}, user="debugmate-local")
+    diagnosis = _validated_probe_diagnosis(backend, candidate, request)
     capabilities = _capabilities(CapabilityStatus.NOT_TESTED)
     report = ProbeReport(
         case_id=case_id,
@@ -256,56 +257,70 @@ def run_cloud_probe(settings: DebugMateSettings, output_root: Path) -> ProbeOutc
     backend = DifyBackend(settings)
     bundle = EvidenceBundle.begin(output_root, case_id)
     bundle.write_json("input.redacted.json", input_payload)
+    capability_statuses = {
+        capability_id: CapabilityStatus.NOT_TESTED for capability_id in CAPABILITY_IDS
+    }
+    evidence: dict[str, Path] = {}
     try:
         upload = backend.upload_file(input_path, settings.dify_user)
         upload_path = bundle.write_json(
             "dify-upload.json",
             {"file_id": upload.file_id, "filename": upload.filename, "backend": upload.backend},
         )
+        evidence.update({"C01": upload_path, "C02": upload_path})
+        capability_statuses.update({"C01": CapabilityStatus.PASS, "C02": CapabilityStatus.PASS})
+        request = _probe_generation_request(case_id)
         workflow = backend.run_workflow(
-            {"case_id": case_id, "file_id": upload.file_id}, settings.dify_user
+            {
+                "case_id": case_id,
+                "file_id": upload.file_id,
+                "generation_request": request.model_dump(mode="json"),
+            },
+            settings.dify_user,
         )
-        diagnosis = _validated_probe_diagnosis(backend, workflow, case_id)
-        diagnosis_path = bundle.write_json(
-            "diagnosis.json", diagnosis.model_dump(mode="json")
-        )
+        diagnosis = _validated_probe_diagnosis(backend, workflow, request)
+        diagnosis_path = bundle.write_json("diagnosis.json", diagnosis.model_dump(mode="json"))
 
         # Phase 2 stores only the scanned source text. Audio generation remains
         # deferred until Phase 4 can prove semantic derivation and media safety.
-        bundle.write_json(
-            "recap.json", {"recap_text": diagnosis.recap_text}
-        )
-        evidence = {
-            "C01": upload_path,
-            "C02": upload_path,
-            "C05": diagnosis_path,
-        }
-        capabilities = []
-        for capability_id in CAPABILITY_IDS:
-            path = evidence.get(capability_id)
-            capabilities.append(
-                ProbeCapability(
-                    capability_id=capability_id,
-                    description=CAPABILITY_DESCRIPTIONS[capability_id],
-                    status=(CapabilityStatus.PASS if path else CapabilityStatus.NOT_TESTED),
-                    evidence_path=(path.relative_to(bundle.temp_path).as_posix() if path else None),
-                    sha256=(sha256_file(path) if path else None),
-                )
-            )
+        bundle.write_json("recap.json", {"recap_text": diagnosis.recap_text})
+        evidence["C05"] = diagnosis_path
+        capability_statuses["C05"] = CapabilityStatus.PASS
         run_status = RunStatus.PASSED
         exit_code = 0
         run_id = workflow.run_id
     except (DifyNotConfigured, DifyAuthError, DifyQuotaError) as error:
         del error
-        capabilities = _capabilities(CapabilityStatus.BLOCKED)
+        if evidence:
+            capability_statuses["C05"] = CapabilityStatus.BLOCKED
+        else:
+            capability_statuses = {
+                capability_id: CapabilityStatus.BLOCKED for capability_id in CAPABILITY_IDS
+            }
         run_status = RunStatus.BLOCKED
         exit_code = 2
         run_id = "blocked:dify"
     except (DifyTransportError, DifyContractError):
-        capabilities = _capabilities(CapabilityStatus.FAIL)
+        if evidence:
+            capability_statuses["C05"] = CapabilityStatus.FAIL
+        else:
+            capability_statuses.update({"C01": CapabilityStatus.FAIL, "C02": CapabilityStatus.FAIL})
         run_status = RunStatus.FAILED
         exit_code = 1
         run_id = "failed:dify"
+
+    capabilities = []
+    for capability_id in CAPABILITY_IDS:
+        path = evidence.get(capability_id)
+        capabilities.append(
+            ProbeCapability(
+                capability_id=capability_id,
+                description=CAPABILITY_DESCRIPTIONS[capability_id],
+                status=capability_statuses[capability_id],
+                evidence_path=(path.relative_to(bundle.temp_path).as_posix() if path else None),
+                sha256=(sha256_file(path) if path else None),
+            )
+        )
 
     report = ProbeReport(
         case_id=case_id,

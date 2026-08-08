@@ -216,6 +216,7 @@ def test_cloud_probe_keeps_scanned_recap_text_but_defers_audio_callback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     audio_calls: list[str] = []
+    workflow_inputs: list[dict[str, object]] = []
 
     class SuccessfulBackend:
         def __init__(self, configured: DebugMateSettings) -> None:
@@ -227,6 +228,7 @@ def test_cloud_probe_keeps_scanned_recap_text_but_defers_audio_callback(
 
         def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult:
             del user
+            workflow_inputs.append(inputs)
             payload = json.loads(FIXTURE_DIAGNOSIS.read_text(encoding="utf-8"))
             payload["case_id"] = inputs["case_id"]
             return CandidateRunResult(
@@ -248,6 +250,22 @@ def test_cloud_probe_keeps_scanned_recap_text_but_defers_audio_callback(
 
     assert outcome.exit_code == 0
     assert audio_calls == []
+    assert len(workflow_inputs) == 1
+    generation_request = workflow_inputs[0]["generation_request"]
+    assert isinstance(generation_request, dict)
+    assert generation_request["case_id"] == outcome.case_id
+    assert generation_request["observed_facts"]
+    assert generation_request["evidence"]
+    assert generation_request["routing"]["category"] == "dependency_environment"
+    assert {item["capability_id"]: item["status"] for item in report["capabilities"]} == {
+        "C01": "pass",
+        "C02": "pass",
+        "C03": "not-tested",
+        "C04": "not-tested",
+        "C05": "pass",
+        "C06": "not-tested",
+        "C07": "not-tested",
+    }
     assert not (outcome.bundle_path / "recap.mp3").exists()
     assert json.loads((outcome.bundle_path / "recap.json").read_text(encoding="utf-8")) == {
         "recap_text": (
@@ -258,6 +276,49 @@ def test_cloud_probe_keeps_scanned_recap_text_but_defers_audio_callback(
     c07 = next(item for item in report["capabilities"] if item["capability_id"] == "C07")
     assert c07["status"] == "not-tested"
     assert c07["evidence_path"] is None
+
+
+def test_cloud_probe_preserves_upload_evidence_when_c05_validation_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class SemanticallyInvalidBackend:
+        def __init__(self, configured: DebugMateSettings) -> None:
+            del configured
+
+        def upload_file(self, path: Path, user: str) -> SimpleNamespace:
+            del path, user
+            return SimpleNamespace(file_id="file-fixture", filename="input.json", backend="dify")
+
+        def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult:
+            del inputs, user
+            payload = json.loads(FIXTURE_DIAGNOSIS.read_text(encoding="utf-8"))
+            payload["category"] = "unknown"
+            payload["observed_facts"] = []
+            payload["evidence"] = []
+            payload["support_links"] = []
+            payload["root_cause_candidates"] = []
+            return CandidateRunResult(
+                run_id="run-semantic-mismatch",
+                backend="dify",
+                candidate_payload=payload,
+            )
+
+    monkeypatch.setattr("debugmate.probe.DifyBackend", SemanticallyInvalidBackend)
+    configured = DebugMateSettings.from_env({"DIFY_API_KEY": SENTINEL})
+
+    outcome = run_cloud_probe(configured, tmp_path / "evidence")
+    statuses = {item.capability_id: item.status.value for item in outcome.report.capabilities}
+
+    assert outcome.exit_code == 1
+    assert statuses == {
+        "C01": "pass",
+        "C02": "pass",
+        "C03": "not-tested",
+        "C04": "not-tested",
+        "C05": "fail",
+        "C06": "not-tested",
+        "C07": "not-tested",
+    }
 
 
 def test_cli_fixture_probe_and_bundle_verification(
