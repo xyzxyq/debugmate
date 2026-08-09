@@ -1139,6 +1139,66 @@ def test_p7_security_scope_scans_scripts_and_configuration(
     assert relative_path in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "value"),
+    [
+        (".env", "DIFY_API_KEY=app-abcdefghijklmnop\n"),  # PHASE7_SYNTHETIC_SECRET
+        (".env", 'DIFY_API_KEY="app-abcdefghijklmnop"\n'),  # PHASE7_SYNTHETIC_SECRET
+        (".env.example", "DIFY_API_KEY=app-abcdefghijklmnop\n"),  # PHASE7_SYNTHETIC_SECRET
+        (".env.example", "DIFY_API_KEY='app-abcdefghijklmnop'\n"),  # PHASE7_SYNTHETIC_SECRET
+        ("platform/dify/app.yml", "api-key: app-abcdefghijklmnop\n"),  # PHASE7_SYNTHETIC_SECRET
+        ("platform/dify/app.yml", 'api-key: "app-abcdefghijklmnop"\n'),  # PHASE7_SYNTHETIC_SECRET
+        ("debugmate.toml", "api_key = app-abcdefghijklmnop\n"),  # PHASE7_SYNTHETIC_SECRET
+        ("debugmate.toml", "api_key = 'app-abcdefghijklmnop'\n"),  # PHASE7_SYNTHETIC_SECRET
+        (
+            "scripts/config.ps1",
+            "$env:DIFY_API_KEY = app-abcdefghijklmnop\n",  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "scripts/config.ps1",
+            '$env:DIFY_API_KEY = "app-abcdefghijklmnop"\n',  # PHASE7_SYNTHETIC_SECRET
+        ),
+    ],
+)
+def test_p7_security_scope_rejects_quoted_and_unquoted_api_keys(
+    tmp_path: Path, relative_path: str, value: str
+) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    target = repository / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(value, encoding="utf-8")
+
+    result = _run_phase7_security(repository, baseline)
+
+    assert result.returncode != 0
+    assert relative_path in result.stderr
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "DIFY_API_KEY=REDACTED\n",
+        "DIFY_API_KEY=[REDACTED]\n",
+        'DIFY_API_KEY="null"\n',
+        "DIFY_API_KEY='none'\n",
+        "DIFY_API_KEY=empty\n",
+        'PASSWORD = "PASSWORD"\n',  # PHASE7_SYNTHETIC_SECRET
+        "TOKEN = token\n",
+        "CLIENT_SECRET = 'secret'\n",
+        'REQUEST_SIGNATURE = "signature"\n',  # PHASE7_SYNTHETIC_SECRET
+    ],
+)
+def test_p7_security_scope_allows_explicit_api_key_placeholders(
+    tmp_path: Path, value: str
+) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    (repository / ".env.example").write_text(value, encoding="utf-8")
+
+    result = _run_phase7_security(repository, baseline)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_p7_security_scope_modified_frozen_hash_exits_nonzero(tmp_path: Path) -> None:
     repository, baseline = _phase7_security_fixture(tmp_path)
     payload = json.loads(baseline.read_text(encoding="utf-8"))

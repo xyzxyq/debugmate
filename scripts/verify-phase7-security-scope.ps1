@@ -48,7 +48,8 @@ function Test-Phase7ReviewableTextPath {
         '.bash', '.bat', '.cmd', '.properties', '.example'
     )
     $leaf = [IO.Path]::GetFileName($normalized)
-    return $textExtensions -contains $extension -or $leaf -in @(
+    return $textExtensions -contains $extension -or $leaf -eq '.env' -or
+        $leaf -like '.env.*' -or $leaf -in @(
         '.gitignore', '.gitattributes', 'Dockerfile', 'Makefile', 'Procfile'
     )
 }
@@ -58,9 +59,19 @@ function Assert-Phase7ValueSafeFiles {
         [Parameter(Mandatory)][string]$Root,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$RelativePaths
     )
+    $credentialNames = '(?:api[_-]?key|token|password|secret|signature|approval[_-]?token)'
+    # These are the only accepted committed credential values. Keep this list exact and auditable.
+    $placeholderValues = @(
+        '[REDACTED]', 'REDACTED', 'null', 'none', 'empty',
+        'token', 'password', 'secret', 'signature'
+    )
+    $placeholderPattern = ($placeholderValues | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    $quotedCredentialPattern = '(?i){0}\s*[:=]\s*(["''])(?!(?:{1})\1(?:\s|$|[#;]))[^"'']{{8,}}\1' -f $credentialNames, $placeholderPattern # PHASE7_SCAN_PATTERN
+    $unquotedCredentialPattern = '(?i){0}\s*[:=]\s*(?!(?:{1})(?:\s*(?:[#;].*)?)?$)[A-Za-z0-9][A-Za-z0-9._/+:-]{{7,}}(?:\s*(?:[#;].*)?)?$' -f $credentialNames, $placeholderPattern # PHASE7_SCAN_PATTERN
     $patterns = @(
         '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
-        '(?i)(?:token|password|secret|signature|approval[_-]?token)\s*[:=]\s*["''](?!\[?REDACTED|null|none|empty|token\b|password\b|secret\b|signature\b)[^"'']{8,}',
+        $quotedCredentialPattern,
+        $unquotedCredentialPattern,
         '(?i)gh[pousr]_[A-Za-z0-9]{12,}',
         '(?i)[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}', # PHASE7_SCAN_PATTERN
         '/Users/', # PHASE7_SCAN_PATTERN
