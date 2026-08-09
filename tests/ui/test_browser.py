@@ -100,6 +100,7 @@ _PHASE7_LEDGER_KEYS = {
 _PHASE7_QA_RUN_ID_ENV = "DEBUGMATE_PHASE7_QA_RUN_ID"
 _PHASE7_STAGING_ENV = "DEBUGMATE_PHASE7_STAGING_DIR"
 _PHASE7_QA_RUN_ID = re.compile(r"p7qa_[0-9a-f]{32}\Z")
+_REPLAY_DISCLOSURE_LABEL = "演示回放（独立模式）"
 _PHASE7_TEST_IDENTITY_HASHES = tuple(
     hashlib.sha256(value.encode("utf-8")).hexdigest()
     for value in (
@@ -732,7 +733,7 @@ def _phase7_open_page(browser, browser_base_url: str, viewport: tuple[int, int])
 def _phase7_assert_stable_selectors(page) -> None:
     disclosures = (
         "补充诊断信息（可选）：代码、环境",
-        "演示回放（独立模式）",
+        _REPLAY_DISCLOSURE_LABEL,
     )
     for label in disclosures:
         page.get_by_text(label, exact=True).click()
@@ -1327,8 +1328,8 @@ def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
         context = None
         try:
             context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
-            expect(page.get_by_text("演示回放（独立模式）", exact=True)).to_be_visible()
-            page.get_by_text("演示回放（独立模式）", exact=True).click()
+            expect(page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True)).to_be_visible()
+            page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True).click()
             expect(page.get_by_text(
                 "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。",
                 exact=True,
@@ -1477,7 +1478,7 @@ def _capture_failure_screenshot(page) -> Path | None:
 
 
 def _open_example(page) -> None:
-    disclosure = page.get_by_text("查看示例", exact=True)
+    disclosure = page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True)
     if page.locator("#replay-action").is_hidden():
         disclosure.click()
     page.locator("#replay-action").wait_for(state="visible", timeout=10_000)
@@ -1518,7 +1519,7 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
             assert report_tab.is_hidden()
             assert card_tab.is_hidden()
             expect(page.locator("#student-overview")).to_contain_text("两步开始诊断")
-            expect(page.get_by_text("查看示例", exact=True)).to_be_visible()
+            expect(page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True)).to_be_visible()
             assert page.locator("#replay-action").is_hidden()
             assert page.locator("#technical-details").is_hidden()
             assert page.locator(".block.next-steps").is_hidden()
@@ -2569,7 +2570,9 @@ def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
                 expected_name="1. 生成脱敏预览",
                 limit=20,
             )
-            example_accordion = _tab_to(page, expected_name="查看示例", limit=3)
+            example_accordion = _tab_to(
+                page, expected_name=_REPLAY_DISCLOSURE_LABEL, limit=3
+            )
             example_accordion.press("Space")
             expect(example_accordion).to_have_class(re.compile(r"\bopen\b"))
             _tab_to(page, expected_name="示例案例", limit=3)
@@ -3381,7 +3384,7 @@ def test_gap_01_real_loopback_workbench_has_two_student_zones(
             page.locator(".gradio-container").wait_for(timeout=30_000)
             for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            page.get_by_text("查看示例", exact=True).wait_for(timeout=30_000)
+            page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True).wait_for(timeout=30_000)
             visible_before_viewport = []
             for text, locator in (
                 ("开始诊断", page.get_by_role("heading", name="开始诊断", exact=True)),
@@ -3398,7 +3401,7 @@ def test_gap_01_real_loopback_workbench_has_two_student_zones(
                         and box["y"] + box["height"] <= 768,
                     }
                 )
-            assert page.get_by_text("查看示例", exact=True).is_visible()
+            assert page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True).is_visible()
             assert page.locator("#replay-action").is_hidden()
             screenshot = _capture_failure_screenshot(page)
             metrics = page.evaluate(
@@ -3593,7 +3596,7 @@ def test_gap_01_real_loopback_workbench_stacks_student_zones_at_1024px(
             page.locator(".gradio-container").wait_for(timeout=30_000)
             for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            page.get_by_text("查看示例", exact=True).wait_for(timeout=30_000)
+            page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True).wait_for(timeout=30_000)
             metrics = page.evaluate(
                 """() => ({
                     regions: ['.control-rail', '.diagnosis-canvas'].map((selector) => {
@@ -3632,7 +3635,9 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             page.locator(".gradio-container").wait_for(timeout=30_000)
             for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            example_disclosure = _tab_to(page, expected_name="查看示例", limit=20)
+            example_disclosure = _tab_to(
+                page, expected_name=_REPLAY_DISCLOSURE_LABEL, limit=20
+            )
             example_disclosure.press("Space")
             replay_label = page.get_by_text("示例案例", exact=True)
             replay_label.wait_for(timeout=30_000)
