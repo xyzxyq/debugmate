@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: course-demo
 status: complete
-stopped_at: Quick task 260809-ghz implementation and verification complete
-last_updated: "2026-08-09T04:40:00Z"
-last_activity: 2026-08-09 -- Versioned independent Dify C03/C04 evidence and an accurate C06 blocker
+stopped_at: Quick task 260809-icj implementation and verification complete
+last_updated: "2026-08-09T06:00:00Z"
+last_activity: 2026-08-09 -- Promoted C06 through independent roundtrip and authoritative rerun evidence
 progress:
   total_phases: 6
   completed_phases: 6
@@ -36,7 +36,7 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 - 2026-08-08 cloud bundle 已在版本化路径通过 `verify-bundle` 且零问题：C01、C02、C05 为 `pass`，C03、C04、C06、C07 为 `not-tested`。
 - C07 已于 2026-08-09 重新通过正式 Dify live TTS gate；版本化 MP3 经 FFprobe 验证为单声道 MP3，并与 `tts-evidence.json` 的 SHA-256 一致。
 - 2026-08-09 独立 live capture 证明 C03/C04 为 `pass`：C03 绑定 target-free request manifest、真实 PNG 上传与 exact VLM extraction；C04 绑定 console run 的 direct Knowledge Retrieval node output、chunk/source URL/locator/score。
-- 当前可复算能力矩阵为 C01/C02/C03/C04/C05/C07 `pass`，C06 `blocked`。C06 的 console UI 文件上传被扩展权限阻断，页面内导入接口返回 401；没有独立重导出与重建应用复跑，因此不得升级为 pass。
+- 当前可复算能力矩阵为 C01–C07 全部 `pass`。C06 绑定 distinct source/independent app 指纹、byte-exact re-export、相同规范化结构 SHA-256、空 differences，以及 authoritative reconstructed-app rerun 的安全 allowlist；总记录与三个内层产物均通过 Git tracked/not ignored 和精确哈希门禁。
 
 ## Remaining UAT Debt
 
@@ -56,8 +56,8 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 ## Next Order
 
 1. 先维护本地课程演示、事实证据、README 与 STATE 的一致性。
-2. 如课程演示需要，先解除 C06 导入权限阻塞，再补齐重导出、结构比较和重建应用复跑证据。
-3. 保持课程材料冻结，直到后续 Dify 实测范围和事实口径稳定。
+2. 保持 C06 independent roundtrip/rerun 证据、矩阵和说明文档的 SHA-256 一致性。
+3. 保持课程材料冻结；本 quick 未刷新 PPTX、视频、字幕或最终截图。
 4. 最后才统一更新 PPTX、视频、字幕和最终截图。
 
 ## Quick Tasks Completed
@@ -80,3 +80,4 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 | 260808-tts | Enable and live-verify the published Dify workflow text-to-speech API feature | 2026-08-09 | this commit | Verified | [app.dsl.yml](../platform/dify/app.dsl.yml) |
 | 260809-fob | Version Dify C01-C07 evidence and synchronize matrix, README, and state truth | 2026-08-09 | ad2724f | Verified | [260809-fob-dify-c01-c07-readme-pptx](./quick/260809-fob-dify-c01-c07-readme-pptx/) |
 | 260809-ghz | Version independent Dify C03/C04 evidence and preserve the accurate C06 blocker | 2026-08-09 | e3b9ed9 | Verified | [260809-ghz-dify-c03-c04-c06-dsl-readme-state-pptx](./quick/260809-ghz-dify-c03-c04-c06-dsl-readme-state-pptx/) |
+| 260809-icj | Promote C06 through independent DSL roundtrip and authoritative rerun evidence | 2026-08-09 | task commits | Verified | [260809-icj-c06-pass-pptx](./quick/260809-icj-c06-pass-pptx/) |
