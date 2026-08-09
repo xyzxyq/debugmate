@@ -25,12 +25,7 @@ from debugmate.knowledge.sync import (
     verify_remote_readback,
 )
 
-FIXTURE = (
-    Path(__file__).resolve().parents[1]
-    / "fixtures"
-    / "knowledge"
-    / "python-errors.html"
-)
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "knowledge" / "python-errors.html"
 
 
 def _source(
@@ -143,9 +138,9 @@ def test_sync_plan_is_deterministic_and_classifies_every_operation(
     assert [item.source_id for item in unchanged.deletes] == ["stale-source"]
     assert [item.source_id for item in update.updates] == ["python-errors"]
     assert [item.source_id for item in create.creates] == ["python-errors"]
-    assert unchanged.model_dump(mode="json") == create_sync_plan(
-        build, remote_manifest
-    ).model_dump(mode="json")
+    assert unchanged.model_dump(mode="json") == create_sync_plan(build, remote_manifest).model_dump(
+        mode="json"
+    )
 
 
 def test_sync_plan_rejects_noncanonical_local_note_path(build: KnowledgeBuild) -> None:
@@ -228,8 +223,7 @@ def test_sync_plan_and_request_carry_source_metadata_and_fixed_dify_config(
         )
 
     payload = json.loads(requests[0].content)
-    assert payload["doc_metadata"]["source_id"] == "python-errors"
-    assert payload["doc_metadata"]["source_sha256"] == build.notes[0].source_sha256
+    assert "doc_metadata" not in payload
     assert payload["process_rule"]["rules"]["segmentation"] == {
         "separator": "\n",
         "max_tokens": 800,
@@ -550,9 +544,7 @@ def test_cloud_marked_executor_sends_key_only_during_explicit_execution(
     assert result.executed is True
     assert len(requests) == 1
     assert requests[0].headers["authorization"] == "Bearer dataset-key"
-    assert requests[0].url == (
-        "https://api.dify.ai/v1/datasets/dataset/document/create-by-text"
-    )
+    assert requests[0].url == ("https://api.dify.ai/v1/datasets/dataset/document/create-by-text")
 
 
 def test_coverage_cli_emits_ascii_safe_json(
