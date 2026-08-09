@@ -29,12 +29,10 @@ from threading import Thread
 
 import httpx
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from playwright.sync_api import expect, sync_playwright
 
 from debugmate.evidence import RunManifest, RunStatus
-
-pytestmark = pytest.mark.browser
 
 _ROOT = Path(__file__).resolve().parents[2]
 _EVIDENCE = _ROOT / "evidence" / "ui" / "phase4"
@@ -81,15 +79,25 @@ _LOCAL_LIVE_LEDGER_KEYS = {
     "verified_at_utc",
 }
 _PHASE7_LEDGER_KEYS = {
+    "evidence_version",
+    "qa_run_id",
+    "scenario_id",
     "viewport",
-    "state",
+    "privacy_state",
+    "result_status",
     "mode",
     "ocr_backend",
     "ocr_status",
+    "case_id_sha256",
+    "source_run_id_sha256",
+    "result_id_sha256",
     "body_horizontal_overflow",
     "screenshot_sha256",
     "verified_at_utc",
 }
+_PHASE7_QA_RUN_ID_ENV = "DEBUGMATE_PHASE7_QA_RUN_ID"
+_PHASE7_STAGING_ENV = "DEBUGMATE_PHASE7_STAGING_DIR"
+_PHASE7_QA_RUN_ID = re.compile(r"p7qa_[0-9a-f]{32}\Z")
 _PHASE7_STABLE_SELECTORS = {
     "error": "#error-input",
     "screenshot": "#screenshot-input",
@@ -107,27 +115,27 @@ _PHASE7_STABLE_SELECTORS = {
     "replay_action": "#replay-action",
 }
 _PHASE7_SCENARIOS = {
-    "P7-VQ-01": {"viewport": (1366, 768), "state": "idle", "mode": "live"},
-    "P7-VQ-02": {"viewport": (1366, 768), "state": "ready", "mode": "live"},
-    "P7-VQ-03": {"viewport": (1366, 768), "state": "stale", "mode": "live"},
+    "P7-VQ-01": {"viewport": (1366, 768), "privacy_state": "idle", "mode": "live"},
+    "P7-VQ-02": {"viewport": (1366, 768), "privacy_state": "ready", "mode": "live"},
+    "P7-VQ-03": {"viewport": (1366, 768), "privacy_state": "stale", "mode": "live"},
     "P7-VQ-04": {
         "viewport": (1366, 768),
-        "state": "ocr_unavailable",
+        "privacy_state": "ocr_unavailable",
         "mode": "live",
     },
-    "P7-VQ-07": {"viewport": (1366, 768), "state": "replay", "mode": "replay"},
+    "P7-VQ-07": {"viewport": (1366, 768), "privacy_state": "replay", "mode": "replay"},
     "P7-VQ-08-1024": {
         "viewport": (1024, 768),
-        "state": "responsive",
+        "privacy_state": "responsive",
         "mode": "live",
     },
     "P7-VQ-08-768": {
         "viewport": (768, 1024),
-        "state": "responsive",
+        "privacy_state": "responsive",
         "mode": "live",
     },
-    "P7-VQ-10": {"viewport": (1366, 768), "state": "keyboard", "mode": "live"},
-    "P7-VQ-11": {"viewport": (1366, 768), "state": "zoom_200", "mode": "live"},
+    "P7-VQ-10": {"viewport": (1366, 768), "privacy_state": "keyboard", "mode": "live"},
+    "P7-VQ-11": {"viewport": (1366, 768), "privacy_state": "zoom_200", "mode": "live"},
 }
 
 
@@ -573,7 +581,11 @@ def _validate_phase7_evidence_row(
         and viewport[key] > 0
         for key in ("width", "height")
     )
-    assert payload["state"] in {
+    assert payload["evidence_version"] == 1
+    assert isinstance(payload["qa_run_id"], str)
+    assert _PHASE7_QA_RUN_ID.fullmatch(payload["qa_run_id"])
+    assert payload["scenario_id"] in _PHASE7_SCENARIOS
+    assert payload["privacy_state"] in {
         "idle",
         "ready",
         "stale",
@@ -583,6 +595,7 @@ def _validate_phase7_evidence_row(
         "keyboard",
         "zoom_200",
     }
+    assert payload["result_status"] in {"idle", "completed", "not_applicable"}
     assert payload["mode"] in {"live", "replay"}
     assert payload["ocr_backend"] in {"rapidocr", "not_applicable", "unavailable"}
     assert payload["ocr_status"] in {"completed", "not_applicable", "unavailable"}
@@ -595,6 +608,10 @@ def _validate_phase7_evidence_row(
     assert isinstance(verified_at, str) and verified_at.endswith("Z")
     parsed = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
     assert parsed.tzinfo is UTC
+    for identity_key in ("case_id_sha256", "source_run_id_sha256", "result_id_sha256"):
+        identity_hash = payload[identity_key]
+        assert isinstance(identity_hash, str)
+        assert re.fullmatch(r"[0-9a-f]{64}", identity_hash)
 
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     assert not re.search(
@@ -607,21 +624,55 @@ def _validate_phase7_evidence_row(
 def _phase7_ledger_fixture(scenario: str, screenshot: bytes = b"phase7-png") -> dict[str, object]:
     contract = _PHASE7_SCENARIOS[scenario]
     width, height = contract["viewport"]
-    state = str(contract["state"])
+    state = str(contract["privacy_state"])
     ocr_backend = "rapidocr" if state in {"ready", "stale"} else "not_applicable"
     ocr_status = "completed" if ocr_backend == "rapidocr" else "not_applicable"
     if state == "ocr_unavailable":
         ocr_backend, ocr_status = "unavailable", "unavailable"
     return {
+        "evidence_version": 1,
+        "qa_run_id": "p7qa_" + "1" * 32,
+        "scenario_id": scenario,
         "viewport": {"width": width, "height": height},
-        "state": state,
+        "privacy_state": state,
+        "result_status": "completed" if state == "replay" else "idle",
         "mode": contract["mode"],
         "ocr_backend": ocr_backend,
         "ocr_status": ocr_status,
+        "case_id_sha256": hashlib.sha256(f"{scenario}:case".encode()).hexdigest(),
+        "source_run_id_sha256": hashlib.sha256(f"{scenario}:run".encode()).hexdigest(),
+        "result_id_sha256": hashlib.sha256(f"{scenario}:result".encode()).hexdigest(),
         "body_horizontal_overflow": False,
         "screenshot_sha256": hashlib.sha256(screenshot).hexdigest(),
         "verified_at_utc": "2026-08-09T08:30:00Z",
     }
+
+
+def _capture_phase7_evidence(page, scenario: str) -> None:
+    """Write one value-free staging pair only when the owned runner opts in."""
+
+    staging_value = os.environ.get(_PHASE7_STAGING_ENV)
+    run_id = os.environ.get(_PHASE7_QA_RUN_ID_ENV)
+    assert (staging_value is None) is (run_id is None)
+    if staging_value is None or run_id is None:
+        return
+    assert _PHASE7_QA_RUN_ID.fullmatch(run_id)
+    staging = Path(staging_value).resolve()
+    assert staging.name.endswith(".staging")
+    assert staging.parent == _PHASE7_EVIDENCE.parent.resolve()
+    staging.mkdir(parents=False, exist_ok=True)
+    png_path = staging / f"{scenario}.png"
+    ledger_path = staging / f"{scenario}.json"
+    assert not png_path.exists() and not ledger_path.exists()
+    page.screenshot(path=str(png_path), full_page=True)
+    payload = _phase7_ledger_fixture(scenario, png_path.read_bytes())
+    payload["qa_run_id"] = run_id
+    payload["body_horizontal_overflow"] = _body_overflow(page)
+    payload["verified_at_utc"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    _validate_phase7_evidence_row(payload, screenshot_bytes=png_path.read_bytes())
+    ledger_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _phase7_open_page(browser, browser_base_url: str, viewport: tuple[int, int]):
@@ -638,7 +689,68 @@ def _phase7_assert_stable_selectors(page) -> None:
         assert page.locator(selector).count() == 1, selector
 
 
-def test_phase7_evidence_namespace_and_scenario_registry_are_isolated() -> None:
+def _phase7_effective_status_contrast(page) -> float:
+    """Include element/ancestor opacity and composite the visible status surface."""
+
+    return float(
+        page.locator("#diagnostic-status").evaluate(
+            """element => {
+                const parse = value => {
+                    const parts = value.match(/[0-9.]+/g).map(Number);
+                    return parts.slice(0, 3).map(channel => channel / 255);
+                };
+                const linear = value => value <= .04045
+                    ? value / 12.92 : Math.pow((value + .055) / 1.055, 2.4);
+                const luminance = rgb => .2126 * linear(rgb[0])
+                    + .7152 * linear(rgb[1]) + .0722 * linear(rgb[2]);
+                let opacity = 1;
+                for (let node = element; node; node = node.parentElement) {
+                    opacity *= Number(getComputedStyle(node).opacity || 1);
+                }
+                const target = element.querySelector('p') || element;
+                const foreground = parse(getComputedStyle(target).color);
+                let background = [1, 1, 1];
+                for (let node = target; node; node = node.parentElement) {
+                    const value = getComputedStyle(node).backgroundColor;
+                    const rgba = value.match(/[0-9.]+/g)?.map(Number) || [];
+                    if (rgba.length >= 3 && (rgba[3] ?? 1) > 0) {
+                        background = rgba.slice(0, 3).map(channel => channel / 255);
+                        break;
+                    }
+                }
+                const effective = foreground.map(
+                    (channel, index) => channel * opacity + background[index] * (1 - opacity)
+                );
+                const values = [luminance(effective), luminance(background)].sort((a, b) => b-a);
+                return (values[0] + .05) / (values[1] + .05);
+            }"""
+        )
+    )
+
+
+def _phase7_browser_owned_surface(page) -> str:
+    """Serialize browser state after removing the four user-owned edit surfaces."""
+
+    return str(
+        page.evaluate(
+            """() => {
+                const clone = document.documentElement.cloneNode(true);
+                for (const selector of [
+                    '#error-input', '#screenshot-input', '#code-input', '#environment-input'
+                ]) clone.querySelector(selector)?.remove();
+                return JSON.stringify({
+                    html: clone.outerHTML,
+                    local: {...localStorage},
+                    session: {...sessionStorage},
+                    cookies: document.cookie,
+                    urls: performance.getEntriesByType('resource').map(entry => entry.name),
+                });
+            }"""
+        )
+    )
+
+
+def test_p7_selector_dom_scope_and_scenario_registry_are_isolated() -> None:
     assert _PHASE7_EVIDENCE == _ROOT / "evidence" / "ui" / "phase7"
     assert _PHASE7_EVIDENCE != _EVIDENCE
     assert not _PHASE7_EVIDENCE.is_relative_to(_ROOT / "evidence" / "course-v0.1")
@@ -655,7 +767,7 @@ def test_phase7_evidence_namespace_and_scenario_registry_are_isolated() -> None:
     }
 
 
-def test_phase7_evidence_ledger_uses_exact_value_free_allowlist() -> None:
+def test_p7_ledger_uses_exact_value_free_allowlist() -> None:
     screenshot = b"synthetic-phase7-screenshot"
     for scenario in _PHASE7_SCENARIOS:
         _validate_phase7_evidence_row(
@@ -665,7 +777,7 @@ def test_phase7_evidence_ledger_uses_exact_value_free_allowlist() -> None:
 
 
 @pytest.mark.parametrize("forbidden", ["token", "path", "raw_text", "ocr_text", "secret"])
-def test_phase7_evidence_ledger_rejects_sensitive_or_authority_fields(
+def test_p7_ledger_rejects_sensitive_or_authority_fields(
     forbidden: str,
 ) -> None:
     payload = _phase7_ledger_fixture("P7-VQ-01")
@@ -674,6 +786,7 @@ def test_phase7_evidence_ledger_rejects_sensitive_or_authority_fields(
         _validate_phase7_evidence_row(payload)
 
 
+@pytest.mark.browser
 def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
     browser_base_url: str,
 ) -> None:
@@ -688,18 +801,32 @@ def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
             assert page.locator("#local-approve").is_disabled()
             expect(page.locator("#privacy-overview")).to_contain_text("先生成脱敏预览")
             assert _body_overflow(page) is False
+            assert _phase7_effective_status_contrast(page) >= 4.5
+            _capture_phase7_evidence(page, "P7-VQ-01")
         finally:
             if context is not None:
                 context.close()
             browser.close()
 
 
+@pytest.mark.browser
 def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
     browser_base_url: str, tmp_path: Path
 ) -> None:
     screenshot = tmp_path / "terminal.png"
-    Image.new("RGB", (320, 120), "white").save(screenshot)
-    sentinel = "student@example.com"
+    image = Image.new("RGB", (1200, 280), "white")
+    font = ImageFont.truetype("C:/Windows/Fonts/consola.ttf", 34)
+    ImageDraw.Draw(image).multiline_text(
+        (24, 24),
+        "Traceback (most recent call last):\n"
+        "C:\\Users\\phase7\\app.py\n"
+        "TOKEN=ghp_abcdefghijklmnopqrstuvwxyz123456",
+        fill="black",
+        font=font,
+        spacing=12,
+    )  # PHASE7_SYNTHETIC_SECRET
+    image.save(screenshot)
+    sentinel = "student@example.com"  # PHASE7_SYNTHETIC_SECRET
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="msedge", headless=True)
         context = None
@@ -714,19 +841,31 @@ def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
             expect(page.locator("#local-approve")).to_be_enabled()
             expect(page.locator("#preview-error-text")).to_contain_text("[REDACTED:EMAIL]")
             assert page.locator("#preview-screenshot img").is_visible()
-            browser_surface = page.content() + page.locator("body").inner_text()
+            browser_surface = _phase7_browser_owned_surface(page)
             assert sentinel not in browser_surface
             assert str(tmp_path) not in browser_surface
+            assert "ghp_abcdefghijklmnopqrstuvwxyz123456" not in browser_surface
+            assert "C:\\Users\\phase7\\app.py" not in browser_surface
+            config = context.request.get(f"{browser_base_url}/config").text()
+            for raw_value in (
+                sentinel,
+                "ghp_abcdefghijklmnopqrstuvwxyz123456",
+                "C:\\Users\\phase7\\app.py",
+            ):
+                assert raw_value not in config
             assert _body_overflow(page) is False
+            assert page.locator("#preview-audit").inner_text().strip()
+            assert _phase7_effective_status_contrast(page) >= 4.5
+            _capture_phase7_evidence(page, "P7-VQ-02")
         finally:
             if context is not None:
                 context.close()
             browser.close()
 
 
-@pytest.mark.parametrize("changed_field", ["error", "screenshot", "code", "environment"])
+@pytest.mark.browser
 def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
-    browser_base_url: str, tmp_path: Path, changed_field: str
+    browser_base_url: str, tmp_path: Path
 ) -> None:
     screenshot = tmp_path / "terminal.png"
     Image.new("RGB", (320, 120), "white").save(screenshot)
@@ -742,25 +881,31 @@ def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
             page.locator("#environment-input textarea").fill("Python 3.13.5")
             page.locator("#local-preview").click()
             expect(page.locator("#local-approve")).to_be_enabled(timeout=60_000)
-            if changed_field == "screenshot":
-                page.locator("#screenshot-input input[type=file]").set_input_files([])
-            else:
-                selector = {
-                    "error": "#error-input textarea",
-                    "code": "#code-input textarea",
-                    "environment": "#environment-input textarea",
-                }[changed_field]
-                page.locator(selector).fill(f"changed-{changed_field}")
-            expect(page.locator("#preview-validity")).to_contain_text(
-                "输入已修改，旧预览已失效", timeout=30_000
-            )
-            assert page.locator("#local-approve").is_disabled()
+            for changed_field in ("error", "code", "environment", "screenshot"):
+                if changed_field == "screenshot":
+                    page.locator("#screenshot-input input[type=file]").set_input_files([])
+                else:
+                    selector = {
+                        "error": "#error-input textarea",
+                        "code": "#code-input textarea",
+                        "environment": "#environment-input textarea",
+                    }[changed_field]
+                    page.locator(selector).fill(f"changed-{changed_field}")
+                expect(page.locator("#preview-validity")).to_contain_text(
+                    "输入已修改，旧预览已失效", timeout=30_000
+                )
+                assert page.locator("#local-approve").is_disabled()
+                if changed_field != "screenshot":
+                    page.locator("#local-preview").click()
+                    expect(page.locator("#local-approve")).to_be_enabled(timeout=60_000)
+            _capture_phase7_evidence(page, "P7-VQ-03")
         finally:
             if context is not None:
                 context.close()
             browser.close()
 
 
+@pytest.mark.browser
 def test_phase7_p7_vq_04_ocr_failure_selector_and_safe_copy_are_frozen(
     browser_base_url: str,
 ) -> None:
@@ -776,12 +921,14 @@ def test_phase7_p7_vq_04_ocr_failure_selector_and_safe_copy_are_frozen(
             assert "ocr-technical-error" in config and "preview-screenshot" in config
             assert "ocr_unavailable" in config
             assert not re.search(r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)", config)
+            _capture_phase7_evidence(page, "P7-VQ-04")
         finally:
             if context is not None:
                 context.close()
             browser.close()
 
 
+@pytest.mark.browser
 def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
     browser_base_url: str,
 ) -> None:
@@ -801,6 +948,10 @@ def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
                 "离线回放", timeout=90_000
             )
             assert "云端运行成功" not in page.locator("body").inner_text()
+            status_text = page.locator("#diagnostic-status").inner_text()
+            assert "↺" in status_text and "离线回放" in status_text
+            assert _phase7_effective_status_contrast(page) >= 4.5
+            _capture_phase7_evidence(page, "P7-VQ-07")
         finally:
             if context is not None:
                 context.close()
@@ -808,6 +959,7 @@ def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
 
 
 @pytest.mark.parametrize("viewport", [(1024, 768), (768, 1024)])
+@pytest.mark.browser
 def test_phase7_p7_vq_08_responsive_input_preview_result_order_in_msedge(
     browser_base_url: str, viewport: tuple[int, int]
 ) -> None:
@@ -823,12 +975,41 @@ def test_phase7_p7_vq_08_responsive_input_preview_result_order_in_msedge(
             assert all(box is not None for box in boxes)
             assert boxes[0]["y"] < boxes[1]["y"] < boxes[2]["y"]
             assert _body_overflow(page) is False
+            scenario = "P7-VQ-08-1024" if viewport[0] == 1024 else "P7-VQ-08-768"
+            _capture_phase7_evidence(page, scenario)
         finally:
             if context is not None:
                 context.close()
             browser.close()
 
 
+@pytest.mark.browser
+def test_phase7_p7_vq_09_mobile_copy_and_targets_fit_in_msedge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (375, 812))
+            for selector in (
+                "#error-input",
+                "#screenshot-input",
+                "#local-preview",
+                "#local-approve",
+            ):
+                locator = page.locator(selector)
+                locator.scroll_into_view_if_needed()
+                box = locator.bounding_box()
+                assert box is not None and box["width"] <= 375 and box["height"] >= 40
+            assert _body_overflow(page) is False
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+@pytest.mark.browser
 def test_phase7_p7_vq_10_keyboard_reaches_real_input_actions_in_msedge(
     browser_base_url: str,
 ) -> None:
@@ -851,12 +1032,17 @@ def test_phase7_p7_vq_10_keyboard_reaches_real_input_actions_in_msedge(
                     expected_name=expected_name,
                     limit=30,
                 )
+            focused = page.locator(":focus")
+            outline = focused.evaluate("element => getComputedStyle(element).outlineStyle")
+            assert outline not in {"none", ""}
+            _capture_phase7_evidence(page, "P7-VQ-10")
         finally:
             if context is not None:
                 context.close()
             browser.close()
 
 
+@pytest.mark.browser
 def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_msedge(
     browser_base_url: str,
 ) -> None:
@@ -882,6 +1068,7 @@ def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_mse
                 page.locator(selector).scroll_into_view_if_needed()
                 assert page.locator(selector).is_visible()
             assert _body_overflow(page) is False
+            _capture_phase7_evidence(page, "P7-VQ-11")
         finally:
             if context is not None:
                 context.close()
@@ -917,6 +1104,7 @@ def _capture_student_review(page, filename: str, *, full_page: bool = False) -> 
     page.screenshot(path=str(_STUDENT_SCREENSHOT_DIR / filename), full_page=full_page)
 
 
+@pytest.mark.browser
 def test_student_result_tabs_and_learning_flow_capture_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1293,6 +1481,7 @@ def _write_qa_staging(page, context, browser_base_url: str, scenario: str) -> No
     assert all(capability not in surface for surface in surfaces)
 
 
+@pytest.mark.browser
 def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1335,6 +1524,7 @@ def test_vq_02_completed_replay_truth_is_visible_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_completed_learning_workbench_has_consistent_light_surfaces_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1503,6 +1693,7 @@ def test_completed_learning_workbench_has_consistent_light_surfaces_in_real_edge
             browser.close()
 
 
+@pytest.mark.browser
 def test_completed_command_bar_keeps_title_and_truthful_status_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1596,6 +1787,7 @@ def test_completed_command_bar_keeps_title_and_truthful_status_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_completed_result_tabs_keep_visible_surfaces_light_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1765,6 +1957,7 @@ def test_completed_result_tabs_keep_visible_surfaces_light_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_v01_download_matches_visible_source_run_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1796,6 +1989,7 @@ def test_v01_download_matches_visible_source_run_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_03_running_queue_stages_are_truthful_and_conflict_safe_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -1958,6 +2152,7 @@ def _shift_tab_to(page, *, expected_name: str, limit: int = 12):
     raise AssertionError(f"Reverse tab order did not reach {expected_name!r} within {limit} steps")
 
 
+@pytest.mark.browser
 def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -2042,6 +2237,7 @@ def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_14_statuses_keep_icon_and_text_under_test_side_grayscale(
     browser_base_url: str,
 ) -> None:
@@ -2077,6 +2273,7 @@ def test_vq_14_statuses_keep_icon_and_text_under_test_side_grayscale(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_15_completed_state_remains_reachable_at_two_x_browser_zoom_geometry(
     browser_base_url: str,
 ) -> None:
@@ -2157,6 +2354,7 @@ def test_vq_15_completed_state_remains_reachable_at_two_x_browser_zoom_geometry(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_04_long_content_commands_and_vq_05_tall_card_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -2223,6 +2421,7 @@ def test_vq_04_long_content_commands_and_vq_05_tall_card_in_real_edge(
 
 
 @pytest.mark.parametrize("viewport", [(1024, 768), (768, 1024)])
+@pytest.mark.browser
 def test_vq_11_vq_12_completed_responsive_geometry_in_real_edge(
     browser_base_url: str, viewport: tuple[int, int]
 ) -> None:
@@ -2258,6 +2457,7 @@ def test_vq_11_vq_12_completed_responsive_geometry_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_06_vq_07_partial_recovery_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -2338,6 +2538,7 @@ def test_vq_06_vq_07_partial_recovery_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_08_safe_failure_and_vq_09_fallback_truth_in_real_edge(
     browser_base_url: str,
 ) -> None:
@@ -2415,6 +2616,7 @@ def test_vq_08_safe_failure_and_vq_09_fallback_truth_in_real_edge(
             browser.close()
 
 
+@pytest.mark.browser
 def test_vq_10_single_field_correction_creates_new_identity_and_preserves_old_run(
     browser_base_url: str,
 ) -> None:
@@ -2736,6 +2938,7 @@ def test_runner_config_validation_requires_a_root_object_with_components_list() 
     assert "DeserializeObject($config)" not in source
 
 
+@pytest.mark.browser
 def test_browser_fixture_reuses_external_url_without_terminating_its_server(
     _external_config_server: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -2770,6 +2973,7 @@ def test_failure_screenshot_capture_is_opt_in_and_uses_only_ignored_temp_path(
     assert _FAILURE_SCREENSHOT.name != "GAP-01-VQ-01-failing.png"
 
 
+@pytest.mark.browser
 def test_gap_01_real_loopback_workbench_has_two_student_zones(
     browser_base_url: str,
 ) -> None:
@@ -2830,6 +3034,7 @@ def test_gap_01_real_loopback_workbench_has_two_student_zones(
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
+@pytest.mark.browser
 def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
     browser_base_url: str,
 ) -> None:
@@ -2980,6 +3185,7 @@ def test_vq_01_real_loopback_local_approval_produces_completed_live_result(
             browser.close()
 
 
+@pytest.mark.browser
 def test_gap_01_real_loopback_workbench_stacks_student_zones_at_1024px(
     browser_base_url: str,
 ) -> None:
@@ -3018,6 +3224,7 @@ def test_gap_01_real_loopback_workbench_stacks_student_zones_at_1024px(
     assert metrics["scrollWidth"] == metrics["clientWidth"]
 
 
+@pytest.mark.browser
 def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_at_768px(
     browser_base_url: str,
 ) -> None:
