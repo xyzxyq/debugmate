@@ -19,6 +19,7 @@ from debugmate.adapters.dify import (
 )
 from debugmate.cli import main
 from debugmate.contracts import new_case_id
+from debugmate.dify_live_evidence import validate_published_tree
 from debugmate.evidence import RunStatus, verify_bundle
 from debugmate.probe import CAPABILITY_IDS, run_cloud_probe, run_fixture_probe
 from debugmate.settings import DebugMateSettings
@@ -385,7 +386,7 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
         "C03": "pass",
         "C04": "pass",
         "C05": "pass",
-        "C06": "blocked",
+        "C06": "pass",
         "C07": "pass",
     }
 
@@ -438,7 +439,10 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
     passing_ids = {
         capability_id for capability_id, status in status_by_id.items() if status == "pass"
     }
-    assert passing_ids == {"C01", "C02", "C03", "C04", "C05", "C07"}
+    assert passing_ids == {"C01", "C02", "C03", "C04", "C05", "C06", "C07"}
+    assert validate_published_tree(
+        repository, repository / "evidence/dify-live/2026-08-09"
+    ) == {"C03": "pass", "C04": "pass", "C06": "pass"}
 
 
 def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:

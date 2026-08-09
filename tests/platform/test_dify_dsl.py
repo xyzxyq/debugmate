@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from debugmate.dify_live_evidence import (
+    LOCKED_C06_WORKFLOW_RUN_ID_SHA256,
     compare_dsl_files,
     sha256_file,
     validate_c06_record,
@@ -98,9 +99,7 @@ def test_dsl_compare_preserves_critical_contracts(
     assert compare_dsl_files(source, changed)["differences"]
 
 
-def test_c06_pass_requires_roundtrip_equivalence_and_reconstructed_rerun(
-    tmp_path: Path,
-) -> None:
+def _valid_c06_record(tmp_path: Path) -> tuple[dict[str, object], Path]:
     source = tmp_path / "source.yml"
     reexport = tmp_path / "reexport.yml"
     output = tmp_path / "reconstructed-output.json"
@@ -109,8 +108,19 @@ def test_c06_pass_requires_roundtrip_equivalence_and_reconstructed_rerun(
     output.write_text(
         json.dumps(
             {
-                "workflow_run_id_sha256": "d" * 64,
+                "evidence_schema_version": "1.0.0",
+                "started_at_utc": "2026-08-09T05:21:46Z",
+                "completed_at_utc": "2026-08-09T05:22:04Z",
+                "status": "SUCCESS",
+                "duration_seconds": 18.515,
+                "total_tokens": 6019,
+                "total_steps": 6,
+                "workflow_run_id_sha256": LOCKED_C06_WORKFLOW_RUN_ID_SHA256,
                 "diagnosis_valid": True,
+                "diagnosis_schema_version": "1.1.0",
+                "diagnosis_category": "dependency_environment",
+                "knowledge_chunk_id": "python-exceptions:module-not-found-error",
+                "source_url": "https://docs.python.org/3/library/exceptions.html",
             }
         ),
         encoding="utf-8",
@@ -120,7 +130,9 @@ def test_c06_pass_requires_roundtrip_equivalence_and_reconstructed_rerun(
         "capability_id": "C06",
         "status": "pass",
         "attempted_at_utc": "2026-08-09T00:00:00Z",
+        "completed_at_utc": "2026-08-09T05:22:04Z",
         "import_channel": "dify_console",
+        "source_app_id_sha256": "d" * 64,
         "independent_app_id_sha256": "e" * 64,
         "source_dsl": source.name,
         "source_sha256": sha256_file(source),
@@ -130,11 +142,76 @@ def test_c06_pass_requires_roundtrip_equivalence_and_reconstructed_rerun(
         "reexport_normalized_sha256": comparison["reexport_normalized_sha256"],
         "differences": [],
         "reconstructed_output": output.name,
+        "reconstructed_output_sha256": sha256_file(output),
         "reason_code": None,
     }
+    return record, output
+
+
+def test_c06_pass_requires_roundtrip_equivalence_and_reconstructed_rerun(
+    tmp_path: Path,
+) -> None:
+    record, _ = _valid_c06_record(tmp_path)
     assert validate_c06_record(record, tmp_path)["status"] == "pass"
 
-    with pytest.raises(ValueError, match="independent"):
-        validate_c06_record(record | {"independent_app_id_sha256": None}, tmp_path)
+    with pytest.raises(ValueError, match="application fingerprints"):
+        validate_c06_record(
+            record
+            | {"independent_app_id_sha256": record["source_app_id_sha256"]},
+            tmp_path,
+        )
     with pytest.raises(ValueError, match="differences"):
         validate_c06_record(record | {"differences": ["vision mismatch"]}, tmp_path)
+
+
+def test_c06_rejects_same_schema_rerun_replacement(tmp_path: Path) -> None:
+    record, output = _valid_c06_record(tmp_path)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    payload["total_tokens"] = 6020
+    output.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="reconstructed output hash mismatch"):
+        validate_c06_record(record, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("workflow_run_id_sha256", "f" * 64),
+        ("status", "FAILED"),
+        ("duration_seconds", 18.516),
+        ("total_tokens", 6020),
+        ("total_steps", 7),
+        ("diagnosis_valid", False),
+        ("diagnosis_schema_version", "1.0.0"),
+        ("diagnosis_category", "runtime"),
+        ("knowledge_chunk_id", ""),
+        ("source_url", "http://example.invalid/source"),
+    ],
+)
+def test_c06_rejects_non_authoritative_rerun_facts(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    record, output = _valid_c06_record(tmp_path)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    payload[field] = value
+    output.write_text(json.dumps(payload), encoding="utf-8")
+    record["reconstructed_output_sha256"] = sha256_file(output)
+
+    with pytest.raises(ValueError):
+        validate_c06_record(record, tmp_path)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "extra"])
+def test_c06_rerun_allowlist_is_exact(tmp_path: Path, mutation: str) -> None:
+    record, output = _valid_c06_record(tmp_path)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    if mutation == "missing":
+        payload.pop("completed_at_utc")
+    else:
+        payload["raw_run_id"] = "must-not-be-accepted"
+    output.write_text(json.dumps(payload), encoding="utf-8")
+    record["reconstructed_output_sha256"] = sha256_file(output)
+
+    with pytest.raises(ValueError, match="safe authoritative rerun evidence"):
+        validate_c06_record(record, tmp_path)

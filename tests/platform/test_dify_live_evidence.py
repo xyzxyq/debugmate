@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import debugmate.dify_live_evidence as live_evidence
 from debugmate.dify_live_evidence import (
     TARGET_TEXT,
     build_request_manifest,
@@ -13,6 +14,7 @@ from debugmate.dify_live_evidence import (
     validate_c03_record,
     validate_c04_record,
     validate_candidate_tree,
+    validate_published_tree,
 )
 
 SAFE_INPUTS: dict[str, object] = {
@@ -238,6 +240,77 @@ def test_candidate_tree_rejects_secret_and_personal_path(tmp_path: Path) -> None
     unsafe.write_text('{"path":"C:\\\\Users\\\\student\\\\secret"}', encoding="utf-8")
     with pytest.raises(ValueError, match="personal absolute path"):
         validate_candidate_tree(tmp_path, evidence)
+
+
+@pytest.mark.parametrize(
+    "untracked_name",
+    [
+        "dsl-roundtrip-evidence.json",
+        "source.dsl.yml",
+        "reexport.dsl.yml",
+        "reconstructed-output.json",
+    ],
+)
+def test_published_c06_requires_record_and_inner_artifacts_tracked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untracked_name: str
+) -> None:
+    evidence = tmp_path / "evidence"
+    combined_dir = evidence / "c03-c04"
+    c06_dir = evidence / "c06"
+    combined_dir.mkdir(parents=True)
+    c06_dir.mkdir()
+    for name in (
+        "input.png",
+        "manifest.json",
+        "retriever.json",
+        "source.dsl.yml",
+        "reexport.dsl.yml",
+        "reconstructed-output.json",
+    ):
+        (evidence / name).write_text("fixture", encoding="utf-8")
+    (combined_dir / "vision-retrieval-evidence.json").write_text(
+        json.dumps(
+            {
+                "c03": {
+                    "capability_id": "C03",
+                    "status": "pass",
+                    "attempted_at_utc": "2026-08-09T00:00:00Z",
+                    "input_image": "input.png",
+                    "request_manifest": "manifest.json",
+                },
+                "c04": {
+                    "capability_id": "C04",
+                    "status": "pass",
+                    "attempted_at_utc": "2026-08-09T00:00:00Z",
+                    "retriever_resource": "retriever.json",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (c06_dir / "dsl-roundtrip-evidence.json").write_text(
+        json.dumps(
+            {
+                "capability_id": "C06",
+                "status": "pass",
+                "attempted_at_utc": "2026-08-09T00:00:00Z",
+                "source_dsl": "evidence/source.dsl.yml",
+                "reexport_dsl": "evidence/reexport.dsl.yml",
+                "reconstructed_output": "evidence/reconstructed-output.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(live_evidence, "validate_candidate_tree", lambda *_: {})
+    monkeypatch.setattr(live_evidence, "validate_c04_record", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        live_evidence,
+        "_git_tracked",
+        lambda _root, path: path.name != untracked_name,
+    )
+
+    with pytest.raises(ValueError, match="not Git tracked"):
+        validate_published_tree(tmp_path, evidence)
 
 
 def test_published_capability_matrix_matches_independent_live_records() -> None:

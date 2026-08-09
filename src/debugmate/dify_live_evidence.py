@@ -16,9 +16,13 @@ from typing import Any, Literal
 import httpx
 import yaml
 from PIL import Image, ImageDraw, ImageFont
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 TARGET_TEXT = "ModuleNotFoundError: No module named 'debugmate_demo_pkg'"
+LOCKED_C06_WORKFLOW_RUN_ID_SHA256 = (
+    "94a89d3fe4e77fa0a1255e39dbfd565f184076a12d6248c93fd314f09cb3531f"
+)
+LOCKED_C06_SOURCE_URL = "https://docs.python.org/3/library/exceptions.html"
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 PERSONAL_PATH_RE = re.compile(r"(?i)\b[A-Z]:\\+Users\\+")
 SECRET_RE = re.compile(
@@ -93,7 +97,9 @@ class C06Record(_StrictModel):
     capability_id: Literal["C06"]
     status: Literal["pass", "fail", "blocked", "not-tested"]
     attempted_at_utc: str
+    completed_at_utc: str | None = None
     import_channel: str | None = None
+    source_app_id_sha256: str | None = None
     independent_app_id_sha256: str | None = None
     source_dsl: str | None = None
     source_sha256: str | None = None
@@ -103,7 +109,24 @@ class C06Record(_StrictModel):
     reexport_normalized_sha256: str | None = None
     differences: list[str] = Field(default_factory=list)
     reconstructed_output: str | None = None
+    reconstructed_output_sha256: str | None = None
     reason_code: str | None = None
+
+
+class C06ReconstructedRun(_StrictModel):
+    evidence_schema_version: Literal["1.0.0"]
+    started_at_utc: Literal["2026-08-09T05:21:46Z"]
+    completed_at_utc: Literal["2026-08-09T05:22:04Z"]
+    status: Literal["SUCCESS"]
+    duration_seconds: float
+    total_tokens: Literal[6019]
+    total_steps: Literal[6]
+    workflow_run_id_sha256: str
+    diagnosis_valid: Literal[True]
+    diagnosis_schema_version: Literal["1.1.0"]
+    diagnosis_category: Literal["dependency_environment"]
+    knowledge_chunk_id: Literal["python-exceptions:module-not-found-error"]
+    source_url: HttpUrl
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -394,16 +417,26 @@ def validate_c06_record(record: Mapping[str, object], repository_root: Path) -> 
         if not parsed.reason_code:
             raise ValueError("non-pass C06 record requires reason_code")
         return parsed.model_dump(mode="json")
-    if not parsed.independent_app_id_sha256:
-        raise ValueError("C06 pass requires an independent reconstructed application")
-    _valid_hash(parsed.independent_app_id_sha256, "independent_app_id_sha256")
+    source_app = _valid_hash(parsed.source_app_id_sha256, "source_app_id_sha256")
+    independent_app = _valid_hash(
+        parsed.independent_app_id_sha256, "independent_app_id_sha256"
+    )
+    if source_app == independent_app:
+        raise ValueError("C06 application fingerprints must be distinct")
     source = _resolve_artifact(repository_root, parsed.source_dsl or "")
     reexport = _resolve_artifact(repository_root, parsed.reexport_dsl or "")
     output = _resolve_artifact(repository_root, parsed.reconstructed_output or "")
-    if sha256_file(source) != parsed.source_sha256:
+    source_sha256 = _valid_hash(parsed.source_sha256, "source_sha256")
+    reexport_sha256 = _valid_hash(parsed.reexport_sha256, "reexport_sha256")
+    output_sha256 = _valid_hash(
+        parsed.reconstructed_output_sha256, "reconstructed_output_sha256"
+    )
+    if sha256_file(source) != source_sha256:
         raise ValueError("C06 source DSL hash mismatch")
-    if sha256_file(reexport) != parsed.reexport_sha256:
+    if sha256_file(reexport) != reexport_sha256:
         raise ValueError("C06 re-export DSL hash mismatch")
+    if sha256_file(output) != output_sha256:
+        raise ValueError("C06 reconstructed output hash mismatch")
     comparison = compare_dsl_files(source, reexport)
     if parsed.differences or comparison["differences"]:
         raise ValueError("C06 normalized structures contain differences")
@@ -411,13 +444,19 @@ def validate_c06_record(record: Mapping[str, object], repository_root: Path) -> 
         raise ValueError("C06 source normalized hash mismatch")
     if parsed.reexport_normalized_sha256 != comparison["reexport_normalized_sha256"]:
         raise ValueError("C06 re-export normalized hash mismatch")
-    reconstructed = _load_json(output)
-    _valid_hash(
-        TypeAdapter(str | None).validate_python(reconstructed.get("workflow_run_id_sha256")),
-        "workflow_run_id_sha256",
+    try:
+        reconstructed = C06ReconstructedRun.model_validate(_load_json(output))
+    except Exception as error:
+        raise ValueError("C06 requires safe authoritative rerun evidence") from error
+    run_fingerprint = _valid_hash(
+        reconstructed.workflow_run_id_sha256, "workflow_run_id_sha256"
     )
-    if reconstructed.get("diagnosis_valid") is not True:
-        raise ValueError("C06 reconstructed application rerun is invalid")
+    if run_fingerprint != LOCKED_C06_WORKFLOW_RUN_ID_SHA256:
+        raise ValueError("C06 workflow run fingerprint does not match the locked rerun")
+    if reconstructed.duration_seconds != 18.515:
+        raise ValueError("C06 rerun duration does not match the locked rerun")
+    if str(reconstructed.source_url) != LOCKED_C06_SOURCE_URL:
+        raise ValueError("C06 rerun source URL does not match the locked source")
     return parsed.model_dump(mode="json")
 
 
