@@ -689,7 +689,7 @@ def _phase7_observed_identity_hashes(page, scenario: str) -> tuple[str, str, str
     return tuple(hashlib.sha256(value.encode("utf-8")).hexdigest() for value in values)
 
 
-def _capture_phase7_evidence(page, scenario: str) -> None:
+def _capture_phase7_evidence(page, scenario: str, *, full_page: bool = True) -> None:
     """Write one value-free staging pair only when the owned runner opts in."""
 
     staging_value = os.environ.get(_PHASE7_STAGING_ENV)
@@ -705,7 +705,10 @@ def _capture_phase7_evidence(page, scenario: str) -> None:
     png_path = staging / f"{scenario}.png"
     ledger_path = staging / f"{scenario}.json"
     assert not png_path.exists() and not ledger_path.exists()
-    page.screenshot(path=str(png_path), full_page=True)
+    page.screenshot(path=str(png_path), full_page=full_page)
+    if scenario == "P7-VQ-11":
+        with Image.open(png_path) as capture:
+            assert capture.size == (683, 384)
     payload = _phase7_ledger_fixture(
         scenario,
         png_path.read_bytes(),
@@ -1599,10 +1602,17 @@ def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_mse
                 },
             )
             page.wait_for_function("() => innerWidth === 683 && devicePixelRatio === 2")
-            grid_columns = page.locator("#workbench-grid.workbench-layout").first.evaluate(
-                "element => getComputedStyle(element).gridTemplateColumns"
+            grids = page.locator("#workbench-grid.workbench-layout").evaluate_all(
+                "elements => elements.map(element => ({"
+                "display: getComputedStyle(element).display, "
+                "columns: getComputedStyle(element).gridTemplateColumns, "
+                "width: element.getBoundingClientRect().width"
+                "}))"
             )
-            assert len(grid_columns.split()) == 1, grid_columns
+            active_grids = [grid for grid in grids if grid["display"] == "grid"]
+            assert active_grids and all(
+                len(grid["columns"].split()) == 1 for grid in active_grids
+            ), grids
             for selector in ("#local-preview", "#local-approve", "#preview-validity"):
                 page.locator(selector).scroll_into_view_if_needed()
                 assert page.locator(selector).is_visible()
@@ -1616,7 +1626,7 @@ def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_mse
             ):
                 box = page.locator(selector).first.bounding_box()
                 assert box is not None and box["x"] + box["width"] <= 684, (selector, box)
-            _capture_phase7_evidence(page, "P7-VQ-11")
+            _capture_phase7_evidence(page, "P7-VQ-11", full_page=False)
         finally:
             if context is not None:
                 context.close()
