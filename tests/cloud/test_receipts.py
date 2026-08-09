@@ -21,7 +21,6 @@ from debugmate.cloud.contracts import (
 )
 from debugmate.cloud.receipts import DifyReceiptStore, ReceiptStoreError
 
-
 CASE_ID = "case_0123456789abcdef0123456789abcdef"
 APPROVAL_FINGERPRINT = "a" * 64
 PREVIEW_HASH = "b" * 64

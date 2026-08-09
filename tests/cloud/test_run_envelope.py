@@ -14,7 +14,6 @@ from debugmate.cloud.contracts import (
     ExecutionBackend,
 )
 
-
 DIAGNOSIS_FIXTURE = Path("fixtures/cases/module_not_found/diagnosis.json")
 
 
@@ -50,8 +49,14 @@ def _envelope_payload() -> dict[str, object]:
     }
 
 
+def _validate_envelope(payload: dict[str, object]) -> DifyRunEnvelope:
+    return DifyRunEnvelope.model_validate_json(
+        json.dumps(payload, ensure_ascii=False), strict=True
+    )
+
+
 def test_run_envelope_accepts_only_bounded_same_run_contract() -> None:
-    envelope = DifyRunEnvelope.model_validate(_envelope_payload(), strict=True)
+    envelope = _validate_envelope(_envelope_payload())
 
     assert envelope.envelope_version == "1.0.0"
     assert envelope.diagnosis.schema_version == "1.1.0"
@@ -60,7 +65,7 @@ def test_run_envelope_accepts_only_bounded_same_run_contract() -> None:
     assert len(envelope.retrieval_trace.hits) == 1
 
     with pytest.raises(ValidationError):
-        DifyRunEnvelope.model_validate(_envelope_payload() | {"provider_body": {}}, strict=True)
+        _validate_envelope(_envelope_payload() | {"provider_body": {}})
 
 
 def test_run_envelope_rejects_oversized_duplicate_or_too_many_hits() -> None:
@@ -73,19 +78,19 @@ def test_run_envelope_rejects_oversized_duplicate_or_too_many_hits() -> None:
     oversized = json.loads(json.dumps(payload))
     oversized["retrieval_trace"]["hits"][0]["content_summary"] = "x" * 2001
     with pytest.raises(ValidationError):
-        DifyRunEnvelope.model_validate(oversized, strict=True)
+        _validate_envelope(oversized)
 
     duplicate = json.loads(json.dumps(payload))
     duplicate["retrieval_trace"]["hits"] = [hit, hit]
     with pytest.raises(ValidationError, match="duplicate"):
-        DifyRunEnvelope.model_validate(duplicate, strict=True)
+        _validate_envelope(duplicate)
 
     too_many = json.loads(json.dumps(payload))
     too_many["retrieval_trace"]["hits"] = [
         hit | {"chunk_fingerprint": f"{index:064x}"} for index in range(5)
     ]
     with pytest.raises(ValidationError):
-        DifyRunEnvelope.model_validate(too_many, strict=True)
+        _validate_envelope(too_many)
 
 
 def test_run_envelope_rejects_case_build_and_fact_drift() -> None:
@@ -98,7 +103,7 @@ def test_run_envelope_rejects_case_build_and_fact_drift() -> None:
         else:
             payload["extraction_facts"] = []
         with pytest.raises(ValidationError):
-            DifyRunEnvelope.model_validate(payload, strict=True)
+            _validate_envelope(payload)
 
 
 def test_usage_is_reported_or_literal_not_reported_without_synthetic_zero() -> None:
