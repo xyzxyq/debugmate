@@ -27,6 +27,8 @@ from debugmate.privacy.models import (
     PreviewBundle,
     RedactedFields,
     RedactionAudit,
+    ScreenshotOcrStatus,
+    ScreenshotPreviewAudit,
 )
 from debugmate.privacy.ocr import OcrToken
 
@@ -67,6 +69,16 @@ def _approved(
         redacted=redacted,
         candidates=[],
         audit=RedactionAudit(candidate_count=0, counts_by_kind={}),
+        screenshot_audit=ScreenshotPreviewAudit(
+            provided=screenshot is not None,
+            ocr_status=(
+                ScreenshotOcrStatus.COMPLETED
+                if screenshot is not None
+                else ScreenshotOcrStatus.NOT_APPLICABLE
+            ),
+            finding_count=0,
+            counts_by_kind={},
+        ),
         source_hash="1" * 64,
         preview_hash="2" * 64,
         rule_version="test",
