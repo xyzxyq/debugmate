@@ -414,10 +414,16 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         for component in config["components"]
         if component["props"].get("elem_id", "").startswith("preview-")
     }
-    assert preview_components["preview-error-text"]["props"]["visible"] == "hidden"
-    assert preview_components["preview-code"]["props"]["visible"] == "hidden"
-    assert preview_components["preview-environment"]["props"]["visible"] == "hidden"
-    assert preview_components["preview-screenshot"]["props"]["visible"] == "hidden"
+    for selector in (
+        "preview-error-text",
+        "preview-code",
+        "preview-environment",
+        "preview-screenshot",
+        "preview-audit",
+    ):
+        assert preview_components[selector]["type"] == "column"
+        assert "preview-slot" in preview_components[selector]["props"]["elem_classes"]
+    assert ".preview-slot { display: contents; }" in app.css
 
     accordions = {
         component["props"].get("label"): component

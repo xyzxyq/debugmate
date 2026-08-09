@@ -169,6 +169,7 @@ WORKBENCH_CSS = "\n".join(
             "border: 1px solid var(--border); border-radius: 6px; "
             "background: var(--surface-2) !important; }"
         ),
+        ".preview-slot { display: contents; }",
         (
             ".region h2 { margin: 0 0 16px; color: var(--text); font-size: 16px; "
             "font-weight: 700; letter-spacing: 0; }"
@@ -1629,59 +1630,63 @@ def build_app(
                         elem_id="privacy-overview",
                     )
                     with gr.Column(elem_id="privacy-preview"):
-                        redacted_input = gr.Textbox(
-                            label="脱敏后的报错文本",
-                            interactive=False,
-                            lines=5,
-                            visible="hidden",
-                            elem_id="preview-error-text",
-                        )
-                        preview_code = gr.Textbox(
-                            label="脱敏后的代码",
-                            interactive=False,
-                            lines=4,
-                            visible="hidden",
-                            elem_id="preview-code",
-                        )
+                        with gr.Column(elem_id="preview-error-text", elem_classes=["preview-slot"]):
+                            redacted_input = gr.Textbox(
+                                label="脱敏后的报错文本",
+                                interactive=False,
+                                lines=5,
+                                visible=False,
+                            )
+                        with gr.Column(elem_id="preview-code", elem_classes=["preview-slot"]):
+                            preview_code = gr.Textbox(
+                                label="脱敏后的代码",
+                                interactive=False,
+                                lines=4,
+                                visible=False,
+                            )
                         preview_code_absent = gr.Markdown(
                             "未提供代码。",
                             visible=False,
                             elem_classes=["absent-category-row"],
                             elem_id="preview-code-absent",
                         )
-                        preview_environment = gr.JSON(
-                            label="脱敏后的环境信息",
-                            value={},
-                            visible="hidden",
-                            elem_id="preview-environment",
-                        )
+                        with gr.Column(
+                            elem_id="preview-environment", elem_classes=["preview-slot"]
+                        ):
+                            preview_environment = gr.JSON(
+                                label="脱敏后的环境信息",
+                                value={},
+                                visible=False,
+                            )
                         preview_environment_absent = gr.Markdown(
                             "未提供环境信息。",
                             visible=False,
                             elem_classes=["absent-category-row"],
                             elem_id="preview-environment-absent",
                         )
-                        preview_screenshot = gr.Image(
-                            label="脱敏后的截图",
-                            interactive=False,
-                            type="filepath",
-                            sources=None,
-                            buttons=[],
-                            visible="hidden",
-                            elem_id="preview-screenshot",
-                        )
+                        with gr.Column(
+                            elem_id="preview-screenshot", elem_classes=["preview-slot"]
+                        ):
+                            preview_screenshot = gr.Image(
+                                label="脱敏后的截图",
+                                interactive=False,
+                                type="filepath",
+                                sources=None,
+                                buttons=[],
+                                visible=False,
+                            )
                         preview_screenshot_absent = gr.Markdown(
                             "未提供截图。",
                             visible=False,
                             elem_classes=["absent-category-row"],
                             elem_id="preview-screenshot-absent",
                         )
-                        preview_audit = gr.Textbox(
-                            elem_id="preview-audit",
-                            label="脱敏审计摘要",
-                            interactive=False,
-                            visible="hidden",
-                        )
+                        with gr.Column(elem_id="preview-audit", elem_classes=["preview-slot"]):
+                            preview_audit = gr.Textbox(
+                                label="脱敏审计摘要",
+                                interactive=False,
+                                visible=False,
+                            )
                         preview_validity = gr.Markdown(
                             "请填写报错文本或上传终端截图，至少提供一项。",
                             elem_id="preview-validity",

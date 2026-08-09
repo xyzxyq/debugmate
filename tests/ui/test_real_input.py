@@ -331,7 +331,15 @@ def test_real_input_components_lock_four_fields_and_preview_surfaces() -> None:
     assert upload["props"]["file_types"] == [".png", ".jpg", ".jpeg"]
     assert by_id["code-input"]["type"] == "textbox"
     assert by_id["environment-input"]["type"] == "textbox"
-    assert by_id["preview-screenshot"]["type"] == "image"
+    assert by_id["preview-screenshot"]["type"] == "column"
+    preview_images = [
+        component
+        for component in config["components"]
+        if component["type"] == "image"
+        and component.get("props", {}).get("label") == "脱敏后的截图"
+    ]
+    assert len(preview_images) == 1
+    assert preview_images[0]["props"]["visible"] is False
 
 
 def test_environment_parser_is_deterministic_and_preserves_duplicate_details() -> None:
