@@ -15,10 +15,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from gradio.state_holder import SessionState
+from PIL import Image
 
 import debugmate.ui.app as app_module
 from debugmate.contracts import DiagnosisRecord
-from debugmate.privacy.models import ApprovedRedactedInput
+from debugmate.privacy.image_redactor import OcrUnavailable
+from debugmate.privacy.models import ApprovedRedactedInput, InputEnvelope
+from debugmate.privacy.text_redactor import redact_input
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ArtifactIdentity,
@@ -33,6 +36,7 @@ from debugmate.results.service import ServiceStageEvent
 from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui import serve as serve_module
 from debugmate.ui.app import CallbackPayload, _UiSessionStateStore, build_app
+from debugmate.ui.local_live import LocalPreviewStore
 from debugmate.ui.presentation import render_verified_diagnosis, render_view_state
 from debugmate.ui.serve import _local_service
 
@@ -595,6 +599,68 @@ def test_local_live_requires_preview_then_same_session_approval() -> None:
     assert states[-1].identity.source_run_id in frames[-1][1]
     assert "fixture_id=null" in frames[-1][1]
     assert "fixture_name=null" in frames[-1][1]
+
+
+def _cached_preview_builder(value: InputEnvelope):
+    return redact_input(
+        InputEnvelope(case_id=value.case_id, error_text="Traceback: redacted preview")
+    )
+
+
+def _cached_upload(tmp_path: Path) -> tuple[Path, Path]:
+    cache = (tmp_path / "cache").absolute()
+    cache.mkdir()
+    upload = cache / "terminal.png"
+    Image.new("RGB", (8, 8), "white").save(upload)
+    return cache, upload
+
+
+def test_local_preview_deletes_raw_upload_after_success(tmp_path: Path) -> None:
+    cache, upload = _cached_upload(tmp_path)
+    app = build_app(_Service(), preview_builder=_cached_preview_builder, upload_root=cache)
+    prepare = _callback(app, "prepare_local_preview")
+
+    prepared = prepare("Traceback", str(upload), None, None, _Request("delete-success"))
+
+    assert isinstance(prepared[0], str)
+    assert not upload.exists()
+
+
+def test_local_preview_deletes_raw_upload_after_invalidation(tmp_path: Path) -> None:
+    cache, upload = _cached_upload(tmp_path)
+    previews = LocalPreviewStore()
+
+    def invalidate_before_publish(value: InputEnvelope):
+        previews.invalidate_and_increment("delete-stale")
+        return _cached_preview_builder(value)
+
+    app = build_app(
+        _Service(),
+        preview_store=previews,
+        preview_builder=invalidate_before_publish,
+        upload_root=cache,
+    )
+    prepare = _callback(app, "prepare_local_preview")
+
+    prepared = prepare("Traceback", str(upload), None, None, _Request("delete-stale"))
+
+    assert prepared[0] is None
+    assert not upload.exists()
+
+
+def test_local_preview_deletes_raw_upload_after_ocr_failure(tmp_path: Path) -> None:
+    cache, upload = _cached_upload(tmp_path)
+
+    def fail_ocr(_value: InputEnvelope):
+        raise OcrUnavailable()
+
+    app = build_app(_Service(), preview_builder=fail_ocr, upload_root=cache)
+    prepare = _callback(app, "prepare_local_preview")
+
+    prepared = prepare("Traceback", str(upload), None, None, _Request("delete-ocr"))
+
+    assert prepared[0] is None
+    assert not upload.exists()
 
 
 @pytest.mark.parametrize(

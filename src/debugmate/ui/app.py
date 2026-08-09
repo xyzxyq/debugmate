@@ -1412,6 +1412,53 @@ def _require_cached_upload(value: object, cache_root: Path) -> Path:
     return resolved
 
 
+def _delete_cached_upload(value: Path, cache_root: Path) -> None:
+    """Delete one previously validated upload without following a replaced path."""
+
+    candidate = Path(value)
+    root = Path(cache_root)
+    if not candidate.is_absolute() or not root.is_absolute():
+        raise ValueError("invalid screenshot cleanup")
+    lexical_root = Path(os.path.abspath(root))
+    lexical_candidate = Path(os.path.abspath(candidate))
+    try:
+        if os.path.commonpath((str(lexical_root), str(lexical_candidate))) != str(
+            lexical_root
+        ):
+            raise ValueError("invalid screenshot cleanup")
+    except ValueError:
+        raise ValueError("invalid screenshot cleanup") from None
+    try:
+        root_info = lexical_root.lstat()
+    except FileNotFoundError:
+        return
+    if (
+        stat.S_ISLNK(root_info.st_mode)
+        or _has_reparse_attribute(lexical_root)
+        or not lexical_root.is_dir()
+    ):
+        raise ValueError("invalid screenshot cleanup")
+    root_resolved = lexical_root.resolve(strict=True)
+    relative = lexical_candidate.relative_to(lexical_root)
+    current = lexical_root
+    try:
+        for part in relative.parts:
+            current = current / part
+            info = current.lstat()
+            if stat.S_ISLNK(info.st_mode) or _has_reparse_attribute(current):
+                raise ValueError("invalid screenshot cleanup")
+    except FileNotFoundError:
+        return
+    resolved = lexical_candidate.resolve(strict=True)
+    if (
+        resolved != candidate
+        or os.path.commonpath((str(root_resolved), str(resolved))) != str(root_resolved)
+        or not resolved.is_file()
+    ):
+        raise ValueError("invalid screenshot cleanup")
+    resolved.unlink()
+
+
 def build_app(
     service: ResultApplicationService,
     *,
@@ -1905,6 +1952,7 @@ def build_app(
             """Build and publish only a redacted preview for the captured revision."""
 
             legacy = request is None and hasattr(error_text, "session_hash")
+            validated_upload: Path | None = None
             if legacy:
                 request = error_text  # type: ignore[assignment]
                 error_text = "ModuleNotFoundError: No module named 'demo_pkg'"
@@ -1917,9 +1965,10 @@ def build_app(
                 normalized_code = code.strip() if isinstance(code, str) else None
                 normalized_screenshot = None
                 if screenshot_path is not None:
-                    normalized_screenshot = str(
-                        _require_cached_upload(screenshot_path, configured_upload_root)
+                    validated_upload = _require_cached_upload(
+                        screenshot_path, configured_upload_root
                     )
+                    normalized_screenshot = str(validated_upload)
                 envelope = InputEnvelope(
                     case_id=new_case_id(),
                     error_text=normalized_error or None,
@@ -1962,6 +2011,9 @@ def build_app(
                     "请粘贴报错文本或上传报错截图。",
                     gr.update(value="", visible=False),
                 )
+            finally:
+                if validated_upload is not None:
+                    _delete_cached_upload(validated_upload, configured_upload_root)
             if legacy:
                 return (
                     prepared.token,
