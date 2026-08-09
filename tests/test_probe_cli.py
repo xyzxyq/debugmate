@@ -19,6 +19,7 @@ from debugmate.adapters.dify import (
 )
 from debugmate.cli import main
 from debugmate.contracts import new_case_id
+from debugmate.dify_live_evidence import main as live_evidence_main
 from debugmate.dify_live_evidence import validate_published_tree
 from debugmate.evidence import RunStatus, verify_bundle
 from debugmate.probe import CAPABILITY_IDS, run_cloud_probe, run_fixture_probe
@@ -67,6 +68,23 @@ def test_extraction_cli_view_has_six_explicit_slots_and_correction_ids() -> None
 
 SENTINEL = "SECRET_SENTINEL_DO_NOT_LOG"
 FIXTURE_DIAGNOSIS = Path("fixtures/cases/module_not_found/diagnosis.json")
+
+
+def _historical_inventory(repository: Path, evidence_root: Path) -> list[dict[str, str]]:
+    files = [path for path in evidence_root.rglob("*") if path.is_file()]
+    c06 = json.loads(
+        (evidence_root / "c06/dsl-roundtrip-evidence.json").read_text(encoding="utf-8")
+    )
+    for key in ("source_dsl", "reexport_dsl", "reconstructed_output"):
+        files.append(repository / c06[key])
+    unique = sorted({path.resolve() for path in files}, key=lambda path: path.as_posix())
+    return [
+        {
+            "path": path.relative_to(repository).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for path in unique
+    ]
 
 
 def settings() -> DebugMateSettings:
@@ -440,9 +458,30 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
         capability_id for capability_id, status in status_by_id.items() if status == "pass"
     }
     assert passing_ids == {"C01", "C02", "C03", "C04", "C05", "C06", "C07"}
+    historical_root = repository / "evidence/dify-live/2026-08-09"
     assert validate_published_tree(
-        repository, repository / "evidence/dify-live/2026-08-09"
+        repository,
+        historical_root,
+        _historical_inventory(repository, historical_root),
     ) == {"C03": "pass", "C04": "pass", "C06": "pass"}
+
+
+def test_live_evidence_cli_requires_tracked_inventory(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    with pytest.raises(SystemExit) as caught:
+        live_evidence_main(
+            [
+                "validate-candidate",
+                "--repository-root",
+                str(tmp_path),
+                "--evidence-root",
+                str(evidence),
+            ]
+        )
+
+    assert caught.value.code == 2
 
 
 def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:

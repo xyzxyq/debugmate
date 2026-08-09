@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
-import debugmate.dify_live_evidence as live_evidence
 from debugmate.dify_live_evidence import (
     TARGET_TEXT,
     build_request_manifest,
@@ -33,6 +33,16 @@ SAFE_INPUTS: dict[str, object] = {
 def _png(path: Path) -> Path:
     path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
     return path
+
+
+def _tracked_inventory(repository_root: Path, paths: list[Path]) -> list[dict[str, str]]:
+    return [
+        {
+            "path": path.resolve().relative_to(repository_root.resolve()).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for path in sorted(paths, key=lambda item: item.as_posix())
+    ]
 
 
 def _c03_record(tmp_path: Path) -> dict[str, object]:
@@ -223,11 +233,8 @@ def test_c04_rejects_structurally_valid_resource_replacement(
 
     with pytest.raises(ValueError, match="retriever resource hash mismatch"):
         validate_c04_record(record, tmp_path)
-    monkeypatch.setattr("debugmate.dify_live_evidence._git_tracked", lambda *_: True)
     with pytest.raises(ValueError, match="retriever resource hash mismatch"):
-        validate_c04_record(
-            record, tmp_path, publication_repository_root=tmp_path
-        )
+        validate_c04_record(record, tmp_path)
 
 
 def test_candidate_tree_rejects_secret_and_personal_path(tmp_path: Path) -> None:
@@ -236,82 +243,84 @@ def test_candidate_tree_rejects_secret_and_personal_path(tmp_path: Path) -> None
     unsafe = evidence / "unsafe.json"
     unsafe.write_text('{"authorization":"Bearer secret-value"}', encoding="utf-8")
     with pytest.raises(ValueError, match="sensitive"):
-        validate_candidate_tree(tmp_path, evidence)
+        validate_candidate_tree(
+            tmp_path, evidence, _tracked_inventory(tmp_path, [unsafe])
+        )
 
     unsafe.write_text('{"path":"C:\\\\Users\\\\student\\\\secret"}', encoding="utf-8")
     with pytest.raises(ValueError, match="personal absolute path"):
-        validate_candidate_tree(tmp_path, evidence)
+        validate_candidate_tree(
+            tmp_path, evidence, _tracked_inventory(tmp_path, [unsafe])
+        )
 
 
 @pytest.mark.parametrize(
-    "untracked_name",
+    ("mutation", "message"),
     [
-        "dsl-roundtrip-evidence.json",
-        "source.dsl.yml",
-        "reexport.dsl.yml",
-        "reconstructed-output.json",
+        (lambda entries: entries[:-1], "missing"),
+        (
+            lambda entries: entries
+            + [{"path": "evidence/extra.json", "sha256": "a" * 64}],
+            "extra",
+        ),
+        (lambda entries: entries + entries[:1], "duplicate"),
+        (lambda entries: list(reversed(entries)), "sorted"),
+        (
+            lambda entries: [
+                {"path": "../escape.json", "sha256": entries[0]["sha256"]}
+            ],
+            "repository-relative",
+        ),
+        (
+            lambda entries: [
+                {"path": entries[0]["path"], "sha256": "f" * 64},
+                *entries[1:],
+            ],
+            "hash mismatch",
+        ),
     ],
 )
-def test_published_c06_requires_record_and_inner_artifacts_tracked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, untracked_name: str
+def test_candidate_inventory_fails_closed(
+    tmp_path: Path,
+    mutation: object,
+    message: str,
 ) -> None:
     evidence = tmp_path / "evidence"
-    combined_dir = evidence / "c03-c04"
-    c06_dir = evidence / "c06"
-    combined_dir.mkdir(parents=True)
-    c06_dir.mkdir()
-    for name in (
-        "input.png",
-        "manifest.json",
-        "retriever.json",
-        "source.dsl.yml",
-        "reexport.dsl.yml",
-        "reconstructed-output.json",
-    ):
-        (evidence / name).write_text("fixture", encoding="utf-8")
-    (combined_dir / "vision-retrieval-evidence.json").write_text(
-        json.dumps(
-            {
-                "c03": {
-                    "capability_id": "C03",
-                    "status": "pass",
-                    "attempted_at_utc": "2026-08-09T00:00:00Z",
-                    "input_image": "input.png",
-                    "request_manifest": "manifest.json",
-                },
-                "c04": {
-                    "capability_id": "C04",
-                    "status": "pass",
-                    "attempted_at_utc": "2026-08-09T00:00:00Z",
-                    "retriever_resource": "retriever.json",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (c06_dir / "dsl-roundtrip-evidence.json").write_text(
-        json.dumps(
-            {
-                "capability_id": "C06",
-                "status": "pass",
-                "attempted_at_utc": "2026-08-09T00:00:00Z",
-                "source_dsl": "evidence/source.dsl.yml",
-                "reexport_dsl": "evidence/reexport.dsl.yml",
-                "reconstructed_output": "evidence/reconstructed-output.json",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(live_evidence, "validate_candidate_tree", lambda *_: {})
-    monkeypatch.setattr(live_evidence, "validate_c04_record", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(
-        live_evidence,
-        "_git_tracked",
-        lambda _root, path: path.name != untracked_name,
-    )
+    evidence.mkdir()
+    first = evidence / "a.json"
+    second = evidence / "b.json"
+    first.write_text("{}", encoding="utf-8")
+    second.write_text("{}", encoding="utf-8")
+    entries = _tracked_inventory(tmp_path, [first, second])
+    mutated = mutation(entries)  # type: ignore[operator]
 
-    with pytest.raises(ValueError, match="not Git tracked"):
-        validate_published_tree(tmp_path, evidence)
+    with pytest.raises(ValueError, match=message):
+        validate_candidate_tree(tmp_path, evidence, mutated)
+
+
+def test_candidate_inventory_accepts_exact_sorted_hash_bound_files(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    first = evidence / "a.json"
+    second = evidence / "b.json"
+    first.write_text("{}", encoding="utf-8")
+    second.write_text("{}", encoding="utf-8")
+
+    assert validate_candidate_tree(
+        tmp_path,
+        evidence,
+        _tracked_inventory(tmp_path, [first, second]),
+    ) == {}
+
+
+def test_inventory_exporter_is_external_and_literal_path_safe() -> None:
+    script = Path("scripts/export-phase8-tracked-inventory.ps1")
+    text = script.read_text(encoding="utf-8")
+
+    assert "git ls-files" in text
+    assert "git check-ignore" in text
+    assert "-LiteralPath" in text
+    assert set(re.findall(r"'(?P<key>path|sha256)'", text)) == {"path", "sha256"}
 
 
 def test_published_capability_matrix_matches_independent_live_records() -> None:
