@@ -19,6 +19,8 @@ from debugmate.privacy.models import (
     PreviewBundle,
     RedactedFields,
     RedactionAudit,
+    ScreenshotOcrStatus,
+    ScreenshotPreviewAudit,
     SecretCandidate,
     SecretKind,
 )
@@ -169,6 +171,12 @@ def redact_input(value: InputEnvelope) -> PreviewBundle:
         redacted_screenshot_path=None,
         redacted_screenshot_sha256=None,
     )
+    screenshot_audit = ScreenshotPreviewAudit(
+        provided=False,
+        ocr_status=ScreenshotOcrStatus.NOT_APPLICABLE,
+        finding_count=0,
+        counts_by_kind={},
+    )
 
     source_hash = sha256_bytes(canonical_json_bytes(value.model_dump(mode="json")))
     preview_payload = {
@@ -176,6 +184,7 @@ def redact_input(value: InputEnvelope) -> PreviewBundle:
         "redacted": redacted.model_dump(mode="json"),
         "candidates": [item.model_dump(mode="json") for item in candidates],
         "audit": audit.model_dump(mode="json"),
+        "screenshot_audit": screenshot_audit.model_dump(mode="json"),
         "source_hash": source_hash,
         "rule_version": RULE_VERSION,
     }
@@ -185,6 +194,7 @@ def redact_input(value: InputEnvelope) -> PreviewBundle:
         redacted=redacted,
         candidates=candidates,
         audit=audit,
+        screenshot_audit=screenshot_audit,
         source_hash=source_hash,
         preview_hash=preview_hash,
         rule_version=RULE_VERSION,
@@ -235,11 +245,22 @@ def build_preview(
     source_payload.pop("screenshot_path", None)
     source_payload["screenshot_sha256"] = result.source_sha256
     source_hash = sha256_bytes(canonical_json_bytes(source_payload))
+    screenshot_counts = Counter(item.kind for item in result.findings)
+    screenshot_audit = ScreenshotPreviewAudit(
+        provided=True,
+        ocr_status=ScreenshotOcrStatus.COMPLETED,
+        finding_count=len(result.findings),
+        counts_by_kind={
+            kind: screenshot_counts[kind]
+            for kind in sorted(screenshot_counts, key=lambda item: item.value)
+        },
+    )
     preview_payload = {
         "case_id": value.case_id,
         "redacted": redacted.model_dump(mode="json"),
         "candidates": [item.model_dump(mode="json") for item in preview.candidates],
         "audit": preview.audit.model_dump(mode="json"),
+        "screenshot_audit": screenshot_audit.model_dump(mode="json"),
         "source_hash": source_hash,
         "rule_version": RULE_VERSION,
     }
@@ -248,6 +269,7 @@ def build_preview(
         redacted=redacted,
         candidates=preview.candidates,
         audit=preview.audit,
+        screenshot_audit=screenshot_audit,
         source_hash=source_hash,
         preview_hash=sha256_bytes(canonical_json_bytes(preview_payload)),
         rule_version=RULE_VERSION,

@@ -8,7 +8,14 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from debugmate.contracts import CaseId
 
@@ -120,6 +127,57 @@ class RedactionAudit(StrictPrivacyModel):
         return self
 
 
+class ScreenshotOcrStatus(StrEnum):
+    """Stable local OCR states that may be disclosed without image contents."""
+
+    NOT_APPLICABLE = "not_applicable"
+    COMPLETED = "completed"
+
+
+class ScreenshotPreviewAudit(StrictPrivacyModel):
+    """Value-free screenshot facts bound into the approved preview."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    provided: bool
+    ocr_status: ScreenshotOcrStatus
+    finding_count: StrictCount
+    counts_by_kind: dict[SecretKind, StrictCount] = Field(default_factory=dict)
+
+    @field_validator("counts_by_kind", mode="before")
+    @classmethod
+    def restore_serialized_kind_codes(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        aliases = {
+            "WINDOWS_ABSOLUTE": SecretKind.WINDOWS_PATH,
+            "UNIX_ABSOLUTE": SecretKind.UNIX_PATH,
+        }
+        return {aliases.get(key, key): count for key, count in value.items()}
+
+    @field_serializer("counts_by_kind", when_used="json")
+    def serialize_value_free_kind_codes(
+        self, value: dict[SecretKind, int]
+    ) -> dict[str, int]:
+        aliases = {
+            SecretKind.WINDOWS_PATH: "WINDOWS_ABSOLUTE",
+            SecretKind.UNIX_PATH: "UNIX_ABSOLUTE",
+        }
+        return {aliases.get(kind, kind.value): count for kind, count in value.items()}
+
+    @model_validator(mode="after")
+    def require_consistent_status_and_counts(self) -> Self:
+        if self.provided != (self.ocr_status is ScreenshotOcrStatus.COMPLETED):
+            raise ValueError("provided and ocr_status must describe the same screenshot state")
+        if sum(self.counts_by_kind.values()) != self.finding_count:
+            raise ValueError("finding_count must equal counts_by_kind total")
+        if list(self.counts_by_kind) != sorted(
+            self.counts_by_kind, key=lambda kind: kind.value
+        ):
+            raise ValueError("counts_by_kind must use deterministic kind ordering")
+        return self
+
+
 class PreviewBundle(StrictPrivacyModel):
     """Deterministic redaction result presented for explicit user confirmation."""
 
@@ -127,6 +185,7 @@ class PreviewBundle(StrictPrivacyModel):
     redacted: RedactedFields
     candidates: list[SecretCandidate]
     audit: RedactionAudit
+    screenshot_audit: ScreenshotPreviewAudit
     source_hash: Sha256
     preview_hash: Sha256
     rule_version: str

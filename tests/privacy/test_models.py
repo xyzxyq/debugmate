@@ -10,6 +10,8 @@ from debugmate.privacy.models import (
     PreviewBundle,
     RedactedFields,
     RedactionAudit,
+    ScreenshotOcrStatus,
+    ScreenshotPreviewAudit,
     SecretCandidate,
     SecretKind,
 )
@@ -63,6 +65,12 @@ def preview_bundle() -> PreviewBundle:
         audit=RedactionAudit(
             candidate_count=1,
             counts_by_kind={SecretKind.EMAIL: 1},
+        ),
+        screenshot_audit=ScreenshotPreviewAudit(
+            provided=False,
+            ocr_status=ScreenshotOcrStatus.NOT_APPLICABLE,
+            finding_count=0,
+            counts_by_kind={},
         ),
         source_hash="b" * 64,
         preview_hash="c" * 64,
