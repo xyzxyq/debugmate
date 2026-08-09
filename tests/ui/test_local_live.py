@@ -38,16 +38,28 @@ class _TrackedLock:
         self._lock.release()
 
 
+def _preview(label: str = "ModuleNotFoundError"):
+    return redact_input(InputEnvelope(case_id=new_case_id(), error_text=label))
+
+
+def _publish(store: LocalPreviewStore, session: str, label: str = "ModuleNotFoundError"):
+    revision = store.snapshot_revision(session)
+    presentation = store.publish_if_current(session, revision, _preview(label))
+    assert presentation is not None
+    return presentation
+
+
 def test_preview_store_atomically_consumes_only_same_session_token() -> None:
     now = datetime(2026, 7, 15, tzinfo=UTC)
     store = LocalPreviewStore(clock=lambda: now)
-    prepared = store.create("session-a")
+    prepared = _publish(store, "session-a")
 
-    record = store.consume(prepared.token, "session-a")
+    record = store.consume_current(prepared.token, "session-a")
 
     assert record is not None
     assert record.request_session == "session-a"
-    assert store.consume(prepared.token, "session-a") is None
+    assert record.revision == 0
+    assert store.consume_current(prepared.token, "session-a") is None
 
 
 def test_preview_store_reads_clock_inside_consume_lock_before_atomic_pop() -> None:
@@ -56,13 +68,13 @@ def test_preview_store_reads_clock_inside_consume_lock_before_atomic_pop() -> No
     store = LocalPreviewStore(
         ttl=timedelta(seconds=1), clock=lambda: current[0]
     )
-    prepared = store.create("session-a")
+    prepared = _publish(store, "session-a")
     tracked = _TrackedLock()
     store._lock = tracked
     consumed: list[object] = []
 
     def consume() -> None:
-        consumed.append(store.consume(prepared.token, "session-a"))
+        consumed.append(store.consume_current(prepared.token, "session-a"))
 
     with tracked:
         thread = threading.Thread(target=consume)
@@ -81,29 +93,65 @@ def test_preview_store_rejects_expired_cross_session_and_tampered_tokens() -> No
     store = LocalPreviewStore(
         ttl=timedelta(seconds=1), max_entries=2, clock=lambda: current[0]
     )
-    cross_session = store.create("session-a")
-    tampered = store.create("session-a")
+    cross_session = _publish(store, "session-a", "cross-session")
+    tampered = _publish(store, "session-b", "tampered")
 
-    assert store.consume(cross_session.token, "session-b") is None
-    assert store.consume(tampered.token + "0", "session-a") is None
+    assert store.consume_current(cross_session.token, "session-b") is None
+    assert store.consume_current(tampered.token + "0", "session-b") is None
     current[0] = now + timedelta(seconds=2)
-    assert store.consume(cross_session.token, "session-a") is None
-    assert store.consume(tampered.token, "session-a") is None
+    assert store.consume_current(cross_session.token, "session-a") is None
+    assert store.consume_current(tampered.token, "session-b") is None
 
 
 def test_preview_store_is_bounded_and_issues_only_opaque_redacted_presentations() -> None:
     store = LocalPreviewStore(max_entries=2)
-    first = store.create("session-a")
-    second = store.create("session-a")
-    third = store.create("session-a")
+    first = _publish(store, "session-a", "first")
+    second = _publish(store, "session-b", "second")
+    third = _publish(store, "session-c", "ModuleNotFoundError")
 
-    assert store.consume(first.token, "session-a") is None
-    assert store.consume(second.token, "session-a") is not None
-    assert store.consume(third.token, "session-a") is not None
+    assert store.consume_current(first.token, "session-a") is None
+    assert store.consume_current(second.token, "session-b") is not None
+    assert store.consume_current(third.token, "session-c") is not None
     assert "ModuleNotFoundError" in third.redacted_display
     assert third.audit_display
     assert "PreviewBundle" not in repr(third)
+    assert "ApprovedRedactedInput" not in repr(third)
     assert "approval_signature" not in repr(third)
+
+
+def test_preview_store_invalidation_removes_every_session_token() -> None:
+    store = LocalPreviewStore()
+    first = _publish(store, "session-a", "first")
+    second = _publish(store, "session-b", "second")
+
+    assert store.invalidate_and_increment("session-a") == 1
+    assert store.consume_current(first.token, "session-a") is None
+    assert store.consume_current(second.token, "session-b") is not None
+
+
+def test_preview_presentation_never_discloses_server_paths_or_strict_objects() -> None:
+    preview = _preview(r"token=secret-value C:\Users\student\private.py")
+    preview = preview.model_copy(
+        update={
+            "redacted": preview.redacted.model_copy(
+                update={
+                    "redacted_screenshot_path": "case_private/redacted.png",
+                    "redacted_screenshot_sha256": "a" * 64,
+                }
+            )
+        }
+    )
+    store = LocalPreviewStore()
+    presentation = store.publish_if_current("session-a", 0, preview)
+
+    assert presentation is not None
+    exposed = repr(presentation)
+    assert "secret-value" not in exposed
+    assert "C:\\Users" not in exposed
+    assert "case_private/redacted.png" not in exposed
+    assert "PreviewBundle" not in exposed
+    assert "ApprovedRedactedInput" not in exposed
+    assert "approval_signature" not in exposed
 
 
 def _install_project_read_guard(
