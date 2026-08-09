@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -190,3 +191,65 @@ def test_candidate_tree_rejects_secret_and_personal_path(tmp_path: Path) -> None
     unsafe.write_text('{"path":"C:\\\\Users\\\\student\\\\secret"}', encoding="utf-8")
     with pytest.raises(ValueError, match="personal absolute path"):
         validate_candidate_tree(tmp_path, evidence)
+
+
+def test_published_capability_matrix_matches_independent_live_records() -> None:
+    repository = Path.cwd().resolve()
+    matrix = json.loads(
+        (repository / "platform/dify/capability-matrix.json").read_text(encoding="utf-8")
+    )
+    expected = {
+        "C01": (
+            "pass",
+            "evidence/dify-live/2026-08-08/cloud-probe/"
+            "case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json",
+            "608ebdbd5990f3e09f6cafd1682ff25441057768e1c59506e611531831b3cab1",
+        ),
+        "C02": (
+            "pass",
+            "evidence/dify-live/2026-08-08/cloud-probe/"
+            "case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json",
+            "608ebdbd5990f3e09f6cafd1682ff25441057768e1c59506e611531831b3cab1",
+        ),
+        "C03": (
+            "pass",
+            "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json",
+            "8bb4211a945b1717608a7cb9eac9aa2e83ec6363de62d790ec97480fd5b75428",
+        ),
+        "C04": (
+            "pass",
+            "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json",
+            "8bb4211a945b1717608a7cb9eac9aa2e83ec6363de62d790ec97480fd5b75428",
+        ),
+        "C05": (
+            "pass",
+            "evidence/dify-live/2026-08-08/cloud-probe/"
+            "case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json",
+            "75b2d9a8c2b555418173410592222e8d504fcc7530779ccbae652770658d0d26",
+        ),
+        "C06": (
+            "blocked",
+            "evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json",
+            "2a038c534eb9b021161ccfff636f8af631cae082b6e36178c044a12ad98f50ca",
+        ),
+        "C07": (
+            "pass",
+            "evidence/dify-live/2026-08-09/tts/dify-recap.mp3",
+            "a7d7821743b4364e1278b650b80e3d869ce2d06621a0745a4eb5fd45bca02328",
+        ),
+    }
+    actual = {
+        item["capability_id"]: (item["status"], item["evidence_path"], item["sha256"])
+        for item in matrix["capabilities"]
+    }
+    assert actual == expected
+    for _, evidence_path, expected_hash in expected.values():
+        artifact = repository / evidence_path
+        assert artifact.is_file()
+        assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_hash
+
+    for doc_path in ("README.md", "platform/dify/README.md", ".planning/STATE.md"):
+        text = (repository / doc_path).read_text(encoding="utf-8")
+        assert "C03" in text and "C04" in text and "C06" in text
+        assert "C03/C04" in text and "`pass`" in text
+        assert "C06" in text and "`blocked`" in text
