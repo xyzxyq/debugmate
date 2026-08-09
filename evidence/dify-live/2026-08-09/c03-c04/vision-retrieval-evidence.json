@@ -1,0 +1,26 @@
+{
+  "c03": {
+    "attempted_at_utc": "2026-08-09T04:34:03Z",
+    "capability_id": "C03",
+    "extracted_facts": [],
+    "extracted_text": "ModuleNotFoundError: No module named 'debugmate_demo_pkg'",
+    "extraction_match_kind": "single_exact",
+    "input_image": "c03-c04/input-terminal.png",
+    "reason_code": null,
+    "request_manifest": "c03-c04/workflow-request-manifest.json",
+    "request_sha256": "3050dafef95212703275af9eb7e9d6e46cbba7b8cb260ce85caec25d6fa89744",
+    "source_kind": "vlm",
+    "status": "pass",
+    "target_text_sha256": "16716ac6917e782990cd2d3f69020fe02c601213a8046d6302f9be46c22fc70d",
+    "upload_id_sha256": "218b285f838782467b43c26eca82cee678fe7bd536edaae3eddb7460df8b40ea",
+    "workflow_run_id_sha256": "ad12b3313a25736393a918ea0b1488c3847c0a380aebcd2e92d89cc410ec20b8"
+  },
+  "c04": {
+    "attempted_at_utc": "2026-08-09T04:24:13Z",
+    "capability_id": "C04",
+    "reason_code": null,
+    "retriever_resource": "c03-c04/retriever-resource.json",
+    "status": "pass"
+  },
+  "schema_version": "1.0.0"
+}

@@ -1,0 +1,16 @@
+{
+  "attempted_at_utc": "2026-08-09T04:34:31Z",
+  "capability_id": "C06",
+  "differences": [],
+  "import_channel": "dify_console_ui_and_authenticated_page_api",
+  "independent_app_id_sha256": null,
+  "reason_code": "console_file_upload_denied_and_import_api_unauthorized",
+  "reconstructed_output": null,
+  "reexport_dsl": null,
+  "reexport_normalized_sha256": null,
+  "reexport_sha256": null,
+  "source_dsl": null,
+  "source_normalized_sha256": null,
+  "source_sha256": null,
+  "status": "blocked"
+}

@@ -1,0 +1,16 @@
+{
+  "hits": [
+    {
+      "chunk_id": "python-exceptions:module-not-found-error",
+      "content_summary": "DebugMate ModuleNotFoundError knowledge entry: Python raises ModuleNotFoundError when an import target cannot be located; verify that the package is installed in the active interpreter environment.",
+      "locator": "ModuleNotFoundError",
+      "relevance_score": 0.31622776601683794,
+      "source_id": "6d31ec2a-99cc-445a-9322-c1591fec198b",
+      "source_title": "debugmate-module-not-found.md",
+      "source_url": "https://docs.python.org/3/library/exceptions.html"
+    }
+  ],
+  "node_run_id_sha256": "827fb573370332f80940855f4cf214fe5b95f37a703d77731c9bd9d2ebef6d49",
+  "source_kind": "knowledge_retrieval_console_log",
+  "workflow_run_id_sha256": "c45e0f4411316dd32a1ea48a1724596bd173741f8448a7241c107064e1abd44c"
+}

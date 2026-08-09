@@ -1,0 +1,22 @@
+{
+  "status": "succeeded",
+  "vlm_facts": [
+    {
+      "source_kind": "vlm",
+      "text": "ModuleNotFoundError: No module named 'debugmate_demo_pkg'"
+    },
+    {
+      "source_kind": "vlm",
+      "text": "import debugmate_demo_pkg"
+    },
+    {
+      "source_kind": "vlm",
+      "text": "python run_demo.py"
+    },
+    {
+      "source_kind": "vlm",
+      "text": "C:\\demo\\run_demo.py"
+    }
+  ],
+  "workflow_run_id_sha256": "ad12b3313a25736393a918ea0b1488c3847c0a380aebcd2e92d89cc410ec20b8"
+}

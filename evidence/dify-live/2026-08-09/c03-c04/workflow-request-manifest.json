@@ -1,0 +1,39 @@
+{
+  "input_image": "input-terminal.png",
+  "input_image_sha256": "54dfcd86bfef1f6aa83aa720e07afa18a241c0fc3934afc2880819d8d85cf7cf",
+  "non_image_inputs": {
+    "candidate": {},
+    "case_id": "c03-c04-live-20260809",
+    "code": "",
+    "environment": {},
+    "error_text": "",
+    "file_id": "",
+    "generation_request": {},
+    "issues": {},
+    "request_kind": "live_vision_evidence",
+    "schema_version": "1.0.0"
+  },
+  "request": {
+    "image_input": {
+      "transfer_method": "local_file",
+      "type": "image",
+      "upload_file_id_sha256": "218b285f838782467b43c26eca82cee678fe7bd536edaae3eddb7460df8b40ea"
+    },
+    "inputs": {
+      "candidate": {},
+      "case_id": "c03-c04-live-20260809",
+      "code": "",
+      "environment": {},
+      "error_text": "",
+      "file_id": "",
+      "generation_request": {},
+      "issues": {},
+      "request_kind": "live_vision_evidence",
+      "schema_version": "1.0.0"
+    }
+  },
+  "request_sha256": "3050dafef95212703275af9eb7e9d6e46cbba7b8cb260ce85caec25d6fa89744",
+  "schema_version": "1.0.0",
+  "target_text_sha256": "16716ac6917e782990cd2d3f69020fe02c601213a8046d6302f9be46c22fc70d",
+  "upload_id_sha256": "218b285f838782467b43c26eca82cee678fe7bd536edaae3eddb7460df8b40ea"
+}
