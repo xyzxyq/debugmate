@@ -1,7 +1,7 @@
 # Phase 07: 真实输入与隐私预览接线 - Research
 
-**Researched:** 2026-08-09  
-**Domain:** Gradio 6 本地真实输入、截图 OCR 脱敏、服务器授权状态与本地结果接线  
+**Researched:** 2026-08-09
+**Domain:** Gradio 6 本地真实输入、截图 OCR 脱敏、服务器授权状态与本地结果接线
 **Confidence:** HIGH
 
 <user_constraints>
@@ -252,43 +252,43 @@ Phase 07 的普通 `serve.py` 不应 import/instantiate/probe Dify、Edge TTS、
 
 ### Pitfall 1: 图片审计“看起来存在”但实际只统计文本
 
-**What goes wrong:** `preview.audit.candidate_count` 目前不含 screenshot findings，UI 若直接显示会低报遮挡数。  
-**How to avoid:** 单独严格建模 screenshot audit，并纳入 preview hash；用截图含敏感框/零敏感框两类测试。  
+**What goes wrong:** `preview.audit.candidate_count` 目前不含 screenshot findings，UI 若直接显示会低报遮挡数。
+**How to avoid:** 单独严格建模 screenshot audit，并纳入 preview hash；用截图含敏感框/零敏感框两类测试。
 **Warning sign:** OCR 确实画了黑框，但 audit 仍为 0。 [VERIFIED: `text_redactor.py`; `image_redactor.py`]
 
 ### Pitfall 2: 把 shared queue 当成锁
 
-**What goes wrong:** queue 降并发不等于浏览器权限验证，也不替代 revision 比较。  
-**How to avoid:** 所有 invalidation/publish/consume 仍在 store lock 内做 compare-and-set。  
+**What goes wrong:** queue 降并发不等于浏览器权限验证，也不替代 revision 比较。
+**How to avoid:** 所有 invalidation/publish/consume 仍在 store lock 内做 compare-and-set。
 **Warning sign:** callback 测试通过，但直接并发 store 单测可产生两个批准。 [CITED: https://www.gradio.app/main/guides/queuing; VERIFIED: threat analysis]
 
 ### Pitfall 3: OCR 失败后留下旧 PNG
 
-**What goes wrong:** 用户可能批准上次成功的同 case 文件。  
-**How to avoid:** 沿用 `build_preview()` 先删旧输出、失败不返回 preview/token，并测试 stale output cleanup。  
+**What goes wrong:** 用户可能批准上次成功的同 case 文件。
+**How to avoid:** 沿用 `build_preview()` 先删旧输出、失败不返回 preview/token，并测试 stale output cleanup。
 **Warning sign:** OCR exception 后 `redacted.png` 仍存在或 preview image 未清空。 [VERIFIED: `test_preview_integration.py`]
 
 ### Pitfall 4: 生产 preview 用 RapidOCR，诊断抽取仍用 Noop
 
-**What goes wrong:** 用户看到遮挡，但批准后的 INP-02 六字段没有截图 OCR 候选。  
-**How to avoid:** `serve.py` 一次构造并共享同一个 backend；源代码门禁拒绝普通 path 中 `_NoopOcr`。  
+**What goes wrong:** 用户看到遮挡，但批准后的 INP-02 六字段没有截图 OCR 候选。
+**How to avoid:** `serve.py` 一次构造并共享同一个 backend；源代码门禁拒绝普通 path 中 `_NoopOcr`。
 **Warning sign:** screenshot-only preview成功，结果六字段全空且 OCR backend call count 只有一次。 [VERIFIED: current `serve.py` gap]
 
 ### Pitfall 5: replay 只在文案上“离线”
 
-**What goes wrong:** 当前 replay composer 默认可能构造 Dify/Edge TTS。  
-**How to avoid:** ordinary Phase 07 assembly 不 import network adapters，服务构造前 poison network factories。  
+**What goes wrong:** 当前 replay composer 默认可能构造 Dify/Edge TTS。
+**How to avoid:** ordinary Phase 07 assembly 不 import network adapters，服务构造前 poison network factories。
 **Warning sign:** 没点 live 也会读取 API settings 或触发 httpx/socket。 [VERIFIED: `serve.py`]
 
 ### Pitfall 6: 返回 redacted absolute path 给 `gr.Image`
 
-**What goes wrong:** 浏览器响应、DOM 或截图泄露本机路径；路径还可能被误用为批准权限。  
-**How to avoid:** 返回单独的 read-only content capability URL；批准只接受 preview token。  
+**What goes wrong:** 浏览器响应、DOM 或截图泄露本机路径；路径还可能被误用为批准权限。
+**How to avoid:** 返回单独的 read-only content capability URL；批准只接受 preview token。
 **Warning sign:** callback repr/config/network response出现盘符、`AppData`、`.debugmate-runtime`。 [VERIFIED: UI-SPEC; Gradio file-access docs]
 
 ### Pitfall 7: 环境文本解析不确定
 
-**What goes wrong:** 同一输入生成不同 dict/hash，或重复 key 静默覆盖。  
+**What goes wrong:** 同一输入生成不同 dict/hash，或重复 key 静默覆盖。
 **How to avoid:** 建立小型确定性 parser：按行/中文分号切分；首个 `:`/`=` 分隔 key/value；规范化已知 key（如 python/device），重复或无 key 项使用稳定 `detail_001` 顺序键；测试 CRLF、空行、重复 key 和中文标点。 [VERIFIED: requirement-to-contract analysis]
 
 ## Code Examples
@@ -492,5 +492,5 @@ Required fresh states are idle real form, ready text+screenshot preview, per-fie
 - Environment readiness: HIGH — probed exact root venv imports and local CLI/file versions on 2026-08-09.
 - Browser integration details: MEDIUM-HIGH — official Gradio contracts verified, but exact 6.20 runtime behavior must be rerun after repairing the incomplete venv.
 
-**Research date:** 2026-08-09  
+**Research date:** 2026-08-09
 **Valid until:** 2026-09-08 for the pinned Phase 07 stack; re-check registry/docs only if changing pins.
