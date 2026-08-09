@@ -111,10 +111,10 @@ DebugMate V0.1 以“尽快形成完整课程作品”为目标。前三阶段�
 **UI hint**: no
 
 ### Phase 7: 真实输入与隐私预览接线
-**Goal**: 用户可在普通 Gradio 页面提交报错文本、代码、环境或截图，在任何云调用前查看并确认真实脱敏预览。  
-**Depends on**: Phase 4  
-**Requirements**: INP-01, INP-02, SAFE-01, UX-01  
-**Gap Closure**: Closes UI input, screenshot upload, OCR and privacy-preview gaps from the V0.1 milestone audit.  
+**Goal**: 用户可在普通 Gradio 页面提交报错文本、代码、环境或截图，在任何云调用前查看并确认真实脱敏预览。
+**Depends on**: Phase 4
+**Requirements**: INP-01, INP-02, SAFE-01, UX-01
+**Gap Closure**: Closes UI input, screenshot upload, OCR and privacy-preview gaps from the V0.1 milestone audit.
 **Success Criteria** (what must be TRUE):
   1. 页面提供报错文本、代码、环境和截图输入；文本与截图均为空时在本机拒绝。
   2. 截图经过既有格式/尺寸验证、生产 OCR 候选与确定性遮挡，不再使用 Noop OCR 作为普通模式入口。
@@ -124,10 +124,10 @@ DebugMate V0.1 以“尽快形成完整课程作品”为目标。前三阶段�
 **UI hint**: yes
 
 ### Phase 8: Dify 统一实时诊断链
-**Goal**: 已批准的脱敏输入通过同一次 Dify workflow 生成严格 DiagnosisRecord，并继续派生本地 Markdown、PNG、MP3、Gradio 结果和 ZIP。  
-**Depends on**: Phase 7  
-**Requirements**: KNOW-03, KNOW-04, DIAG-02, MULTI-03, UX-01, EVID-01  
-**Gap Closure**: Closes the DifyBackend/CloudGateway product wiring and unified-run evidence gaps.  
+**Goal**: 已批准的脱敏输入通过同一次 Dify workflow 生成严格 DiagnosisRecord，并继续派生本地 Markdown、PNG、MP3、Gradio 结果和 ZIP。
+**Depends on**: Phase 7
+**Requirements**: KNOW-03, KNOW-04, DIAG-02, MULTI-03, UX-01, EVID-01
+**Gap Closure**: Closes the DifyBackend/CloudGateway product wiring and unified-run evidence gaps.
 **Success Criteria** (what must be TRUE):
   1. 普通 live 模式使用环境变量配置的 Dify backend，缺少配置时明确降级而不是伪装云端成功。
   2. 同一次 run 的上传、视觉抽取、知识检索、结构化诊断、运行指纹和本地产物身份可追溯。
@@ -137,10 +137,10 @@ DebugMate V0.1 以“尽快形成完整课程作品”为目标。前三阶段�
 **UI hint**: yes
 
 ### Phase 9: 当前代表案例与提示词证据
-**Goal**: 以当前代码和当前 Dify 合同重跑少量代表案例，形成可复算的案例表与 V1–V4 同案例对照。  
-**Depends on**: Phase 8  
-**Requirements**: EVAL-01, EVAL-03, EVAL-05, EVID-03  
-**Gap Closure**: Closes stale representative-case, prompt-comparison and course-source evidence gaps.  
+**Goal**: 以当前代码和当前 Dify 合同重跑少量代表案例，形成可复算的案例表与 V1–V4 同案例对照。
+**Depends on**: Phase 8
+**Requirements**: EVAL-01, EVAL-03, EVAL-05, EVID-03
+**Gap Closure**: Closes stale representative-case, prompt-comparison and course-source evidence gaps.
 **Success Criteria** (what must be TRUE):
   1. 3–5 个案例覆盖 live 成功、信息不足、长内容、隐私和降级/失败状态。
   2. V1–V4 使用同一脱敏案例生成或验证输出，并记录采用、拒绝和限制理由。
@@ -150,10 +150,10 @@ DebugMate V0.1 以“尽快形成完整课程作品”为目标。前三阶段�
 **UI hint**: no
 
 ### Phase 10: 最终课程提交包刷新
-**Goal**: 从 Phase 9 的当前真实证据统一生成并检查最终截图、PPTX、讲解稿、AI 配音、字幕和视频。  
-**Depends on**: Phase 9  
-**Requirements**: EVID-03, EVID-04, EVID-05  
-**Gap Closure**: Closes historical-media freshness, claim consistency, manifest drift and final QA gaps.  
+**Goal**: 从 Phase 9 的当前真实证据统一生成并检查最终截图、PPTX、讲解稿、AI 配音、字幕和视频。
+**Depends on**: Phase 9
+**Requirements**: EVID-03, EVID-04, EVID-05
+**Gap Closure**: Closes historical-media freshness, claim consistency, manifest drift and final QA gaps.
 **Success Criteria** (what must be TRUE):
   1. 最终截图来自当前 UI，课程文案准确区分 live Dify、local fallback 和固定回放。
   2. PPTX、视频、字幕、讲解稿和 manifests 全部由当前证据生成，哈希相互一致。
