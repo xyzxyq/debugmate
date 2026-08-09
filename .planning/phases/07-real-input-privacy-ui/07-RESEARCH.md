@@ -447,19 +447,13 @@ Required fresh states are idle real form, ready text+screenshot preview, per-fie
 |---|---|---|---|
 | — | None. Recommendations are derived from locked context, inspected code/tests, official docs, registry metadata and local environment probes. | — | — |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should screenshot audit extend `PreviewBundle` or be a sibling strict preview result?**
-   - What we know: current `PreviewBundle` cannot represent screenshot findings/OCR status, while approval signs `preview_hash` and redacted fields. [VERIFIED: codebase]
-   - Recommendation: extend `PreviewBundle` with a value-free `ScreenshotPreviewAudit` included in `preview_hash`; this best binds what the user reviewed. [VERIFIED: architecture analysis]
+1. **Screenshot audit placement — RESOLVED / LOCKED:** `ScreenshotPreviewAudit` is a strict, value-free field of `PreviewBundle`, and its canonical JSON is included in `preview_hash`. It is not a sibling result. This makes the HMAC-approved preview bind the screenshot `provided`/OCR status/finding counts that the user actually reviewed while excluding OCR text, boxes and paths. [VERIFIED: codebase; architecture analysis]
 
-2. **Where should the Gradio upload cache root be configured?**
-   - What we know: Gradio supports `GRADIO_TEMP_DIR`, upload files are placed in its cache, and broad cache paths can be served. [CITED: https://gradio.app/guides/file-access]
-   - Recommendation: ordinary `serve.py` owns an absolute `.debugmate-runtime/gradio-cache` before app construction, preview accepts only files resolved under that root, and launch uses the 10 MiB max. Verify exact behavior in an integration test because the root venv is currently incomplete. [VERIFIED: environment/code analysis]
+2. **Gradio upload cache boundary — RESOLVED / LOCKED:** ordinary `serve.py` sets `GRADIO_TEMP_DIR` to the absolute, server-owned `.debugmate-runtime/gradio-cache` before Gradio app construction. Every browser-supplied filepath must resolve under that exact cache root; the server rejects symlink/reparse components, arbitrary absolute paths and lexical/resolved escapes before existing real-byte PNG/JPEG, 10 MiB and 20 MP validation. Broad `allowed_paths` are prohibited. [CITED: https://gradio.app/guides/file-access; VERIFIED: environment/code analysis]
 
-3. **How much Phase 07 Edge evidence is sufficient?**
-   - What we know: UI-SPEC mandates nine fresh categories and existing Phase 4 already covers general result tabs/downloads. [VERIFIED: UI-SPEC; Phase 4 verification]
-   - Recommendation: capture the mandated Phase 07 privacy/input states only; reuse but rerun targeted existing result regressions, do not refresh final media. [VERIFIED: phase boundary]
+3. **Phase 07 Edge evidence scope — RESOLVED / LOCKED:** capture only the Phase 07 privacy/input states mandated by UI-SPEC (idle, ready, stale, OCR unavailable, replay, required responsive widths, keyboard and 200% zoom) under `evidence/ui/phase7`. Existing result regressions are rerun as tests, but Phase 04 evidence, course-final screenshots and Phase 10 media are not refreshed. [VERIFIED: UI-SPEC; Phase 4 verification; phase boundary]
 
 ## Sources
 
