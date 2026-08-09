@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -348,9 +349,9 @@ def test_published_capability_matrix_matches_independent_live_records() -> None:
             "75b2d9a8c2b555418173410592222e8d504fcc7530779ccbae652770658d0d26",
         ),
         "C06": (
-            "blocked",
+            "pass",
             "evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json",
-            "2a038c534eb9b021161ccfff636f8af631cae082b6e36178c044a12ad98f50ca",
+            "cfec6162753ce1496b2a0bf95f93ed442afda2fdb83cdaa675b2ac6be316c114",
         ),
         "C07": (
             "pass",
@@ -367,9 +368,27 @@ def test_published_capability_matrix_matches_independent_live_records() -> None:
         artifact = repository / evidence_path
         assert artifact.is_file()
         assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_hash
+        assert subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", evidence_path],
+            cwd=repository,
+            capture_output=True,
+            check=False,
+        ).returncode == 0
+        assert subprocess.run(
+            ["git", "check-ignore", "--quiet", "--", evidence_path],
+            cwd=repository,
+            check=False,
+        ).returncode != 0
 
-    for doc_path in ("README.md", "platform/dify/README.md", ".planning/STATE.md"):
+    for doc_path in (
+        "README.md",
+        "platform/dify/README.md",
+        "evidence/dify-live/README.md",
+        ".planning/STATE.md",
+    ):
         text = (repository / doc_path).read_text(encoding="utf-8")
         assert "C03" in text and "C04" in text and "C06" in text
         assert "C03/C04" in text and "`pass`" in text
-        assert "C06" in text and "`blocked`" in text
+        assert "C06" in text and "independent" in text.casefold()
+        assert "re-export" in text.casefold() or "重导出" in text
+        assert "rerun" in text.casefold() or "复跑" in text

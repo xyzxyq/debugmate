@@ -38,12 +38,12 @@
 | C03 Vision extraction | `pass` | [`vision-retrieval-evidence.json`](../../evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json) 绑定 target-free request manifest、真实 PNG 上传、Workflow run 指纹和 exact VLM extraction |
 | C04 Knowledge retrieval | `pass` | 同一能力记录另绑定 [`retriever-resource.json`](../../evidence/dify-live/2026-08-09/c03-c04/retriever-resource.json)；主证据来自 Knowledge Retrieval node execution direct output，含 chunk/source URL/locator/score |
 | C05 Structured JSON | `pass` | [`diagnosis.json`](../../evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json) 已通过严格合同校验 |
-| C06 DSL export/import | `blocked` | [`dsl-roundtrip-evidence.json`](../../evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json) 记录真实尝试：控制台可用，但本地文件上传被浏览器扩展权限阻断，页面内导入接口返回 401；没有重导出或复跑，不得标 pass |
+| C06 DSL export/import | `pass` | [`dsl-roundtrip-evidence.json`](../../evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json) 绑定 distinct source/independent app 指纹、byte-exact re-export、相同规范化结构哈希与 authoritative reconstructed-app rerun |
 | C07 TTS MP3 | `pass` | [`dify-recap.mp3`](../../evidence/dify-live/2026-08-09/tts/dify-recap.mp3) 与 [`tts-evidence.json`](../../evidence/dify-live/2026-08-09/tts/tts-evidence.json) |
 
 任何能力只有在 `evidence_path` 存在且 SHA-256 可复算时才能标记 `pass`。fixture 成功不等于 C01–C07 通过。
 
-C03/C04 的 `pass` 分别由图像请求链和 direct retrieval node log 证明，不能只从 DSL 节点或 diagnosis.evidence 推断；同理，历史上观察到 DSL 重导入成功也不能代替 C06 的可复算复跑记录。
+C03/C04 的 `pass` 分别由图像请求链和 direct retrieval node log 证明，不能只从 DSL 节点或 diagnosis.evidence 推断；C06 的 `pass` 则由 independent import、re-export、规范化结构相等和 reconstructed-app rerun 的 Git-tracked 精确哈希链证明。此次提升没有刷新课程 PPTX、视频、字幕或最终截图。
 
 ## 版本化现场证据复验
 

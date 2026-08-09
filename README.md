@@ -40,7 +40,7 @@ V0.1 不是公网部署、生产系统或自动修复工具。页面展示的命
 | Pydantic | 严格验证 `DiagnosisRecord`、结果状态和 manifest，拒绝静默类型转换与额外字段 |
 | Pillow / 本地 TTS | 从同一诊断记录确定性生成 PNG；按可用后端生成并验证 MP3 |
 | Gradio | 提供输入、隐私确认、学生诊断摘要、多模态结果、技术细节和下载入口 |
-| Dify（可选增强） | 已版本化 C01/C02 认证与上传、C03 视觉抽取、C04 direct knowledge retrieval、C05 结构化诊断和 C07 TTS 现场证据；C06 导入/重导出/复跑仍受阻 |
+| Dify（可选增强） | C01–C07 均有版本化现场证据；C06 绑定 independent app 导入、重导出、规范化结构相等与 reconstructed-app 复跑 |
 
 Git 仓库是可提交事实源。云端配置不能替代仓库中的知识源、提示词、Schema、回放样例、测试和运行证据。
 
@@ -53,7 +53,7 @@ Git 仓库是可提交事实源。云端配置不能替代仓库中的知识源�
 | [`knowledge/`](knowledge/) | 官方知识源清单、本地快照、构建与评测资产 |
 | [`fixtures/replay/`](fixtures/replay/) | allowlist 固定回放索引与脱敏证据包 |
 | [`platform/dify/`](platform/dify/) | Dify 能力矩阵和可重建平台资产 |
-| [`evidence/dify-live/`](evidence/dify-live/) | 可复算、无秘密的真实 Dify cloud-probe、视觉、检索、C06 blocker 与 TTS 证据 |
+| [`evidence/dify-live/`](evidence/dify-live/) | 可复算、无秘密的真实 Dify cloud-probe、视觉、检索、C06 independent roundtrip/rerun 与 TTS 证据 |
 | [`tests/`](tests/) | 契约、隐私、结果和 UI/Edge 自动测试 |
 | [`evidence/`](evidence/) | 经校验的本地运行与课程证据 |
 | [`.planning/`](.planning/) | 项目需求、路线图、阶段记录和当前状态 |
@@ -98,7 +98,7 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 `fixture-probe` 不需要云凭据，只验证固定输入下的探针合同与 evidence bundle 生成。它退出 0 时，C01–C07 七项云能力仍全部是 `not-tested`；这不能证明 Dify 认证、文件上传、视觉、知识检索、工作流、DSL 导入导出或云端 TTS 已通过。
 
-`cloud-probe` 仅在用户自行配置所需环境变量（例如 `DIFY_API_KEY`）后发起真实云调用。2026-08-08 bundle 仍保持其原始逐项状态；2026-08-09 的独立 live capture 另证明 C03/C04 为 `pass`，并准确记录 C06 为 `blocked`。探针退出 0 也不表示七项能力全部通过，最终状态以 capability matrix 绑定的版本化证据为准。
+`cloud-probe` 仅在用户自行配置所需环境变量（例如 `DIFY_API_KEY`）后发起真实云调用。2026-08-08 bundle 仍保持其原始逐项状态；2026-08-09 的独立 live capture 另证明 C03/C04 为 `pass`，C06 的后续 independent import、re-export、规范化结构等价和 reconstructed-app rerun 也已形成单独证据链。探针退出 0 本身不表示七项能力全部通过，最终状态以 capability matrix 绑定的版本化证据为准。
 
 两个命令输出的 JSON 都包含 `backend`、`bundle_path` 和 `status_counts`：`bundle_path` 指向可审计证据包，`status_counts` 汇总该次逐能力状态。最终结论必须以 bundle 内每项状态、证据路径和 SHA-256 为准：
 
@@ -107,7 +107,7 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 - `blocked`：凭据、账号、配额或其他前置条件阻止了真实测试。
 - `not-tested`：该项本次没有真实执行，不能从本地、fixture 或其他能力的成功推断为通过。
 
-[`scripts/run_phase1_probe.ps1`](scripts/run_phase1_probe.ps1) 是基础包装入口；本次 C03/C04/C06 使用 [`capture_dify_c03_c04_c06.ps1`](scripts/capture_dify_c03_c04_c06.ps1) 独立取证。当前 [`capability-matrix.json`](platform/dify/capability-matrix.json) 以 Git tracked 文件和实算 SHA-256 为门禁：C01/C02/C03/C04/C05/C07 为 `pass`，C06 为 `blocked`。C03 的非图像输入由 request manifest 证明 target-free，C04 只接受 direct Knowledge Retrieval node log，C06 未完成导入、重导出、结构比较和重建应用复跑。
+[`scripts/run_phase1_probe.ps1`](scripts/run_phase1_probe.ps1) 是基础包装入口；C03/C04 使用 [`capture_dify_c03_c04_c06.ps1`](scripts/capture_dify_c03_c04_c06.ps1) 独立取证。当前 [`capability-matrix.json`](platform/dify/capability-matrix.json) 以 Git tracked 文件和实算 SHA-256 为门禁，C01–C07 全部为 `pass`。C03 的非图像输入由 request manifest 证明 target-free，C04 只接受 direct Knowledge Retrieval node log；C06 指向 [`dsl-roundtrip-evidence.json`](evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json)，证明 independent app 的 import、re-export、规范化结构相等和锁定事实的 reconstructed-app rerun。
 
 ## 固定回放与真值标签
 
@@ -140,7 +140,7 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 ## 当前限制
 
-- [`platform/dify/capability-matrix.json`](platform/dify/capability-matrix.json) 中 C01/C02/C03/C04/C05/C07 为 `pass`，C06 为 `blocked`。C03/C04 分别绑定真实图像请求和 direct retrieval node log；C06 仍缺独立导入、重导出、结构比较与重建应用复跑。
+- [`platform/dify/capability-matrix.json`](platform/dify/capability-matrix.json) 中 C01–C07 全部为 `pass`。C03/C04 分别绑定真实图像请求和 direct retrieval node log；C06 绑定 independent import、re-export、规范化结构等价与 reconstructed-app rerun。此次证据提升未刷新 PPTX、视频、字幕或最终截图。
 - 当前本地规则与知识快照覆盖课程选取的 Python/AI 高频场景，不代表覆盖全部框架、版本和故障。
 - Local SAPI 中文复盘已在实体播放设备上完成人耳听验；该本地降级验证与 C07 的 Dify 现场 TTS 证据仍是两条独立链路。
 - V0.1 面向单用户 Windows 本地课程演示，不包含公网部署、多人账号、生产监控、SLA 或并发压测。
@@ -149,8 +149,8 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 ## 后续工作顺序
 
 1. 先持续保持本地课程演示、证据、README 与项目状态一致。
-2. 如课程演示确有需要，先解除 C06 的控制台导入权限阻塞，再补齐重导出、结构比较和重建应用复跑证据。
-3. 保持课程材料冻结，直到后续 Dify 实测范围和事实口径稳定。
+2. 保持 C06 independent roundtrip/rerun 证据与 capability matrix 的哈希绑定。
+3. 继续冻结课程材料，直到事实口径稳定并单独授权刷新。
 4. 最后才统一刷新 PPTX、视频、字幕和最终截图，避免反复改写交付物。
 
 本次 README/STATE 真值同步不处理或刷新 PPTX、视频、字幕、最终截图及其他课程交付物。

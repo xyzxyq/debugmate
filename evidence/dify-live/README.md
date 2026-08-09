@@ -7,9 +7,9 @@
 - `2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/`：从已验证的 live cloud-probe 原样复制；仅证明 C01、C02、C05 为 `pass`。其中 `probe-results.json` 明确保留 C03、C04、C06、C07 为 `not-tested`。
 - `2026-08-09/tts/`：通过正式 Dify `text-to-audio` live gate 生成的 MP3 及其无秘密媒体元数据；证明 C07 为 `pass`。
 - `2026-08-09/c03-c04/`：固定合成终端 PNG 经正式 `/files/upload` 与 `/workflows/run` 运行；target-free request manifest、Workflow 输出及同一控制台日志的 Knowledge Retrieval 节点 allowlist 分别证明 C03、C04 为 `pass`。
-- `2026-08-09/c06/dsl-roundtrip-evidence.json`：记录实际导入尝试。控制台可访问，但浏览器扩展不允许本地文件上传，已认证页面直接调用导入接口又返回 401；未发生独立导入、重导出与复跑，所以 C06 为 `blocked`。
+- `2026-08-09/c06/dsl-roundtrip-evidence.json`：C06 `pass` 总记录；绑定 distinct source/independent app 指纹、byte-exact `reexport.dsl.yml`、相同规范化结构 SHA-256、空 differences，以及 allowlist-only `reconstructed-output.json` 的 authoritative rerun 事实。
 
-C03 的目标原文只存在于 PNG 像素中；版本化 manifest 枚举全部非图像 Start 输入并绑定 canonical request SHA-256。C04 的主证据是 direct Knowledge Retrieval node execution output，不是最终 diagnosis.evidence。C06 仍需要独立导入、重导出、结构等价比较与重建应用复跑才能升级为 `pass`。
+C03/C04 的证据边界保持独立：C03 的目标原文只存在于 PNG 像素中；版本化 manifest 枚举全部非图像 Start 输入并绑定 canonical request SHA-256。C04 的主证据是 direct Knowledge Retrieval node execution output，不是最终 diagnosis.evidence。C06 已完成 independent import、re-export、规范化结构等价比较与 reconstructed-app rerun；只有总记录和三个内层产物全部 Git tracked、not ignored 且精确 SHA 匹配时，publication validator 才接受 `pass`。C01–C07 当前全部为 `pass`；此次证据变更未刷新课程 PPTX、视频、字幕或最终截图。
 
 ## 复验
 
