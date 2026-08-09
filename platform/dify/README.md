@@ -1,6 +1,6 @@
 # Dify Phase 1 重建与能力闸门
 
-本目录保存可重建的 Dify 配置边界。当前 `app.dsl.yml.example` 是**不可运行的结构占位文件**，不能冒充真实导出的 DSL；实际账号配置完成后，必须用平台导出的 DSL 替换并记录重导入证据。
+本目录保存可重建的 Dify 配置边界。`app.dsl.yml` 是已经版本化的真实平台导出；`app.dsl.yml.example` 只是**不可运行的结构样例**，不能冒充真实 DSL 或执行证据。真实 DSL 已保存并不自动证明 C06，仍需版本化的“重导入后复跑”记录。
 
 ## 设置顺序
 
@@ -29,15 +29,34 @@
 
 ## 七项能力
 
-- C01：Authentication/API，真实非 401/403 响应及 run/request ID。
-- C02：File upload，虚构输入上传后得到 file ID。
-- C03：Vision extraction，真实提取截图中的 `ModuleNotFoundError` 关键文本。
-- C04：Knowledge retrieval，返回至少一个带来源元数据的 chunk。
-- C05：Structured JSON，响应通过 `DiagnosisRecord` 严格验证。
-- C06：DSL export/import，真实导出并成功重导入，且有本地证据文件。
-- C07：TTS MP3，保存的字节通过 MP3 文件头与后续 FFprobe 验证。
+当前逐项状态以 [`capability-matrix.json`](capability-matrix.json) 为唯一机器可读来源：
+
+| 能力 | 状态 | 版本化证据或未通过原因 |
+|---|---|---|
+| C01 Authentication/API | `pass` | [`dify-upload.json`](../../evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json) |
+| C02 File upload | `pass` | 与 C01 共享同一份真实上传响应证据 |
+| C03 Vision extraction | `not-tested` | 尚无真实截图视觉抽取的独立版本化执行证据 |
+| C04 Knowledge retrieval | `not-tested` | 尚无真实 retrieval chunk 与来源元数据的独立版本化证据 |
+| C05 Structured JSON | `pass` | [`diagnosis.json`](../../evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json) 已通过严格合同校验 |
+| C06 DSL export/import | `not-tested` | 已保存 DSL 和历史重导入观察，但尚无导出、重导入、复跑的版本化执行记录 |
+| C07 TTS MP3 | `pass` | [`dify-recap.mp3`](../../evidence/dify-live/2026-08-09/tts/dify-recap.mp3) 与 [`tts-evidence.json`](../../evidence/dify-live/2026-08-09/tts/tts-evidence.json) |
 
 任何能力只有在 `evidence_path` 存在且 SHA-256 可复算时才能标记 `pass`。fixture 成功不等于 C01–C07 通过。
+
+视觉或检索节点出现在 DSL 中、诊断输出含知识引用字段，均不能代替 C03/C04 的真实运行证据；同理，历史上观察到 DSL 重导入成功也不能代替 C06 的可复算复跑记录。
+
+## 版本化现场证据复验
+
+[`evidence/dify-live/`](../../evidence/dify-live/) 保存无秘密的现场证据。cloud bundle 原样保留 2026-08-08 探针结果；TTS 目录保存 2026-08-09 通过正式 Dify live gate 生成并经 FFprobe 检查的 MP3。
+
+```powershell
+$python = (Resolve-Path -LiteralPath '.venv\Scripts\python.exe').Path
+$env:PYTHONPATH = (Resolve-Path -LiteralPath 'src').Path
+$bundle = (Resolve-Path -LiteralPath 'evidence\dify-live\2026-08-08\cloud-probe\case_d2c4d21672c14d9bad7f7fe95ee86653').Path
+& $python -m debugmate.cli verify-bundle $bundle
+ffprobe -v error -show_entries stream=codec_name,channels -show_entries format=duration,size -of json 'evidence\dify-live\2026-08-09\tts\dify-recap.mp3'
+Get-FileHash -Algorithm SHA256 -LiteralPath 'evidence\dify-live\2026-08-09\tts\dify-recap.mp3'
+```
 
 ## 时间与成本闸门
 

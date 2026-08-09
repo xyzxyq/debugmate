@@ -40,7 +40,7 @@ V0.1 不是公网部署、生产系统或自动修复工具。页面展示的命
 | Pydantic | 严格验证 `DiagnosisRecord`、结果状态和 manifest，拒绝静默类型转换与额外字段 |
 | Pillow / 本地 TTS | 从同一诊断记录确定性生成 PNG；按可用后端生成并验证 MP3 |
 | Gradio | 提供输入、隐私确认、学生诊断摘要、多模态结果、技术细节和下载入口 |
-| Dify（可选增强） | 预留云端视觉、知识检索、工作流和 TTS 接入；当前能力矩阵尚未实测 |
+| Dify（可选增强） | 已版本化 C01/C02 认证与上传、C05 结构化诊断和 C07 TTS 现场证据；C03/C04/C06 仍未实测 |
 
 Git 仓库是可提交事实源。云端配置不能替代仓库中的知识源、提示词、Schema、回放样例、测试和运行证据。
 
@@ -53,6 +53,7 @@ Git 仓库是可提交事实源。云端配置不能替代仓库中的知识源�
 | [`knowledge/`](knowledge/) | 官方知识源清单、本地快照、构建与评测资产 |
 | [`fixtures/replay/`](fixtures/replay/) | allowlist 固定回放索引与脱敏证据包 |
 | [`platform/dify/`](platform/dify/) | Dify 能力矩阵和可重建平台资产 |
+| [`evidence/dify-live/`](evidence/dify-live/) | 可复算、无秘密的真实 Dify cloud-probe 与 TTS 证据 |
 | [`tests/`](tests/) | 契约、隐私、结果和 UI/Edge 自动测试 |
 | [`evidence/`](evidence/) | 经校验的本地运行与课程证据 |
 | [`.planning/`](.planning/) | 项目需求、路线图、阶段记录和当前状态 |
@@ -97,7 +98,7 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 `fixture-probe` 不需要云凭据，只验证固定输入下的探针合同与 evidence bundle 生成。它退出 0 时，C01–C07 七项云能力仍全部是 `not-tested`；这不能证明 Dify 认证、文件上传、视觉、知识检索、工作流、DSL 导入导出或云端 TTS 已通过。
 
-`cloud-probe` 仅在用户自行配置所需环境变量（例如 `DIFY_API_KEY`）后发起真实云调用。本仓库当前没有已成功执行该命令的声明。其退出码 0/1/2 分别表示探针完成、探针合同/传输/结果验证失败、因凭据等前置条件受阻；退出 0 也不表示七项能力全部通过，当前实现只会把有真实证据的 C01、C02、C05 标为 `pass`，其他能力仍可为 `not-tested`。
+`cloud-probe` 仅在用户自行配置所需环境变量（例如 `DIFY_API_KEY`）后发起真实云调用。仓库已保存一份通过 bundle 校验的 2026-08-08 现场运行：C01、C02、C05 为 `pass`，C03、C04、C06、C07 为 `not-tested`。其退出码 0/1/2 分别表示探针完成、探针合同/传输/结果验证失败、因凭据等前置条件受阻；退出 0 也不表示七项能力全部通过。
 
 两个命令输出的 JSON 都包含 `backend`、`bundle_path` 和 `status_counts`：`bundle_path` 指向可审计证据包，`status_counts` 汇总该次逐能力状态。最终结论必须以 bundle 内每项状态、证据路径和 SHA-256 为准：
 
@@ -106,7 +107,7 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 - `blocked`：凭据、账号、配额或其他前置条件阻止了真实测试。
 - `not-tested`：该项本次没有真实执行，不能从本地、fixture 或其他能力的成功推断为通过。
 
-[`scripts/run_phase1_probe.ps1`](scripts/run_phase1_probe.ps1) 是包装入口：它先运行 fixture 探针，仅在凭据存在时运行 cloud 探针，然后执行离线测试与 Ruff。包装脚本成功同样不能替代 bundle 内逐能力证据；当前能力矩阵仍是 C01–C07 全部 `not-tested`。
+[`scripts/run_phase1_probe.ps1`](scripts/run_phase1_probe.ps1) 是包装入口：它先运行 fixture 探针，仅在凭据存在时运行 cloud 探针，然后执行离线测试与 Ruff。包装脚本成功同样不能替代 bundle 内逐能力证据。当前 [`capability-matrix.json`](platform/dify/capability-matrix.json) 以版本化文件和实算 SHA-256 为门禁：C01、C02、C05、C07 为 `pass`，C03、C04、C06 为 `not-tested`。C07 的独立证据是 2026-08-09 由正式 Dify TTS live gate 生成并经 FFprobe 验证的 [`dify-recap.mp3`](evidence/dify-live/2026-08-09/tts/dify-recap.mp3)。
 
 ## 固定回放与真值标签
 
@@ -139,17 +140,17 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 ## 当前限制
 
-- [`platform/dify/capability-matrix.json`](platform/dify/capability-matrix.json) 中 C01–C07 七项全部仍为 `not-tested`。Dify 认证、文件上传、云端视觉、知识检索、结构化工作流、DSL 导入导出和云端 TTS 均不得写成已完成或已验收。
+- [`platform/dify/capability-matrix.json`](platform/dify/capability-matrix.json) 中 C01、C02、C05、C07 已有版本化现场证据并为 `pass`；C03、C04、C06 仍为 `not-tested`。视觉/检索节点配置、诊断字段或历史重导入观察不能替代这些能力的独立执行证据。
 - 当前本地规则与知识快照覆盖课程选取的 Python/AI 高频场景，不代表覆盖全部框架、版本和故障。
-- Local SAPI 生成的中文复盘已有“可解码、非静音”等机器证据，但仍需在实体播放设备上进行一次人耳听感检查；机器检查不能替代主观听验。
+- Local SAPI 中文复盘已在实体播放设备上完成人耳听验；该本地降级验证与 C07 的 Dify 现场 TTS 证据仍是两条独立链路。
 - V0.1 面向单用户 Windows 本地课程演示，不包含公网部署、多人账号、生产监控、SLA 或并发压测。
 - 系统提供诊断建议和验证命令，不保证修复成功，也不自动执行修复。
 
 ## 后续工作顺序
 
 1. 先持续保持本地课程演示、证据、README 与项目状态一致。
-2. 按实际演示需要实测 Dify C01–C07，并只依据真实运行证据更新能力矩阵。
-3. 安排 `physical-device` 上的 Local SAPI 中文复盘人耳听验。
-4. 最后才统一刷新 PPTX、视频、字幕和最终截图，避免在 UI 与事实口径仍变化时反复改写交付物。
+2. 如课程演示确有需要，为 C03、C04、C06 补充各自独立、版本化且可复算的真实执行证据。
+3. 保持课程材料冻结，直到后续 Dify 实测范围和事实口径稳定。
+4. 最后才统一刷新 PPTX、视频、字幕和最终截图，避免反复改写交付物。
 
 本次 README/STATE 真值同步不处理或刷新 PPTX、视频、字幕、最终截图及其他课程交付物。
