@@ -11,7 +11,7 @@ from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.contracts import ArtifactIdentity
 from debugmate.results.media import probe_mp3
 from debugmate.results.recap import SafeRecapText
-from debugmate.results.tts.base import RateProfile, TtsRequestIdentity
+from debugmate.results.tts.base import AudioPayload, RateProfile, TtsRequestIdentity
 from debugmate.results.tts.dify import DifyTtsAdapter
 from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
@@ -54,8 +54,12 @@ def _identity(recap: SafeRecapText) -> TtsRequestIdentity:
     )
 
 
+def _candidate_evidence(candidate: AudioPayload) -> str:
+    return candidate.model_dump_json(exclude={"audio_bytes"})
+
+
 def _assert_live_candidate(
-    candidate, *, backend: str, request: TtsRequestIdentity, tmp_path: Path
+    candidate: AudioPayload, *, backend: str, request: TtsRequestIdentity, tmp_path: Path
 ) -> None:
     media = tmp_path / f"{backend}.mp3"
     media.write_bytes(candidate.audio_bytes)
@@ -67,9 +71,24 @@ def _assert_live_candidate(
     assert probe.codec == "mp3"
     assert probe.channels == 1
     assert probe.sha256 != "0" * 64
-    evidence = candidate.model_dump_json()
+    evidence = _candidate_evidence(candidate)
     assert _safe_recap().text not in evidence
     assert "DIFY_API_KEY" not in evidence
+
+
+def test_candidate_evidence_excludes_non_utf8_audio_bytes() -> None:
+    recap = _safe_recap()
+    evidence = _candidate_evidence(
+        AudioPayload(
+            backend="dify",
+            rate_profile=RateProfile.NORMAL,
+            request_identity=_identity(recap),
+            audio_bytes=b"\xff\xfbnon-utf8-mp3",
+        )
+    )
+
+    assert '"backend":"dify"' in evidence
+    assert "audio_bytes" not in evidence
 
 
 def _assert_value_free_rejection(adapter, recap: SafeRecapText) -> None:
