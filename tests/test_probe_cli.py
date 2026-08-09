@@ -484,6 +484,26 @@ def test_live_evidence_cli_requires_tracked_inventory(tmp_path: Path) -> None:
     assert caught.value.code == 2
 
 
+def test_live_evidence_cli_rejects_malformed_tracked_inventory(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="JSON array"):
+        live_evidence_main(
+            [
+                "validate-candidate",
+                "--repository-root",
+                str(tmp_path),
+                "--evidence-root",
+                str(evidence),
+                "--tracked-inventory",
+                str(inventory),
+            ]
+        )
+
+
 def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:
     dify_readme = Path("platform/dify/README.md").read_text(encoding="utf-8")
     root_readme = Path("README.md").read_text(encoding="utf-8")

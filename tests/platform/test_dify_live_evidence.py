@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import debugmate.dify_live_evidence as live_evidence
 from debugmate.dify_live_evidence import (
     TARGET_TEXT,
     build_request_manifest,
@@ -311,6 +312,48 @@ def test_candidate_inventory_accepts_exact_sorted_hash_bound_files(tmp_path: Pat
         evidence,
         _tracked_inventory(tmp_path, [first, second]),
     ) == {}
+
+
+def test_published_inventory_rejects_hash_mismatch(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    candidate = evidence / "candidate.json"
+    candidate.write_text("{}", encoding="utf-8")
+    inventory = _tracked_inventory(tmp_path, [candidate])
+    inventory[0]["sha256"] = "f" * 64
+
+    with pytest.raises(ValueError, match="hash mismatch"):
+        validate_published_tree(tmp_path, evidence, inventory)
+
+
+def test_candidate_inventory_rejects_absolute_and_linked_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    candidate = evidence / "candidate.json"
+    candidate.write_text("{}", encoding="utf-8")
+    digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+
+    with pytest.raises(ValueError, match="repository-relative"):
+        validate_candidate_tree(
+            tmp_path,
+            evidence,
+            [{"path": candidate.as_posix(), "sha256": digest}],
+        )
+
+    original = live_evidence._is_link_or_reparse
+    monkeypatch.setattr(
+        live_evidence,
+        "_is_link_or_reparse",
+        lambda path: path.name == candidate.name or original(path),
+    )
+    with pytest.raises(ValueError, match="links or reparse"):
+        validate_candidate_tree(
+            tmp_path,
+            evidence,
+            _tracked_inventory(tmp_path, [candidate]),
+        )
 
 
 def test_inventory_exporter_is_external_and_literal_path_safe() -> None:

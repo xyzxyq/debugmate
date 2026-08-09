@@ -17,7 +17,22 @@ $env:PYTHONPATH = (Resolve-Path -LiteralPath (Join-Path $repositoryRoot "src")).
 if ($LASTEXITCODE) {
     throw "Dify live evidence capture failed"
 }
-& $python -m debugmate.dify_live_evidence validate-candidate --repository-root $repositoryRoot --evidence-root $staging
+$inventoryPath = $staging + "-tracked-inventory.json"
+$candidatePaths = @(
+    Get-ChildItem -LiteralPath $staging -Recurse -File -Force |
+        ForEach-Object { $_.FullName }
+)
+& (Join-Path $PSScriptRoot "export-phase8-tracked-inventory.ps1") `
+    -RepositoryRoot $repositoryRoot `
+    -CandidatePath $candidatePaths `
+    -OutputPath $inventoryPath
+if ($LASTEXITCODE) {
+    throw "Dify live evidence inventory export failed"
+}
+& $python -m debugmate.dify_live_evidence validate-candidate `
+    --repository-root $repositoryRoot `
+    --evidence-root $staging `
+    --tracked-inventory $inventoryPath
 if ($LASTEXITCODE) {
     throw "Dify live evidence candidate validation failed"
 }

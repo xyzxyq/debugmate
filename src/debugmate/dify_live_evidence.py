@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -46,6 +45,11 @@ ALLOWED_NON_IMAGE_INPUTS = {
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class TrackedInventoryEntry(_StrictModel):
+    path: str = Field(min_length=1, max_length=1024)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class RetrievalHit(_StrictModel):
@@ -285,8 +289,6 @@ def validate_c03_record(record: Mapping[str, object], repository_root: Path) -> 
 def validate_c04_record(
     record: Mapping[str, object],
     repository_root: Path,
-    *,
-    publication_repository_root: Path | None = None,
 ) -> dict[str, Any]:
     parsed = C04Record.model_validate(record)
     if parsed.status != "pass":
@@ -298,10 +300,6 @@ def validate_c04_record(
     resource_path = _resolve_artifact(repository_root, parsed.retriever_resource or "")
     if sha256_file(resource_path) != expected_sha256:
         raise ValueError("C04 retriever resource hash mismatch")
-    if publication_repository_root is not None and not _git_tracked(
-        publication_repository_root, resource_path
-    ):
-        raise ValueError("C04 retriever resource must be Git tracked and not ignored")
     try:
         resource = RetrieverResource.model_validate(_load_json(resource_path))
     except Exception as error:
@@ -477,34 +475,124 @@ def _record_paths(evidence_root: Path) -> tuple[Path, Path]:
     )
 
 
-def _git_tracked(repository_root: Path, path: Path) -> bool:
-    relative = path.resolve().relative_to(repository_root.resolve()).as_posix()
-    result = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", relative],
-        cwd=repository_root,
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        return False
-    ignored = subprocess.run(
-        ["git", "check-ignore", "--quiet", "--", relative],
-        cwd=repository_root,
-        check=False,
-    )
-    return ignored.returncode != 0
+def _is_link_or_reparse(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return bool(attributes & 0x400)
 
 
-def validate_candidate_tree(repository_root: Path, evidence_root: Path) -> dict[str, str]:
+def _reject_linked_path(repository_root: Path, path: Path) -> None:
+    root = repository_root.absolute()
+    candidate = path.absolute()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as error:
+        raise ValueError("inventory path must be repository-relative") from error
+    current = root
+    if _is_link_or_reparse(current):
+        raise ValueError("repository root must not be a link or reparse point")
+    for part in relative.parts:
+        current = current / part
+        if current.exists() and _is_link_or_reparse(current):
+            raise ValueError("inventory paths must not contain links or reparse points")
+
+
+def _inventory_path(repository_root: Path, value: str) -> Path:
+    if "\\" in value:
+        raise ValueError("inventory path must use forward slashes")
+    relative = Path(value)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise ValueError("inventory path must be repository-relative without parent traversal")
+    if any(part in {"", "."} for part in relative.parts):
+        raise ValueError("inventory path must be canonical repository-relative form")
+    root = repository_root.resolve()
+    candidate = root.joinpath(*relative.parts)
+    _reject_linked_path(root, candidate)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise ValueError(f"tracked inventory contains extra or absent file: {value}") from error
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise ValueError("inventory path must be repository-relative") from error
+    if not resolved.is_file():
+        raise ValueError(f"inventory path is not a regular file: {value}")
+    if resolved.relative_to(root).as_posix() != value:
+        raise ValueError("inventory path must be canonical repository-relative form")
+    return resolved
+
+
+def _validate_tracked_inventory(
+    repository_root: Path,
+    tracked_inventory: Sequence[Mapping[str, object]],
+) -> dict[str, Path]:
+    if isinstance(tracked_inventory, (str, bytes, bytearray)):
+        raise ValueError("tracked inventory must be a JSON array")
+    parsed = [TrackedInventoryEntry.model_validate(entry) for entry in tracked_inventory]
+    paths = [entry.path for entry in parsed]
+    if len(paths) != len(set(paths)):
+        raise ValueError("tracked inventory contains duplicate paths")
+    if paths != sorted(paths):
+        raise ValueError("tracked inventory paths must be sorted")
+    validated: dict[str, Path] = {}
+    for entry in parsed:
+        path = _inventory_path(repository_root, entry.path)
+        if sha256_file(path) != entry.sha256:
+            raise ValueError(f"tracked inventory hash mismatch: {entry.path}")
+        validated[entry.path] = path
+    return validated
+
+
+def _candidate_files(repository_root: Path, evidence_root: Path) -> set[Path]:
+    files: set[Path] = set()
+    for path in evidence_root.rglob("*"):
+        _reject_linked_path(repository_root, path)
+        if path.is_file():
+            files.add(path.resolve())
+    c06_path = evidence_root / "c06" / "dsl-roundtrip-evidence.json"
+    if c06_path.is_file():
+        c06 = C06Record.model_validate(_load_json(c06_path))
+        for value in (c06.source_dsl, c06.reexport_dsl, c06.reconstructed_output):
+            if value:
+                files.add(_resolve_artifact(repository_root, value))
+    return files
+
+
+def _require_exact_inventory(
+    repository_root: Path,
+    expected_files: set[Path],
+    inventory: Mapping[str, Path],
+) -> None:
+    root = repository_root.resolve()
+    expected = {path.resolve().relative_to(root).as_posix() for path in expected_files}
+    actual = set(inventory)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
+        raise ValueError(f"tracked inventory is missing candidate files: {missing}")
+    if extra:
+        raise ValueError(f"tracked inventory contains extra files: {extra}")
+
+
+def validate_candidate_tree(
+    repository_root: Path,
+    evidence_root: Path,
+    tracked_inventory: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
     root = repository_root.resolve()
     evidence = evidence_root.resolve()
     try:
         evidence.relative_to(root)
     except ValueError as error:
         raise ValueError("evidence root must be inside repository") from error
-    for path in evidence.rglob("*"):
-        if path.is_file():
+    _reject_linked_path(root, evidence)
+    inventory = _validate_tracked_inventory(root, tracked_inventory)
+    candidate_files = _candidate_files(root, evidence)
+    _require_exact_inventory(root, candidate_files, inventory)
+    for path in candidate_files:
+        if path.is_relative_to(evidence):
             _scan_text(path)
     c03_c04_path, c06_path = _record_paths(evidence)
     result: dict[str, str] = {}
@@ -521,38 +609,21 @@ def validate_candidate_tree(repository_root: Path, evidence_root: Path) -> dict[
     return result
 
 
-def validate_published_tree(repository_root: Path, evidence_root: Path) -> dict[str, str]:
-    result = validate_candidate_tree(repository_root, evidence_root)
-    referenced: set[Path] = set(_record_paths(evidence_root))
-    combined = _load_json(evidence_root / "c03-c04" / "vision-retrieval-evidence.json")
-    c03 = C03Record.model_validate(combined["c03"])
-    c04 = C04Record.model_validate(combined["c04"])
-    validate_c04_record(
-        combined["c04"],
-        evidence_root,
-        publication_repository_root=repository_root,
-    )
-    c06 = C06Record.model_validate(
-        _load_json(evidence_root / "c06" / "dsl-roundtrip-evidence.json")
-    )
-    for value in (
-        c03.input_image,
-        c03.request_manifest,
-        c04.retriever_resource,
-    ):
-        if value:
-            referenced.add(_resolve_artifact(evidence_root, value))
-    for value in (c06.source_dsl, c06.reexport_dsl, c06.reconstructed_output):
-        if value:
-            referenced.add(_resolve_artifact(repository_root, value))
-    untracked = [path for path in referenced if not _git_tracked(repository_root, path)]
-    if untracked:
-        names = [
-            path.resolve().relative_to(repository_root.resolve()).as_posix()
-            for path in untracked
-        ]
-        raise ValueError(f"published evidence is not Git tracked/not ignored: {sorted(names)}")
-    return result
+def validate_published_tree(
+    repository_root: Path,
+    evidence_root: Path,
+    tracked_inventory: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
+    return validate_candidate_tree(repository_root, evidence_root, tracked_inventory)
+
+
+def _load_tracked_inventory(path: Path) -> list[Mapping[str, object]]:
+    if _is_link_or_reparse(path):
+        raise ValueError("tracked inventory file must not be a link or reparse point")
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+        raise ValueError("tracked inventory must be a JSON array of objects")
+    return payload
 
 
 def generate_terminal_png(path: Path) -> Path:
@@ -833,6 +904,7 @@ def _parser() -> argparse.ArgumentParser:
         child = subparsers.add_parser(command)
         child.add_argument("--repository-root", type=Path, required=True)
         child.add_argument("--evidence-root", type=Path, required=True)
+        child.add_argument("--tracked-inventory", type=Path, required=True)
     capture = subparsers.add_parser("capture")
     capture.add_argument("--output-root", type=Path, required=True)
     return parser
@@ -846,9 +918,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = capture_c03_c04(output_root)
         result.update(write_blocked_c06(output_root, "console_import_export_not_attempted"))
     elif args.command == "validate-candidate":
-        result = validate_candidate_tree(args.repository_root, args.evidence_root)
+        result = validate_candidate_tree(
+            args.repository_root,
+            args.evidence_root,
+            _load_tracked_inventory(args.tracked_inventory),
+        )
     else:
-        result = validate_published_tree(args.repository_root, args.evidence_root)
+        result = validate_published_tree(
+            args.repository_root,
+            args.evidence_root,
+            _load_tracked_inventory(args.tracked_inventory),
+        )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
 
