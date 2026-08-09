@@ -1,12 +1,12 @@
 {
   "matrix_version": "1.0.0",
   "capabilities": [
-    {"capability_id": "C01", "description": "Authentication/API", "status": "not-tested", "evidence_path": null, "sha256": null},
-    {"capability_id": "C02", "description": "File upload", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C01", "description": "Authentication/API", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json", "sha256": "608ebdbd5990f3e09f6cafd1682ff25441057768e1c59506e611531831b3cab1"},
+    {"capability_id": "C02", "description": "File upload", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json", "sha256": "608ebdbd5990f3e09f6cafd1682ff25441057768e1c59506e611531831b3cab1"},
     {"capability_id": "C03", "description": "Vision extraction", "status": "not-tested", "evidence_path": null, "sha256": null},
     {"capability_id": "C04", "description": "Knowledge retrieval", "status": "not-tested", "evidence_path": null, "sha256": null},
-    {"capability_id": "C05", "description": "Structured DiagnosisRecord JSON", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C05", "description": "Structured DiagnosisRecord JSON", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json", "sha256": "75b2d9a8c2b555418173410592222e8d504fcc7530779ccbae652770658d0d26"},
     {"capability_id": "C06", "description": "DSL export/import", "status": "not-tested", "evidence_path": null, "sha256": null},
-    {"capability_id": "C07", "description": "TTS MP3", "status": "not-tested", "evidence_path": null, "sha256": null}
+    {"capability_id": "C07", "description": "TTS MP3", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-09/tts/dify-recap.mp3", "sha256": "a7d7821743b4364e1278b650b80e3d869ce2d06621a0745a4eb5fd45bca02328"}
   ]
 }

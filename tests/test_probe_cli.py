@@ -409,9 +409,10 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
             raise AssertionError(f"unsupported capability status: {item['status']}")
 
     status_by_id = {item["capability_id"]: item["status"] for item in matrix["capabilities"]}
-    assert {capability_id for capability_id, status in status_by_id.items() if status == "pass"} == set(
-        expected_evidence
-    )
+    passing_ids = {
+        capability_id for capability_id, status in status_by_id.items() if status == "pass"
+    }
+    assert passing_ids == set(expected_evidence)
 
 
 def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:
