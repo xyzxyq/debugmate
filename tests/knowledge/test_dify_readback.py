@@ -6,9 +6,13 @@ from pathlib import Path
 import httpx
 import pytest
 
+from debugmate import cli
+from debugmate.cli import main
 from debugmate.knowledge.build import build_knowledge
 from debugmate.knowledge.models import load_registry
 from debugmate.knowledge.sync import (
+    DifyReadbackAttestation,
+    DifySyncConfig,
     KnowledgeSyncError,
     MissingDatasetKey,
     SyncConfirmationRequired,
@@ -316,3 +320,78 @@ def test_missing_inventory_page_fails_closed() -> None:
         pytest.raises(KnowledgeSyncError, match="pagination"),
     ):
         list_remote_documents(client, "dataset", {"Authorization": "Bearer key"})
+
+
+def test_cli_default_sync_never_constructs_an_http_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    build = _seventeen_source_build(tmp_path)
+
+    def poison_client(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("offline knowledge-sync must not construct HTTP")
+
+    monkeypatch.setattr(cli.httpx, "Client", poison_client)
+    assert main(["knowledge-sync", str(build.path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["executed"] is False
+    assert payload["document_count"] == 17
+    assert "dataset_id" not in payload
+    assert "document_id" not in json.dumps(payload)
+
+
+def test_cli_execute_missing_key_is_value_free_and_transport_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    build = _seventeen_source_build(tmp_path)
+    monkeypatch.delenv("DIFY_DATASET_API_KEY", raising=False)
+    monkeypatch.setenv("DIFY_DATASET_ID", "dataset-binding")
+
+    def poison_client(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("missing configuration must fail before HTTP construction")
+
+    monkeypatch.setattr(cli.httpx, "Client", poison_client)
+    assert main(["knowledge-sync", str(build.path), "--execute"]) == 1
+    assert json.loads(capsys.readouterr().out) == {"code": "dataset_key_missing", "ok": False}
+
+
+def test_attestation_output_is_strict_validated_and_atomically_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    build = _seventeen_source_build(tmp_path)
+    output = tmp_path / "nested" / "attestation.json"
+    monkeypatch.setenv("DIFY_DATASET_API_KEY", "secret-key")
+    monkeypatch.setenv("DIFY_DATASET_ID", "dataset-binding")
+    attestation = DifyReadbackAttestation(
+        knowledge_build_id=build.build_id,
+        dataset_fingerprint="a" * 64,
+        document_count=17,
+        document_fingerprints=[f"{index:064x}" for index in range(1, 18)],
+        config=DifySyncConfig(),
+        response_hashes=["f" * 64],
+    )
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(cli.httpx, "Client", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(cli, "synchronize_knowledge", lambda *_args, **_kwargs: attestation)
+    assert main(
+        [
+            "knowledge-sync",
+            str(build.path),
+            "--execute",
+            "--attestation-output",
+            str(output),
+        ]
+    ) == 0
+    written = DifyReadbackAttestation.model_validate_json(
+        output.read_text(encoding="utf-8"), strict=True
+    )
+    assert written == attestation
+    stdout = capsys.readouterr().out
+    assert "secret-key" not in stdout
+    assert "dataset-binding" not in stdout
