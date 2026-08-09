@@ -20,6 +20,7 @@ from debugmate.ui.presentation import (
     render_verified_diagnosis,
     render_view_state,
 )
+from debugmate.ui import presentation as presentation_module
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -277,3 +278,110 @@ def test_failure_details_have_only_safe_derived_values_and_exact_invalid_copy() 
         ("建议操作", "请选择其他固定案例。"),
     )
     assert "C:" not in repr(source.failure_details + replay.failure_details)
+
+
+_PRIVACY_EXPECTATIONS = {
+    "idle": ("● 等待输入", False, True, True, False),
+    "invalid": ("⚠ 还缺少主要报错", False, False, False, False),
+    "preparing": ("▶ 正在本地生成脱敏预览", False, False, False, False),
+    "ready": ("✓ 脱敏预览已就绪", True, True, True, False),
+    "stale": ("⚠ 预览已失效", False, True, False, False),
+    "error": ("✕ 本地 OCR 暂不可用", False, True, False, False),
+    "approving": ("▶ 正在确认脱敏输入", False, False, True, False),
+    "approved": ("● 等待诊断", False, False, True, False),
+}
+
+
+@pytest.mark.parametrize(
+    ("privacy_name", "expected"),
+    tuple(_PRIVACY_EXPECTATIONS.items()),
+)
+def test_privacy_result_mode_combinations_are_exhaustive_and_deduplicate_aria(
+    privacy_name: str,
+    expected: tuple[str, bool, bool, bool, bool],
+) -> None:
+    """A wrong precedence branch, action permission or repeated announcement must fail."""
+
+    privacy_type = getattr(presentation_module, "PrivacyPreviewState", None)
+    render_combined = getattr(presentation_module, "render_combined_state", None)
+    assert privacy_type is not None and callable(render_combined)
+    privacy = privacy_type(privacy_name)
+    status, confirm, preview_action, preview_visible, result_visible = expected
+
+    idle = render_combined(
+        mode=ResultMode.LIVE,
+        privacy=privacy,
+        result=_state(ResultStatus.IDLE),
+    )
+    assert idle.primary_status == status
+    assert idle.confirm_enabled is confirm
+    assert idle.preview_enabled is preview_action
+    assert idle.preview_visible is preview_visible
+    assert idle.result_visible is result_visible
+    assert idle.aria_live == status
+    assert render_combined(
+        mode=ResultMode.LIVE,
+        privacy=privacy,
+        result=_state(ResultStatus.IDLE),
+        previous_aria_live=idle.aria_live,
+    ).aria_live is None
+
+    previous = render_combined(
+        mode=ResultMode.LIVE,
+        privacy=privacy,
+        result=_state(ResultStatus.FAILED),
+    )
+    assert previous.result_visible is True
+    if privacy_name == "approved":
+        assert previous.primary_status == "✕ 诊断失败"
+        assert previous.secondary_status == "✓ 已确认脱敏输入"
+    else:
+        assert previous.primary_status == status
+        assert previous.secondary_status == "上次结果：诊断失败"
+
+    replay_result = _state(
+        ResultStatus.IDLE,
+        mode=ResultMode.REPLAY,
+        fixture_id="module-not-found",
+        fixture_name="ModuleNotFoundError：缺少虚构依赖包",
+    )
+    replay = render_combined(
+        mode=ResultMode.REPLAY,
+        privacy=privacy,
+        result=replay_result,
+    )
+    assert replay.primary_status == "↺ 离线回放 · ModuleNotFoundError：缺少虚构依赖包"
+    assert replay.secondary_status == "本地固定案例"
+    assert replay.confirm_enabled is False
+    assert replay.preview_authoritative is False
+    assert "已确认脱敏输入" not in repr(replay)
+    assert "云端" not in repr(replay)
+
+
+def test_approved_running_result_outranks_privacy_without_flattening_axes() -> None:
+    privacy_type = getattr(presentation_module, "PrivacyPreviewState", None)
+    render_combined = getattr(presentation_module, "render_combined_state", None)
+    assert privacy_type is not None and callable(render_combined)
+
+    running = render_combined(
+        mode=ResultMode.LIVE,
+        privacy=privacy_type("approved"),
+        result=_state(ResultStatus.RUNNING),
+    )
+
+    assert running.primary_status == "▶ 正在生成结果 · 验证来源"
+    assert running.secondary_status == "✓ 已确认脱敏输入"
+    assert running.inputs_enabled is False
+    assert running.preview_enabled is False
+    assert running.confirm_enabled is False
+    assert running.preview_visible is True
+    assert running.result_visible is True
+    assert running.aria_live == "▶ 正在生成结果 · 验证来源"
+
+
+def test_privacy_state_rejects_undeclared_raw_or_path_values() -> None:
+    privacy_type = getattr(presentation_module, "PrivacyPreviewState", None)
+    assert privacy_type is not None
+    assert {item.value for item in privacy_type} == set(_PRIVACY_EXPECTATIONS)
+    with pytest.raises(ValueError):
+        privacy_type("raw=C:\\Users\\student")
