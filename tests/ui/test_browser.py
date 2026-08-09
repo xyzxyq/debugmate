@@ -708,7 +708,7 @@ def _capture_phase7_evidence(page, scenario: str, *, full_page: bool = True) -> 
     page.screenshot(path=str(png_path), full_page=full_page)
     if scenario == "P7-VQ-11":
         with Image.open(png_path) as capture:
-            assert capture.size == (683, 384)
+            assert capture.size == (1366, 768)
     payload = _phase7_ledger_fixture(
         scenario,
         png_path.read_bytes(),
