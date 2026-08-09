@@ -1338,6 +1338,11 @@ def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
             expect(page.locator("#preview-error-text textarea")).to_have_value(
                 re.compile(r"\[REDACTED:EMAIL\]")
             )
+            expect(page.locator("#preview-code-absent")).to_have_text("未提供代码。")
+            expect(page.locator("#preview-environment-absent")).to_have_text(
+                "未提供环境信息。"
+            )
+            assert page.locator("#preview-screenshot-absent").is_hidden()
             assert page.locator("#preview-screenshot img").is_visible()
             _assert_major_regions_within_viewport(page)
             browser_surface = _phase7_browser_owned_surface(page)
@@ -1380,6 +1385,12 @@ def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
             page.locator("#environment-input textarea").fill("Python 3.13.5")
             page.locator("#local-preview").click()
             expect(page.locator("#local-approve")).to_be_enabled(timeout=60_000)
+            expect(page.locator("#preview-code textarea")).to_have_value(
+                "import fictional_pkg"
+            )
+            expect(page.locator("#preview-environment")).to_contain_text("Python")
+            assert page.locator("#preview-code-absent").is_hidden()
+            assert page.locator("#preview-environment-absent").is_hidden()
             for changed_field in ("error", "code", "environment", "screenshot"):
                 if changed_field == "screenshot":
                     page.locator("#screenshot-input button[aria-label=Clear]").click()

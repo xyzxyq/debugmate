@@ -287,6 +287,9 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "technical-details",
         "privacy-overview",
         "privacy-preview",
+        "preview-code-absent",
+        "preview-environment-absent",
+        "preview-screenshot-absent",
     } <= elem_ids
 
     for text in (
@@ -722,16 +725,24 @@ def test_ready_preview_shows_exact_compact_absent_category_rows() -> None:
 
     prepared = prepare("Traceback", None, None, None, _Request("absent-categories"))
 
-    assert prepared[3]["value"] == "未提供代码。"
-    assert prepared[3]["visible"] is True
-    assert prepared[3]["lines"] == 1
-    assert prepared[4]["value"] == "未提供环境信息。"
-    assert prepared[4]["visible"] is True
-    assert prepared[4]["height"] == 40
+    assert prepared[3]["value"] == ""
+    assert prepared[3]["visible"] is False
+    assert prepared[4]["value"] == {}
+    assert prepared[4]["visible"] is False
     assert prepared[5]["value"] is None
-    assert prepared[5]["placeholder"] == "未提供截图。"
-    assert prepared[5]["visible"] is True
-    assert prepared[5]["height"] == 40
+    assert prepared[5]["visible"] is False
+    assert all(update["visible"] is True for update in prepared[10:13])
+    config = app.get_config_file()
+    absent_rows = {
+        component["props"]["elem_id"]: component["props"]["value"]
+        for component in config["components"]
+        if component.get("props", {}).get("elem_id", "").endswith("-absent")
+    }
+    assert absent_rows == {
+        "preview-code-absent": "未提供代码。",
+        "preview-environment-absent": "未提供环境信息。",
+        "preview-screenshot-absent": "未提供截图。",
+    }
 
 
 def test_local_preview_deletes_raw_upload_after_invalidation(tmp_path: Path) -> None:

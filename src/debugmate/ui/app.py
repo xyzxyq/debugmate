@@ -165,6 +165,11 @@ WORKBENCH_CSS = "\n".join(
             "border-color: var(--border) !important; }"
         ),
         (
+            ".absent-category-row { min-height: 40px; padding: 8px 12px; "
+            "border: 1px solid var(--border); border-radius: 6px; "
+            "background: var(--surface-2) !important; }"
+        ),
+        (
             ".region h2 { margin: 0 0 16px; color: var(--text); font-size: 16px; "
             "font-weight: 700; letter-spacing: 0; }"
         ),
@@ -1638,11 +1643,23 @@ def build_app(
                             visible="hidden",
                             elem_id="preview-code",
                         )
+                        preview_code_absent = gr.Markdown(
+                            "未提供代码。",
+                            visible=False,
+                            elem_classes=["absent-category-row"],
+                            elem_id="preview-code-absent",
+                        )
                         preview_environment = gr.JSON(
                             label="脱敏后的环境信息",
                             value={},
                             visible="hidden",
                             elem_id="preview-environment",
+                        )
+                        preview_environment_absent = gr.Markdown(
+                            "未提供环境信息。",
+                            visible=False,
+                            elem_classes=["absent-category-row"],
+                            elem_id="preview-environment-absent",
                         )
                         preview_screenshot = gr.Image(
                             label="脱敏后的截图",
@@ -1652,6 +1669,12 @@ def build_app(
                             buttons=[],
                             visible="hidden",
                             elem_id="preview-screenshot",
+                        )
+                        preview_screenshot_absent = gr.Markdown(
+                            "未提供截图。",
+                            visible=False,
+                            elem_classes=["absent-category-row"],
+                            elem_id="preview-screenshot-absent",
                         )
                         preview_audit = gr.Textbox(
                             elem_id="preview-audit",
@@ -2015,6 +2038,9 @@ def build_app(
                     "或修复 RapidOCR 后重新生成预览。未进行云端调用。",
                     gr.update(value="ocr_unavailable", visible=True),
                     gr.update(visible=True),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
                 )
             except (OSError, TypeError, ValueError):
                 if legacy:
@@ -2030,6 +2056,9 @@ def build_app(
                     "请填写报错文本或上传终端截图，至少提供一项。",
                     gr.update(value="", visible=False),
                     gr.update(visible=True),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
+                    gr.update(visible=False),
                 )
             finally:
                 if validated_upload is not None:
@@ -2049,29 +2078,25 @@ def build_app(
                     visible=True,
                 ),
                 gr.update(
-                    value=preview.redacted.code or "未提供代码。",
-                    visible=True,
-                    lines=4 if preview.redacted.code is not None else 1,
+                    value=preview.redacted.code or "",
+                    visible=preview.redacted.code is not None,
+                    lines=4,
                 ),
                 gr.update(
-                    value=(
-                        preview.redacted.environment
-                        if preview.redacted.environment
-                        else "未提供环境信息。"
-                    ),
-                    visible=True,
-                    height=None if preview.redacted.environment else 40,
+                    value=preview.redacted.environment,
+                    visible=bool(preview.redacted.environment),
                 ),
                 gr.update(
                     value=screenshot_capability,
-                    visible=True,
-                    height=None if screenshot_capability is not None else 40,
-                    placeholder=None if screenshot_capability is not None else "未提供截图。",
+                    visible=screenshot_capability is not None,
                 ),
                 gr.update(value=prepared.audit_display, visible=True),
                 "脱敏预览已就绪，请逐项检查后再确认。",
                 gr.update(value="", visible=False),
                 gr.update(visible=True),
+                gr.update(visible=preview.redacted.code is None),
+                gr.update(visible=not preview.redacted.environment),
+                gr.update(visible=screenshot_capability is None),
             )
 
         def invalidate_live_preview(request: gr.Request) -> tuple[object, ...]:
@@ -2090,6 +2115,9 @@ def build_app(
                 "输入已修改，旧预览已失效。请重新生成脱敏预览。",
                 gr.update(value="", visible=False),
                 gr.update(visible=True),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
             )
 
         def approve_and_diagnose_stream(preview_token: str | None, request: gr.Request):
@@ -2265,6 +2293,9 @@ def build_app(
                 preview_validity,
                 ocr_technical_error,
                 privacy_workspace,
+                preview_code_absent,
+                preview_environment_absent,
+                preview_screenshot_absent,
             ],
             api_name=False,
             queue=True,
@@ -2293,6 +2324,9 @@ def build_app(
                     preview_validity,
                     ocr_technical_error,
                     privacy_workspace,
+                    preview_code_absent,
+                    preview_environment_absent,
+                    preview_screenshot_absent,
                 ],
                 api_name=False,
                 queue=True,
