@@ -56,3 +56,4 @@ if ($parent) {
     [System.IO.Directory]::CreateDirectory($parent) | Out-Null
 }
 [System.IO.File]::WriteAllText($output, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+exit 0

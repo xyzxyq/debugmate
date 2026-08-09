@@ -364,6 +364,7 @@ def test_inventory_exporter_is_external_and_literal_path_safe() -> None:
     assert "git check-ignore" in text
     assert "-LiteralPath" in text
     assert set(re.findall(r"'(?P<key>path|sha256)'", text)) == {"path", "sha256"}
+    assert text.rstrip().endswith("exit 0")
 
 
 def test_published_capability_matrix_matches_independent_live_records() -> None:
