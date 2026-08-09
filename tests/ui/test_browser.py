@@ -38,6 +38,7 @@ pytestmark = pytest.mark.browser
 
 _ROOT = Path(__file__).resolve().parents[2]
 _EVIDENCE = _ROOT / "evidence" / "ui" / "phase4"
+_PHASE7_EVIDENCE = _ROOT / "evidence" / "ui" / "phase7"
 _FAILURE_SCREENSHOT_ENV = "DEBUGMATE_UI_FAILURE_SCREENSHOT"
 _FAILURE_SCREENSHOT = _EVIDENCE / "tmp" / "GAP-01-layout-red.png"
 _UI_BASE_URL_ENV = "DEBUGMATE_UI_BASE_URL"
@@ -78,6 +79,55 @@ _LOCAL_LIVE_LEDGER_KEYS = {
     "body_horizontal_overflow",
     "server_owner",
     "verified_at_utc",
+}
+_PHASE7_LEDGER_KEYS = {
+    "viewport",
+    "state",
+    "mode",
+    "ocr_backend",
+    "ocr_status",
+    "body_horizontal_overflow",
+    "screenshot_sha256",
+    "verified_at_utc",
+}
+_PHASE7_STABLE_SELECTORS = {
+    "error": "#error-input",
+    "screenshot": "#screenshot-input",
+    "code": "#code-input",
+    "environment": "#environment-input",
+    "preview_error": "#preview-error-text",
+    "preview_code": "#preview-code",
+    "preview_environment": "#preview-environment",
+    "preview_screenshot": "#preview-screenshot",
+    "preview_audit": "#preview-audit",
+    "preview_validity": "#preview-validity",
+    "ocr_error": "#ocr-technical-error",
+    "preview_action": "#local-preview",
+    "approve_action": "#local-approve",
+    "replay_action": "#replay-action",
+}
+_PHASE7_SCENARIOS = {
+    "P7-VQ-01": {"viewport": (1366, 768), "state": "idle", "mode": "live"},
+    "P7-VQ-02": {"viewport": (1366, 768), "state": "ready", "mode": "live"},
+    "P7-VQ-03": {"viewport": (1366, 768), "state": "stale", "mode": "live"},
+    "P7-VQ-04": {
+        "viewport": (1366, 768),
+        "state": "ocr_unavailable",
+        "mode": "live",
+    },
+    "P7-VQ-07": {"viewport": (1366, 768), "state": "replay", "mode": "replay"},
+    "P7-VQ-08-1024": {
+        "viewport": (1024, 768),
+        "state": "responsive",
+        "mode": "live",
+    },
+    "P7-VQ-08-768": {
+        "viewport": (768, 1024),
+        "state": "responsive",
+        "mode": "live",
+    },
+    "P7-VQ-10": {"viewport": (1366, 768), "state": "keyboard", "mode": "live"},
+    "P7-VQ-11": {"viewport": (1366, 768), "state": "zoom_200", "mode": "live"},
 }
 
 
@@ -507,6 +557,335 @@ def browser_base_url() -> Iterator[str]:
         yield _wait_for_config(f"http://127.0.0.1:{port}", process)
     finally:
         _stop_loopback_server(process, port)
+
+
+def _validate_phase7_evidence_row(
+    payload: dict[str, object], *, screenshot_bytes: bytes | None = None
+) -> None:
+    """Validate the value-free Phase 07 engineering evidence contract."""
+
+    assert set(payload) == _PHASE7_LEDGER_KEYS
+    viewport = payload["viewport"]
+    assert isinstance(viewport, dict) and set(viewport) == {"width", "height"}
+    assert all(
+        isinstance(viewport[key], int)
+        and not isinstance(viewport[key], bool)
+        and viewport[key] > 0
+        for key in ("width", "height")
+    )
+    assert payload["state"] in {
+        "idle",
+        "ready",
+        "stale",
+        "ocr_unavailable",
+        "replay",
+        "responsive",
+        "keyboard",
+        "zoom_200",
+    }
+    assert payload["mode"] in {"live", "replay"}
+    assert payload["ocr_backend"] in {"rapidocr", "not_applicable", "unavailable"}
+    assert payload["ocr_status"] in {"completed", "not_applicable", "unavailable"}
+    assert isinstance(payload["body_horizontal_overflow"], bool)
+    assert isinstance(payload["screenshot_sha256"], str)
+    assert re.fullmatch(r"[0-9a-f]{64}", payload["screenshot_sha256"])
+    if screenshot_bytes is not None:
+        assert payload["screenshot_sha256"] == hashlib.sha256(screenshot_bytes).hexdigest()
+    verified_at = payload["verified_at_utc"]
+    assert isinstance(verified_at, str) and verified_at.endswith("Z")
+    parsed = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+    assert parsed.tzinfo is UTC
+
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert not re.search(
+        r"(?:Traceback|\[REDACTED:|[A-Za-z]:\\|/Users/|/home/|"
+        r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|gh[pousr]_[A-Za-z0-9]+)",
+        serialized,
+    )
+
+
+def _phase7_ledger_fixture(scenario: str, screenshot: bytes = b"phase7-png") -> dict[str, object]:
+    contract = _PHASE7_SCENARIOS[scenario]
+    width, height = contract["viewport"]
+    state = str(contract["state"])
+    ocr_backend = "rapidocr" if state in {"ready", "stale"} else "not_applicable"
+    ocr_status = "completed" if ocr_backend == "rapidocr" else "not_applicable"
+    if state == "ocr_unavailable":
+        ocr_backend, ocr_status = "unavailable", "unavailable"
+    return {
+        "viewport": {"width": width, "height": height},
+        "state": state,
+        "mode": contract["mode"],
+        "ocr_backend": ocr_backend,
+        "ocr_status": ocr_status,
+        "body_horizontal_overflow": False,
+        "screenshot_sha256": hashlib.sha256(screenshot).hexdigest(),
+        "verified_at_utc": "2026-08-09T08:30:00Z",
+    }
+
+
+def _phase7_open_page(browser, browser_base_url: str, viewport: tuple[int, int]):
+    width, height = viewport
+    context = browser.new_context(viewport={"width": width, "height": height})
+    page = context.new_page()
+    page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
+    page.locator(".gradio-container").wait_for(timeout=30_000)
+    return context, page
+
+
+def _phase7_assert_stable_selectors(page) -> None:
+    for selector in _PHASE7_STABLE_SELECTORS.values():
+        assert page.locator(selector).count() == 1, selector
+
+
+def test_phase7_evidence_namespace_and_scenario_registry_are_isolated() -> None:
+    assert _PHASE7_EVIDENCE == _ROOT / "evidence" / "ui" / "phase7"
+    assert _PHASE7_EVIDENCE != _EVIDENCE
+    assert not _PHASE7_EVIDENCE.is_relative_to(_ROOT / "evidence" / "course-v0.1")
+    assert set(_PHASE7_SCENARIOS) == {
+        "P7-VQ-01",
+        "P7-VQ-02",
+        "P7-VQ-03",
+        "P7-VQ-04",
+        "P7-VQ-07",
+        "P7-VQ-08-1024",
+        "P7-VQ-08-768",
+        "P7-VQ-10",
+        "P7-VQ-11",
+    }
+
+
+def test_phase7_evidence_ledger_uses_exact_value_free_allowlist() -> None:
+    screenshot = b"synthetic-phase7-screenshot"
+    for scenario in _PHASE7_SCENARIOS:
+        _validate_phase7_evidence_row(
+            _phase7_ledger_fixture(scenario, screenshot),
+            screenshot_bytes=screenshot,
+        )
+
+
+@pytest.mark.parametrize("forbidden", ["token", "path", "raw_text", "ocr_text", "secret"])
+def test_phase7_evidence_ledger_rejects_sensitive_or_authority_fields(
+    forbidden: str,
+) -> None:
+    payload = _phase7_ledger_fixture("P7-VQ-01")
+    payload[forbidden] = "must-not-enter-ledger"
+    with pytest.raises(AssertionError):
+        _validate_phase7_evidence_row(payload)
+
+
+def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            _phase7_assert_stable_selectors(page)
+            for selector in ("#error-input", "#screenshot-input", "#local-preview"):
+                assert page.locator(selector).is_visible()
+            assert page.locator("#local-approve").is_disabled()
+            expect(page.locator("#privacy-overview")).to_contain_text("先生成脱敏预览")
+            assert _body_overflow(page) is False
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
+    browser_base_url: str, tmp_path: Path
+) -> None:
+    screenshot = tmp_path / "terminal.png"
+    Image.new("RGB", (320, 120), "white").save(screenshot)
+    sentinel = "student@example.com"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            page.locator("#error-input textarea").fill(f"mail={sentinel}")
+            page.locator("#screenshot-input input[type=file]").set_input_files(str(screenshot))
+            page.locator("#local-preview").click()
+            expect(page.locator("#preview-validity")).to_contain_text(
+                "脱敏预览已就绪", timeout=60_000
+            )
+            expect(page.locator("#local-approve")).to_be_enabled()
+            expect(page.locator("#preview-error-text")).to_contain_text("[REDACTED:EMAIL]")
+            assert page.locator("#preview-screenshot img").is_visible()
+            browser_surface = page.content() + page.locator("body").inner_text()
+            assert sentinel not in browser_surface
+            assert str(tmp_path) not in browser_surface
+            assert _body_overflow(page) is False
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize("changed_field", ["error", "screenshot", "code", "environment"])
+def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
+    browser_base_url: str, tmp_path: Path, changed_field: str
+) -> None:
+    screenshot = tmp_path / "terminal.png"
+    Image.new("RGB", (320, 120), "white").save(screenshot)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            page.locator("#error-input textarea").fill("ModuleNotFoundError: fictional_pkg")
+            page.locator("#screenshot-input input[type=file]").set_input_files(str(screenshot))
+            page.get_by_text("补充诊断信息（可选）", exact=True).click()
+            page.locator("#code-input textarea").fill("import fictional_pkg")
+            page.locator("#environment-input textarea").fill("Python 3.13.5")
+            page.locator("#local-preview").click()
+            expect(page.locator("#local-approve")).to_be_enabled(timeout=60_000)
+            if changed_field == "screenshot":
+                page.locator("#screenshot-input input[type=file]").set_input_files([])
+            else:
+                selector = {
+                    "error": "#error-input textarea",
+                    "code": "#code-input textarea",
+                    "environment": "#environment-input textarea",
+                }[changed_field]
+                page.locator(selector).fill(f"changed-{changed_field}")
+            expect(page.locator("#preview-validity")).to_contain_text(
+                "输入已修改，旧预览已失效", timeout=30_000
+            )
+            assert page.locator("#local-approve").is_disabled()
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def test_phase7_p7_vq_04_ocr_failure_selector_and_safe_copy_are_frozen(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            technical_error = page.locator("#ocr-technical-error")
+            assert technical_error.count() == 1
+            assert page.locator("#preview-screenshot").count() == 1
+            config = context.request.get(f"{browser_base_url}/config").text()
+            assert "ocr-technical-error" in config and "preview-screenshot" in config
+            assert "ocr_unavailable" in config
+            assert not re.search(r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)", config)
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            expect(page.get_by_text("演示回放（独立模式）", exact=True)).to_be_visible()
+            page.get_by_text("演示回放（独立模式）", exact=True).click()
+            expect(page.get_by_text(
+                "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。",
+                exact=True,
+            )).to_be_visible()
+            page.locator("#replay-action").click()
+            expect(page.locator("#diagnostic-status")).to_contain_text(
+                "离线回放", timeout=90_000
+            )
+            assert "云端运行成功" not in page.locator("body").inner_text()
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize("viewport", [(1024, 768), (768, 1024)])
+def test_phase7_p7_vq_08_responsive_input_preview_result_order_in_msedge(
+    browser_base_url: str, viewport: tuple[int, int]
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, viewport)
+            boxes = [
+                page.locator(selector).bounding_box()
+                for selector in (".control-rail", "#privacy-preview", ".result-workspace")
+            ]
+            assert all(box is not None for box in boxes)
+            assert boxes[0]["y"] < boxes[1]["y"] < boxes[2]["y"]
+            assert _body_overflow(page) is False
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def test_phase7_p7_vq_10_keyboard_reaches_real_input_actions_in_msedge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            assert page.locator("[tabindex]").evaluate_all(
+                "elements => elements.map(e => Number(e.tabIndex)).filter(value => value > 0)"
+            ) == []
+            for expected_id, expected_name in (
+                ("error-input", "报错文本"),
+                ("screenshot-input", "终端截图"),
+                ("local-preview", "1. 生成脱敏预览"),
+            ):
+                _tab_to(
+                    page,
+                    expected_id=expected_id,
+                    expected_name=expected_name,
+                    limit=30,
+                )
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
+
+
+def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_msedge(
+    browser_base_url: str,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        context = None
+        try:
+            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
+            cdp = context.new_cdp_session(page)
+            cdp.send(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 683,
+                    "height": 384,
+                    "screenWidth": 1366,
+                    "screenHeight": 768,
+                    "deviceScaleFactor": 2,
+                    "mobile": False,
+                },
+            )
+            page.wait_for_function("() => innerWidth === 683 && devicePixelRatio === 2")
+            for selector in ("#local-preview", "#local-approve", "#preview-validity"):
+                page.locator(selector).scroll_into_view_if_needed()
+                assert page.locator(selector).is_visible()
+            assert _body_overflow(page) is False
+        finally:
+            if context is not None:
+                context.close()
+            browser.close()
 
 
 def _capture_failure_screenshot(page) -> Path | None:
