@@ -38,6 +38,22 @@ class FailingOcr:
         raise RuntimeError(f"OCR failed for {path}")
 
 
+class EmptyOcr:
+    def recognize(self, _path: Path) -> list[OcrToken]:
+        return []
+
+
+class TwoFindingOcr:
+    def recognize(self, _path: Path) -> list[OcrToken]:
+        return [
+            OcrToken(
+                text="student@example.com teacher@example.org",
+                box=((10, 10), (180, 10), (180, 35), (10, 35)),
+                score=0.99,
+            )
+        ]
+
+
 def _input(source: Path) -> InputEnvelope:
     return InputEnvelope(
         case_id=new_case_id(),
@@ -57,6 +73,64 @@ def test_preview_binds_redacted_screenshot_hash(tmp_path: Path) -> None:
     assert relative_output.as_posix() == f"{preview.case_id}/redacted.png"
     assert preview.redacted.redacted_screenshot_sha256 == sha256_file(output)
     assert preview.preview_hash != preview.source_hash
+
+
+def test_sensitive_screenshot_audit_is_value_and_path_free(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", (200, 80), "white").save(source)
+
+    preview = build_preview(_input(source), tmp_path / "workspace", FakeOcr())
+
+    audit = preview.screenshot_audit
+    assert audit.provided is True
+    assert str(audit.ocr_status) == "completed"
+    assert audit.finding_count == 1
+    assert sum(audit.counts_by_kind.values()) == 1
+    serialized = audit.model_dump_json()
+    assert r"C:\Users\student\secret.py" not in serialized
+    assert str(tmp_path) not in serialized
+    assert all(word not in serialized.casefold() for word in ("text", "box", "path"))
+
+
+def test_zero_finding_screenshot_still_records_completed_audit(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", (200, 80), "white").save(source)
+
+    preview = build_preview(_input(source), tmp_path / "workspace", EmptyOcr())
+
+    assert preview.screenshot_audit.provided is True
+    assert str(preview.screenshot_audit.ocr_status) == "completed"
+    assert preview.screenshot_audit.finding_count == 0
+    assert preview.screenshot_audit.counts_by_kind == {}
+
+
+def test_screenshot_audit_facts_change_preview_hash_when_pixels_are_identical(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", (200, 80), "white").save(source)
+    value = _input(source)
+
+    one = build_preview(value, tmp_path / "workspace-one", FakeOcr())
+    two = build_preview(value, tmp_path / "workspace-two", TwoFindingOcr())
+
+    assert one.redacted.redacted_screenshot_sha256 == two.redacted.redacted_screenshot_sha256
+    assert one.screenshot_audit.finding_count == 1
+    assert two.screenshot_audit.finding_count == 2
+    assert one.preview_hash != two.preview_hash
+
+
+def test_text_only_preview_has_explicit_not_applicable_screenshot_audit(
+    tmp_path: Path,
+) -> None:
+    value = InputEnvelope(case_id=new_case_id(), error_text="Traceback")
+
+    preview = build_preview(value, tmp_path / "workspace", EmptyOcr())
+
+    assert preview.screenshot_audit.provided is False
+    assert str(preview.screenshot_audit.ocr_status) == "not_applicable"
+    assert preview.screenshot_audit.finding_count == 0
+    assert preview.screenshot_audit.counts_by_kind == {}
 
 
 def test_build_preview_revalidates_model_copy_bypasses(tmp_path: Path) -> None:
