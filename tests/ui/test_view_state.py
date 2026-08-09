@@ -15,12 +15,12 @@ from debugmate.results.contracts import (
     ResultViewState,
     SafeFailure,
 )
+from debugmate.ui import presentation as presentation_module
 from debugmate.ui.presentation import (
     PHASE4_STAGES,
     render_verified_diagnosis,
     render_view_state,
 )
-from debugmate.ui import presentation as presentation_module
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -338,6 +338,20 @@ def test_privacy_result_mode_combinations_are_exhaustive_and_deduplicate_aria(
     else:
         assert previous.primary_status == status
         assert previous.secondary_status == "上次结果：诊断失败"
+
+    running = render_combined(
+        mode=ResultMode.LIVE,
+        privacy=privacy,
+        result=_state(ResultStatus.RUNNING),
+    )
+    if privacy_name == "approved":
+        assert running.primary_status == "▶ 正在生成结果 · 验证来源"
+        assert running.secondary_status == "✓ 已确认脱敏输入"
+        assert running.result_visible is True
+    else:
+        assert running.primary_status == status
+        assert running.secondary_status == "本机预处理"
+        assert running.result_visible is False
 
     replay_result = _state(
         ResultStatus.IDLE,

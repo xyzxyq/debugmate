@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from debugmate.contracts import DiagnosisRecord
 from debugmate.results.contracts import ResultMode, ResultStatus, ResultViewState
@@ -87,6 +88,141 @@ _RETRY_COPY = {
 _EMPTY_BODY = (
     "提交已脱敏输入，或从固定案例中选择一个回放案例。结果会在此显示文字报告、诊断卡和语音复盘。"
 )
+
+
+class PrivacyPreviewState(StrEnum):
+    """Strict local-input authority state with no room for raw presentation data."""
+
+    IDLE = "idle"
+    INVALID = "invalid"
+    PREPARING = "preparing"
+    READY = "ready"
+    STALE = "stale"
+    ERROR = "error"
+    APPROVING = "approving"
+    APPROVED = "approved"
+
+
+@dataclass(frozen=True, slots=True)
+class CombinedViewModel:
+    """Presentation facts derived from the three independent UI truth axes."""
+
+    primary_status: str
+    secondary_status: str
+    inputs_enabled: bool
+    preview_enabled: bool
+    confirm_enabled: bool
+    preview_visible: bool
+    result_visible: bool
+    preview_authoritative: bool
+    aria_live: str | None
+
+
+_PRIVACY_PRIMARY = {
+    PrivacyPreviewState.IDLE: "● 等待输入",
+    PrivacyPreviewState.INVALID: "⚠ 还缺少主要报错",
+    PrivacyPreviewState.PREPARING: "▶ 正在本地生成脱敏预览",
+    PrivacyPreviewState.READY: "✓ 脱敏预览已就绪",
+    PrivacyPreviewState.STALE: "⚠ 预览已失效",
+    PrivacyPreviewState.ERROR: "✕ 本地 OCR 暂不可用",
+    PrivacyPreviewState.APPROVING: "▶ 正在确认脱敏输入",
+    PrivacyPreviewState.APPROVED: "● 等待诊断",
+}
+_PREVIEW_ACTION_STATES = {
+    PrivacyPreviewState.IDLE,
+    PrivacyPreviewState.READY,
+    PrivacyPreviewState.STALE,
+    PrivacyPreviewState.ERROR,
+}
+_INPUT_ENABLED_STATES = {
+    PrivacyPreviewState.IDLE,
+    PrivacyPreviewState.INVALID,
+    PrivacyPreviewState.READY,
+    PrivacyPreviewState.STALE,
+    PrivacyPreviewState.ERROR,
+}
+_PREVIEW_VISIBLE_STATES = {
+    PrivacyPreviewState.IDLE,
+    PrivacyPreviewState.READY,
+    PrivacyPreviewState.APPROVING,
+    PrivacyPreviewState.APPROVED,
+}
+_TERMINAL_RESULT_LABELS = {
+    ResultStatus.COMPLETED: "已完成",
+    ResultStatus.PARTIAL: "部分完成",
+    ResultStatus.FAILED: "诊断失败",
+}
+
+
+def render_combined_state(
+    *,
+    mode: ResultMode,
+    privacy: PrivacyPreviewState,
+    result: ResultViewState,
+    previous_aria_live: str | None = None,
+) -> CombinedViewModel:
+    """Resolve mode, privacy authority and result truth using the locked precedence."""
+
+    if not isinstance(mode, ResultMode):
+        raise TypeError("render_combined_state requires ResultMode")
+    if not isinstance(privacy, PrivacyPreviewState):
+        raise TypeError("render_combined_state requires PrivacyPreviewState")
+    if not isinstance(result, ResultViewState):
+        raise TypeError("render_combined_state requires ResultViewState")
+    if result.mode is not mode:
+        raise ValueError("mode and result mode must match")
+
+    result_view = render_view_state(result)
+    terminal = result.status in _TERMINAL_RESULT_LABELS
+
+    if mode is ResultMode.REPLAY:
+        primary = result_view.mode_badge
+        if result.status is not ResultStatus.IDLE:
+            primary = f"{primary} · {result_view.status_badge}"
+        secondary = "本地固定案例"
+        inputs_enabled = False
+        preview_enabled = False
+        confirm_enabled = False
+        preview_visible = False
+        result_visible = result.status is not ResultStatus.IDLE
+        preview_authoritative = False
+    else:
+        approved_result = privacy is PrivacyPreviewState.APPROVED and result.status in {
+            ResultStatus.RUNNING,
+            ResultStatus.COMPLETED,
+            ResultStatus.PARTIAL,
+            ResultStatus.FAILED,
+        }
+        primary = result_view.status_badge if approved_result else _PRIVACY_PRIMARY[privacy]
+        if approved_result:
+            secondary = "✓ 已确认脱敏输入"
+        elif terminal:
+            secondary = f"上次结果：{_TERMINAL_RESULT_LABELS[result.status]}"
+        else:
+            secondary = "本机预处理"
+        inputs_enabled = privacy in _INPUT_ENABLED_STATES
+        preview_enabled = privacy in _PREVIEW_ACTION_STATES
+        confirm_enabled = privacy is PrivacyPreviewState.READY
+        preview_visible = privacy in _PREVIEW_VISIBLE_STATES
+        result_visible = terminal or approved_result
+        preview_authoritative = privacy in {
+            PrivacyPreviewState.READY,
+            PrivacyPreviewState.APPROVING,
+            PrivacyPreviewState.APPROVED,
+        }
+
+    aria_live = None if primary == previous_aria_live else primary
+    return CombinedViewModel(
+        primary_status=primary,
+        secondary_status=secondary,
+        inputs_enabled=inputs_enabled,
+        preview_enabled=preview_enabled,
+        confirm_enabled=confirm_enabled,
+        preview_visible=preview_visible,
+        result_visible=result_visible,
+        preview_authoritative=preview_authoritative,
+        aria_live=aria_live,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,14 +326,14 @@ def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPr
 def _mode_badge(state: ResultViewState) -> str:
     if state.mode is ResultMode.REPLAY:
         return f"↺ 离线回放 · {state.fixture_name}"
-    return "● 实时诊断"
+    return "● 诊断我的报错（本地预处理）"
 
 
 def _result_metadata(state: ResultViewState) -> str:
     source = "" if state.identity is None else f"；来源运行：{state.identity.source_run_id}"
     if state.mode is ResultMode.REPLAY:
         return f"离线回放：{state.fixture_name}{source}"
-    return "" if not source else f"实时诊断{source}；fixture_id=null；fixture_name=null"
+    return "" if not source else f"本地诊断{source}；fixture_id=null；fixture_name=null"
 
 
 def _audio_metadata(state: ResultViewState) -> tuple[str | None, str | None]:
