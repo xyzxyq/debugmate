@@ -2,23 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-08-09T07:59:50.296Z"
+status: Ready to plan
+last_updated: "2026-08-09T20:26:55.867Z"
 progress:
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 7
   total_plans: 29
-  completed_plans: 24
-  percent: 83
+  completed_plans: 29
+  percent: 70
 ---
 
 # Project State
 
 ## Current Position
 
-DebugMate V0.1 已完成原 6 个阶段，但里程碑审计证明真实输入、Dify 统一端到端链和当前课程提交包仍有缺口。路线图现扩展为 10 个阶段，状态为 `in_progress`：6/10 phases complete，当前进入 Phase 7。
+Phase: 08
+Plan: Not started
+DebugMate V0.1 已完成 Phase 1–7。真实四字段输入、本地脱敏预览、一次性审批、生产 RapidOCR、隐私/竞态门禁与当前 Edge 证据均已通过独立验收；路线图状态为 `in_progress`：7/10 phases complete，当前进入 Phase 8。
 
-GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24 份对应 SUMMARY，即 24/24（100%）。Phase 4 的 `04-11-SUMMARY.md` 与 `04-12-SUMMARY.md` 已补齐；不得再使用旧的 22/24 或无法解释的 “26/26 plans completed” 口径。
+GSD 文件记账现已与路线图一致：现场共有 29 份阶段 PLAN 和 29 份对应 SUMMARY，即 29/29 已执行计划；阶段完成度为 7/10（70%）。
 
 当前位置：Phase 4 的 12/12 计划、代码审查修复、独立验证和实体设备 Local SAPI 中文人耳听验均已完成；5/5 路线图目标与 9/9 Phase 4 requirements 已满足，状态为 `complete`。
 
@@ -53,10 +55,9 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 
 ## Next Order
 
-1. Phase 7：接通真实文本、代码、环境与截图输入，并复用脱敏预览/审批合同。
-2. Phase 8：将已批准输入接入 Dify workflow 和现有三模态结果/ZIP 服务。
-3. Phase 9：重跑当前代表案例和 V1-V4 同案例提示词证据。
-4. Phase 10：最后统一更新 PPTX、视频、字幕和最终截图，并完成 freshness/claim/hash QA。
+1. Phase 8：将已批准输入接入 Dify workflow 和现有三模态结果/ZIP 服务。
+2. Phase 9：重跑当前代表案例和 V1-V4 同案例提示词证据。
+3. Phase 10：最后统一更新 PPTX、视频、字幕和最终截图，并完成 freshness/claim/hash QA。
 
 ## Quick Tasks Completed
 
