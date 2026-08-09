@@ -170,14 +170,61 @@ def test_c04_pass_requires_direct_node_resource_and_source_metadata(tmp_path: Pa
         "status": "pass",
         "attempted_at_utc": "2026-08-09T00:00:00Z",
         "retriever_resource": resource_path.name,
+        "retriever_resource_sha256": hashlib.sha256(resource_path.read_bytes()).hexdigest(),
         "reason_code": None,
     }
 
     assert validate_c04_record(record, tmp_path)["status"] == "pass"
     resource["source_kind"] = "diagnosis.evidence"
     resource_path.write_text(json.dumps(resource), encoding="utf-8")
+    record["retriever_resource_sha256"] = hashlib.sha256(
+        resource_path.read_bytes()
+    ).hexdigest()
     with pytest.raises(ValueError, match="direct Knowledge Retrieval"):
         validate_c04_record(record, tmp_path)
+
+
+def test_c04_rejects_structurally_valid_resource_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resource_path = tmp_path / "retriever-resource.json"
+    resource = {
+        "source_kind": "knowledge_retrieval_node_resource",
+        "workflow_run_id_sha256": "b" * 64,
+        "node_run_id_sha256": "c" * 64,
+        "hits": [
+            {
+                "chunk_id": "chunk-1",
+                "content_summary": "Original direct retrieval evidence.",
+                "source_id": "python-errors",
+                "source_title": "Python Errors and Exceptions",
+                "source_url": "https://docs.python.org/3/tutorial/errors.html",
+                "locator": "#exceptions",
+                "relevance_score": None,
+            }
+        ],
+    }
+    resource_path.write_text(json.dumps(resource), encoding="utf-8")
+    record = {
+        "capability_id": "C04",
+        "status": "pass",
+        "attempted_at_utc": "2026-08-09T00:00:00Z",
+        "retriever_resource": resource_path.name,
+        "retriever_resource_sha256": hashlib.sha256(resource_path.read_bytes()).hexdigest(),
+        "reason_code": None,
+    }
+
+    assert validate_c04_record(record, tmp_path)["status"] == "pass"
+    resource["hits"][0]["content_summary"] = "Valid structure, replaced content."
+    resource_path.write_text(json.dumps(resource), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="retriever resource hash mismatch"):
+        validate_c04_record(record, tmp_path)
+    monkeypatch.setattr("debugmate.dify_live_evidence._git_tracked", lambda *_: True)
+    with pytest.raises(ValueError, match="retriever resource hash mismatch"):
+        validate_c04_record(
+            record, tmp_path, publication_repository_root=tmp_path
+        )
 
 
 def test_candidate_tree_rejects_secret_and_personal_path(tmp_path: Path) -> None:
@@ -214,12 +261,12 @@ def test_published_capability_matrix_matches_independent_live_records() -> None:
         "C03": (
             "pass",
             "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json",
-            "8bb4211a945b1717608a7cb9eac9aa2e83ec6363de62d790ec97480fd5b75428",
+            "5be859005686b254a7432d3dba3ce93af760be3636db3f3529346bf82d5e9384",
         ),
         "C04": (
             "pass",
             "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json",
-            "8bb4211a945b1717608a7cb9eac9aa2e83ec6363de62d790ec97480fd5b75428",
+            "5be859005686b254a7432d3dba3ce93af760be3636db3f3529346bf82d5e9384",
         ),
         "C05": (
             "pass",

@@ -20,6 +20,7 @@
     "capability_id": "C04",
     "reason_code": null,
     "retriever_resource": "c03-c04/retriever-resource.json",
+    "retriever_resource_sha256": "aae5be8d982b33adf99a572d1cca0a2b7f364eb0a03d369344c5094f524f4592",
     "status": "pass"
   },
   "schema_version": "1.0.0"

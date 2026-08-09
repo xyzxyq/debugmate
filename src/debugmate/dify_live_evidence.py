@@ -85,6 +85,7 @@ class C04Record(_StrictModel):
     status: Literal["pass", "fail", "blocked", "not-tested"]
     attempted_at_utc: str
     retriever_resource: str | None = None
+    retriever_resource_sha256: str | None = None
     reason_code: str | None = None
 
 
@@ -258,13 +259,26 @@ def validate_c03_record(record: Mapping[str, object], repository_root: Path) -> 
     return parsed.model_dump(mode="json")
 
 
-def validate_c04_record(record: Mapping[str, object], repository_root: Path) -> dict[str, Any]:
+def validate_c04_record(
+    record: Mapping[str, object],
+    repository_root: Path,
+    *,
+    publication_repository_root: Path | None = None,
+) -> dict[str, Any]:
     parsed = C04Record.model_validate(record)
     if parsed.status != "pass":
         if not parsed.reason_code:
             raise ValueError("non-pass C04 record requires reason_code")
         return parsed.model_dump(mode="json")
+    expected_sha256 = parsed.retriever_resource_sha256 or ""
+    _valid_hash(expected_sha256, "retriever_resource_sha256")
     resource_path = _resolve_artifact(repository_root, parsed.retriever_resource or "")
+    if sha256_file(resource_path) != expected_sha256:
+        raise ValueError("C04 retriever resource hash mismatch")
+    if publication_repository_root is not None and not _git_tracked(
+        publication_repository_root, resource_path
+    ):
+        raise ValueError("C04 retriever resource must be Git tracked and not ignored")
     try:
         resource = RetrieverResource.model_validate(_load_json(resource_path))
     except Exception as error:
@@ -474,6 +488,11 @@ def validate_published_tree(repository_root: Path, evidence_root: Path) -> dict[
     combined = _load_json(evidence_root / "c03-c04" / "vision-retrieval-evidence.json")
     c03 = C03Record.model_validate(combined["c03"])
     c04 = C04Record.model_validate(combined["c04"])
+    validate_c04_record(
+        combined["c04"],
+        evidence_root,
+        publication_repository_root=repository_root,
+    )
     c06 = C06Record.model_validate(
         _load_json(evidence_root / "c06" / "dsl-roundtrip-evidence.json")
     )
@@ -741,6 +760,7 @@ def capture_c03_c04(output_root: Path) -> dict[str, str]:
         status=c04_status,
         attempted_at_utc=attempted,
         retriever_resource=resource_path.relative_to(output_root).as_posix() if resource else None,
+        retriever_resource_sha256=sha256_file(resource_path) if resource else None,
         reason_code=None if resource else "workflow_response_omitted_direct_retriever_resource",
     )
     combined = {
