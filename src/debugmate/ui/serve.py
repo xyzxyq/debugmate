@@ -6,6 +6,7 @@ import argparse
 import secrets
 import socket
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from debugmate.diagnosis.local_rule import LocalRuleGenerationProvider
@@ -15,6 +16,9 @@ from debugmate.knowledge.local_rule import (
     LocalRuleRetrievalProvider,
     load_local_rule_snapshot,
 )
+from debugmate.privacy.models import InputEnvelope, PreviewBundle
+from debugmate.privacy.rapidocr_backend import RapidOcrBackend
+from debugmate.privacy.text_redactor import build_preview
 from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.card import CardRenderFailure, render_card
 from debugmate.results.consistency import validate_result_candidates
@@ -34,11 +38,20 @@ from debugmate.settings import DebugMateSettings
 from debugmate.ui.app import WORKBENCH_CSS, build_app, ensure_content_endpoint
 
 
-class _NoopOcr:
-    """Text-only local workflow OCR port with no external side effects."""
+@dataclass(frozen=True, slots=True)
+class LocalAppDependencies:
+    """Explicit Phase 07 graph shared by preview and approved extraction."""
 
-    def recognize(self, _path: Path) -> list[object]:
-        return []
+    service: ResultApplicationService
+    ocr_backend: RapidOcrBackend
+    redacted_root: Path
+
+    @property
+    def preview_workspace(self) -> Path:
+        return self.redacted_root
+
+    def build_preview(self, value: InputEnvelope) -> PreviewBundle:
+        return build_preview(value, self.redacted_root, self.ocr_backend)
 
 
 def _available_loopback_port(value: str) -> int:
@@ -172,32 +185,35 @@ def _local_composer(
     return compose
 
 
-def _local_service(
+def _local_dependencies(
     *,
     runtime_root: Path | None = None,
     approval_key: bytes | None = None,
     replay_local_only: bool = False,
     qa_result_mode: str | None = None,
-) -> ResultApplicationService:
+) -> LocalAppDependencies:
     project_root = Path(__file__).resolve().parents[3]
     runtime_root = runtime_root or project_root / ".debugmate-runtime"
     runtime_root = Path(runtime_root).absolute()
-    runtime_root.mkdir(exist_ok=True)
+    runtime_root.mkdir(parents=True, exist_ok=True)
     if qa_result_mode not in {None, "tts_failed", "png_failed", "fallback"}:
         raise ValueError("invalid QA result mode")
     results_root = TrustedResultRoot.for_testing(runtime_root / "results")
+    redacted_root = (runtime_root / "redacted").absolute()
+    redacted_root.mkdir(parents=True, exist_ok=True)
+    ocr_backend = RapidOcrBackend()
     approval_key = approval_key or secrets.token_bytes(32)
     snapshot = load_local_rule_snapshot(project_root)
     workflow = DiagnosisWorkflow(
         extraction_provider=ProductionExtractionProvider(
-            redacted_root=runtime_root / "redacted", ocr_backend=_NoopOcr()
+            redacted_root=redacted_root, ocr_backend=ocr_backend
         ),
         retrieval_provider=LocalRuleRetrievalProvider(snapshot),
         generator=LocalRuleGenerationProvider(snapshot),
         approval_key=approval_key,
-        redacted_root=runtime_root / "redacted",
+        redacted_root=redacted_root,
     )
-    return ResultApplicationService(
+    service = ResultApplicationService(
         workflow=workflow,
         evidence_root=runtime_root / "evidence",
         outcome_store=DiagnosisOutcomeStore(runtime_root / "outcomes"),
@@ -211,6 +227,28 @@ def _local_service(
             qa_result_mode=qa_result_mode,
         ),
     )
+    return LocalAppDependencies(
+        service=service,
+        ocr_backend=ocr_backend,
+        redacted_root=redacted_root,
+    )
+
+
+def _local_service(
+    *,
+    runtime_root: Path | None = None,
+    approval_key: bytes | None = None,
+    replay_local_only: bool = False,
+    qa_result_mode: str | None = None,
+) -> ResultApplicationService:
+    """Compatibility façade while Phase 07 UI consumes the explicit graph."""
+
+    return _local_dependencies(
+        runtime_root=runtime_root,
+        approval_key=approval_key,
+        replay_local_only=replay_local_only,
+        qa_result_mode=qa_result_mode,
+    ).service
 
 
 def main(argv: Sequence[str] | None = None) -> int:

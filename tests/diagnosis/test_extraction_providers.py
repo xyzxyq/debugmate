@@ -133,6 +133,28 @@ def test_production_extraction_maps_all_fields_with_stable_provenance(tmp_path: 
     assert all(fact.fact_id.startswith("fact_") for fact in facts.facts)
 
 
+def test_approved_screenshot_rehashes_before_ocr_and_keeps_six_fields(
+    tmp_path: Path,
+) -> None:
+    from debugmate.diagnosis.extraction import FieldId
+    from debugmate.diagnosis.providers import ExtractionRejected, ProductionExtractionProvider
+
+    _error_text, tokens = _fixture_tokens()
+    ocr = FakeOcr(tokens)
+    approved = _approved(tmp_path)
+    provider = ProductionExtractionProvider(redacted_root=tmp_path, ocr_backend=ocr)
+
+    record = provider.extract(approved)
+
+    assert {candidate.field_id for candidate in record.candidates} == set(FieldId)
+    assert ocr.paths == [(tmp_path / "case.png").resolve()]
+
+    (tmp_path / "case.png").write_bytes(b"changed-after-approval")
+    with pytest.raises(ExtractionRejected, match="hash"):
+        provider.extract(approved)
+    assert ocr.paths == [(tmp_path / "case.png").resolve()]
+
+
 def test_optional_vlm_is_explicit_and_candidate_only(tmp_path: Path) -> None:
     from debugmate.diagnosis.extraction import (
         FactCandidate,

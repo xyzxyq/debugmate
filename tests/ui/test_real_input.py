@@ -13,6 +13,7 @@ from PIL import Image
 from debugmate.contracts import new_case_id
 from debugmate.privacy.models import InputEnvelope
 from debugmate.privacy.ocr import OcrToken
+from debugmate.privacy.rapidocr_backend import RapidOcrBackend
 from debugmate.privacy.text_redactor import build_preview, redact_input
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -269,6 +270,32 @@ def test_phase7_contract_construction_local_only(
     )
 
     assert poison_calls == []
+
+
+def test_local_dependencies_construct_one_shared_production_ocr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    constructed: list[RapidOcrBackend] = []
+
+    class TrackedRapidOcrBackend(RapidOcrBackend):
+        def __init__(self) -> None:
+            super().__init__(factory=lambda: None)
+            constructed.append(self)
+
+    monkeypatch.setattr(serve_module, "RapidOcrBackend", TrackedRapidOcrBackend)
+
+    dependencies = serve_module._local_dependencies(
+        runtime_root=tmp_path / "runtime",
+        approval_key=secrets.token_bytes(32),
+    )
+
+    provider = dependencies.service._workflow._extraction_provider
+    assert len(constructed) == 1
+    assert dependencies.ocr_backend is constructed[0]
+    assert provider._ocr_backend is dependencies.ocr_backend
+    assert provider._redacted_root == dependencies.redacted_root
+    assert dependencies.redacted_root.is_absolute()
+    assert dependencies.preview_workspace == dependencies.redacted_root
 
 
 def test_phase7_contract_orthogonal_state() -> None:
