@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: course-demo
 status: complete
-stopped_at: Quick task 260809-fob implementation complete; orchestration docs commit pending
-last_updated: "2026-08-09T03:40:00Z"
-last_activity: 2026-08-09 -- Versioned Dify C01/C02/C05/C07 evidence and synchronized truth
+stopped_at: Quick task 260809-ghz implementation and verification complete
+last_updated: "2026-08-09T04:40:00Z"
+last_activity: 2026-08-09 -- Versioned independent Dify C03/C04 evidence and an accurate C06 blocker
 progress:
   total_phases: 6
   completed_phases: 6
@@ -30,12 +30,13 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 
 - 普通 UI 合同：`tests/ui/test_app.py` — 34 passed。
 - 显式 Microsoft Edge 套件：39 passed、7 environment-gated skipped、0 failed。
-- quick verifier：5/5 must-haves verified。
+- quick verifier：6/6 must-haves verified。
 - 默认离线回归：845 passed、73 deselected、0 failed（1 个既有依赖弃用警告）。
 - Phase 4 review fixes：102 passed，Ruff passed；3 个 Warning 已全部关闭。
 - 2026-08-08 cloud bundle 已在版本化路径通过 `verify-bundle` 且零问题：C01、C02、C05 为 `pass`，C03、C04、C06、C07 为 `not-tested`。
 - C07 已于 2026-08-09 重新通过正式 Dify live TTS gate；版本化 MP3 经 FFprobe 验证为单声道 MP3，并与 `tts-evidence.json` 的 SHA-256 一致。
-- 当前可复算能力矩阵为 C01/C02/C05/C07 `pass`，C03/C04/C06 `not-tested`。历史现场观察、DSL 节点或输出字段不能把后三项升级为 `pass`；本地规则和固定回放也不能替代云端证据。
+- 2026-08-09 独立 live capture 证明 C03/C04 为 `pass`：C03 绑定 target-free request manifest、真实 PNG 上传与 exact VLM extraction；C04 绑定 console run 的 direct Knowledge Retrieval node output、chunk/source URL/locator/score。
+- 当前可复算能力矩阵为 C01/C02/C03/C04/C05/C07 `pass`，C06 `blocked`。C06 的 console UI 文件上传被扩展权限阻断，页面内导入接口返回 401；没有独立重导出与重建应用复跑，因此不得升级为 pass。
 
 ## Remaining UAT Debt
 
@@ -55,7 +56,7 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 ## Next Order
 
 1. 先维护本地课程演示、事实证据、README 与 STATE 的一致性。
-2. 如课程演示需要，再为 C03、C04、C06 补充独立、版本化且可复算的真实执行证据。
+2. 如课程演示需要，先解除 C06 导入权限阻塞，再补齐重导出、结构比较和重建应用复跑证据。
 3. 保持课程材料冻结，直到后续 Dify 实测范围和事实口径稳定。
 4. 最后才统一更新 PPTX、视频、字幕和最终截图。
 
@@ -78,3 +79,4 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 | 260808-dsl | Version the Dify workflow DSL after a successful six-node re-import check | 2026-08-08 | this commit | Verified | [app.dsl.yml](../platform/dify/app.dsl.yml) |
 | 260808-tts | Enable and live-verify the published Dify workflow text-to-speech API feature | 2026-08-09 | this commit | Verified | [app.dsl.yml](../platform/dify/app.dsl.yml) |
 | 260809-fob | Version Dify C01-C07 evidence and synchronize matrix, README, and state truth | 2026-08-09 | ad2724f | Verified | [260809-fob-dify-c01-c07-readme-pptx](./quick/260809-fob-dify-c01-c07-readme-pptx/) |
+| 260809-ghz | Version independent Dify C03/C04 evidence and preserve the accurate C06 blocker | 2026-08-09 | e3b9ed9 | Verified | [260809-ghz-dify-c03-c04-c06-dsl-readme-state-pptx](./quick/260809-ghz-dify-c03-c04-c06-dsl-readme-state-pptx/) |
