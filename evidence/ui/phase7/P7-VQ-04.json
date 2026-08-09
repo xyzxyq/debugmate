@@ -1,6 +1,6 @@
 {
   "evidence_version": 1,
-  "qa_run_id": "p7qa_aaa9032f39cd4b0ba7c09ae7688178fb",
+  "qa_run_id": "p7qa_837982416cea43588ff8bc2977d1b0ad",
   "scenario_id": "P7-VQ-04",
   "viewport": {
     "width": 1366,
@@ -15,6 +15,6 @@
   "source_run_id_sha256": null,
   "result_id_sha256": null,
   "body_horizontal_overflow": false,
-  "screenshot_sha256": "1e9429233025ba8c49be2aa49db1f1a0e1e9882456cbade17cd1d16bacabadad",
-  "verified_at_utc": "2026-08-09T16:09:18.623690Z"
+  "screenshot_sha256": "c97cfdaf97cdc299c433d4b291cec674eebe0dacf12d3fff3482f98cb55360eb",
+  "verified_at_utc": "2026-08-09T16:15:04.491657Z"
 }

@@ -5,15 +5,15 @@ $ErrorActionPreference = 'Stop'
 
 function Get-Phase7ExpectedInventory {
     return @(
-        [pscustomobject]@{ Scenario = 'P7-VQ-01'; Width = 1366; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-02'; Width = 1366; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-03'; Width = 1366; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-04'; Width = 1366; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-07'; Width = 1366; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-08-1024'; Width = 1024; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-08-768'; Width = 768; Height = 1024 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-10'; Width = 1366; Height = 768 },
-        [pscustomobject]@{ Scenario = 'P7-VQ-11'; Width = 1366; Height = 768 }
+        [pscustomobject]@{ Scenario = 'P7-VQ-01'; Width = 1366; Height = 768; PrivacyState = 'idle'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'not_applicable'; OcrStatus = 'not_applicable'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-02'; Width = 1366; Height = 768; PrivacyState = 'ready'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'rapidocr'; OcrStatus = 'completed'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-03'; Width = 1366; Height = 768; PrivacyState = 'stale'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'rapidocr'; OcrStatus = 'completed'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-04'; Width = 1366; Height = 768; PrivacyState = 'ocr_unavailable'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'unavailable'; OcrStatus = 'unavailable'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-07'; Width = 1366; Height = 768; PrivacyState = 'replay'; ResultStatus = 'completed'; Mode = 'replay'; OcrBackend = 'not_applicable'; OcrStatus = 'not_applicable'; HasIdentity = $true },
+        [pscustomobject]@{ Scenario = 'P7-VQ-08-1024'; Width = 1024; Height = 768; PrivacyState = 'responsive'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'not_applicable'; OcrStatus = 'not_applicable'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-08-768'; Width = 768; Height = 1024; PrivacyState = 'responsive'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'not_applicable'; OcrStatus = 'not_applicable'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-10'; Width = 1366; Height = 768; PrivacyState = 'keyboard'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'not_applicable'; OcrStatus = 'not_applicable'; HasIdentity = $false },
+        [pscustomobject]@{ Scenario = 'P7-VQ-11'; Width = 1366; Height = 768; PrivacyState = 'zoom_200'; ResultStatus = 'idle'; Mode = 'live'; OcrBackend = 'not_applicable'; OcrStatus = 'not_applicable'; HasIdentity = $false }
     )
 }
 
@@ -74,14 +74,33 @@ function Assert-Phase7EvidenceSet {
         if (@(Compare-Object -ReferenceObject $allowedKeys -DifferenceObject $actualKeys -CaseSensitive).Count -ne 0) {
             throw "Ledger allowlist mismatch: $($entry.Scenario)"
         }
+        $viewportKeys = @($ledger.viewport.PSObject.Properties.Name)
+        if (@(Compare-Object -ReferenceObject @('width', 'height') -DifferenceObject $viewportKeys -CaseSensitive).Count -ne 0) {
+            throw "Ledger viewport allowlist mismatch: $($entry.Scenario)"
+        }
+        foreach ($dimension in @('width', 'height')) {
+            if ($ledger.viewport.$dimension -isnot [int] -and $ledger.viewport.$dimension -isnot [long]) {
+                throw "Ledger viewport type invalid: $($entry.Scenario)/$dimension"
+            }
+        }
+        foreach ($field in @('privacy_state', 'result_status', 'mode', 'ocr_backend', 'ocr_status')) {
+            if ($ledger.$field -isnot [string]) { throw "Ledger semantic type invalid: $($entry.Scenario)/$field" }
+        }
+        if ($ledger.body_horizontal_overflow -isnot [bool]) {
+            throw "Ledger overflow type invalid: $($entry.Scenario)"
+        }
         if ($ledger.evidence_version -ne 1 -or $ledger.qa_run_id -cne $QaRunId -or
             $ledger.scenario_id -cne $entry.Scenario -or $ledger.viewport.width -ne $entry.Width -or
-            $ledger.viewport.height -ne $entry.Height -or $ledger.body_horizontal_overflow -ne $false) {
+            $ledger.viewport.height -ne $entry.Height -or
+            $ledger.privacy_state -cne $entry.PrivacyState -or
+            $ledger.result_status -cne $entry.ResultStatus -or $ledger.mode -cne $entry.Mode -or
+            $ledger.ocr_backend -cne $entry.OcrBackend -or $ledger.ocr_status -cne $entry.OcrStatus -or
+            $ledger.body_horizontal_overflow -ne $false) {
             throw "Ledger identity/viewport contract failed: $($entry.Scenario)"
         }
         foreach ($hashName in @('case_id_sha256', 'source_run_id_sha256', 'result_id_sha256')) {
             $identityHash = $ledger.$hashName
-            if ($entry.Scenario -ceq 'P7-VQ-07') {
+            if ($entry.HasIdentity) {
                 if ($identityHash -isnot [string] -or $identityHash -cnotmatch '^[0-9a-f]{64}$') {
                     throw "Ledger observed identity hash invalid: $($entry.Scenario)/$hashName"
                 }

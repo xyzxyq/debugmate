@@ -939,7 +939,22 @@ def test_p7_skip_gate_rejects_junit_skip(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "fault",
-    ["missing", "extra", "stale_run", "stale_time", "hash", "non_pair", "residue"],
+    [
+        "missing",
+        "extra",
+        "stale_run",
+        "stale_time",
+        "hash",
+        "non_pair",
+        "residue",
+        "privacy_state",
+        "result_status",
+        "mode",
+        "ocr_backend",
+        "ocr_status",
+        "viewport_extra",
+        "viewport_type",
+    ],
 )
 def test_p7_inventory_validation_fails_closed(tmp_path: Path, fault: str) -> None:
     run_id = "p7qa_" + "1" * 32
@@ -963,14 +978,37 @@ def test_p7_inventory_validation_fails_closed(tmp_path: Path, fault: str) -> Non
         (evidence / "P7-VQ-01.png").write_bytes(b"not-the-ledger-png")
     elif fault == "non_pair":
         (evidence / "P7-VQ-02.png").unlink()
-    else:
+    elif fault == "residue":
         (evidence / ".foreign.backup").write_bytes(b"residue")
+    else:
+        path = evidence / "P7-VQ-01.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if fault in {"privacy_state", "result_status", "mode", "ocr_backend", "ocr_status"}:
+            payload[fault] = "contradictory"
+        elif fault == "viewport_extra":
+            payload["viewport"]["device_scale_factor"] = 1
+        else:
+            payload["viewport"]["width"] = "1366"
+        path.write_text(json.dumps(payload), encoding="utf-8")
     command = (
         f"Assert-Phase7EvidenceSet -Directory '{str(evidence).replace("'", "''")}' "
         f"-QaRunId '{run_id}' -RunStartedAtUtc ([DateTimeOffset]'2026-08-09T10:00:00Z') "
         "-RunFinishedAtUtc ([DateTimeOffset]'2026-08-09T10:00:10Z')"
     )
     assert _run_phase7_powershell(command).returncode != 0
+
+
+def test_p7_inventory_validation_accepts_exact_semantic_contract(tmp_path: Path) -> None:
+    run_id = "p7qa_" + "1" * 32
+    evidence = tmp_path / "phase7.staging"
+    _write_phase7_set(evidence, run_id, "2026-08-09T10:00:05Z")
+    command = (
+        f"Assert-Phase7EvidenceSet -Directory '{str(evidence).replace("'", "''")}' "
+        f"-QaRunId '{run_id}' -RunStartedAtUtc ([DateTimeOffset]'2026-08-09T10:00:00Z') "
+        "-RunFinishedAtUtc ([DateTimeOffset]'2026-08-09T10:00:10Z')"
+    )
+    result = _run_phase7_powershell(command)
+    assert result.returncode == 0, result.stderr
 
 
 def test_p7_transaction_failure_restores_prior_formal_directory(tmp_path: Path) -> None:
