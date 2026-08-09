@@ -290,6 +290,13 @@ try {
     $ocrJunit = Join-Path $qaRuntime 'ocr-junit.xml'
     $browserJunit = Join-Path $qaRuntime 'browser-junit.xml'
 
+    # Complete the production OCR smoke before starting the owned Gradio process.
+    # RapidOCR model initialization is the peak-memory gate; sequencing it prevents
+    # the independently owned UI process from being reclaimed mid-browser suite.
+    & $python -m pytest -q -m ocr tests/privacy/test_rapidocr_smoke.py --junitxml $ocrJunit
+    if ($LASTEXITCODE -ne 0) { throw "Production RapidOCR smoke failed: $LASTEXITCODE" }
+    Assert-JUnitZeroIssues -Path $ocrJunit | Out-Null
+
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
     $server = Start-Process -FilePath $python -ArgumentList @(
@@ -309,9 +316,6 @@ try {
     $env:DEBUGMATE_PHASE7_QA_RUN_ID = $qaRunId
     $env:DEBUGMATE_PHASE7_STAGING_DIR = $transaction.Staging
 
-    & $python -m pytest -q -m ocr tests/privacy/test_rapidocr_smoke.py --junitxml $ocrJunit
-    if ($LASTEXITCODE -ne 0) { throw "Production RapidOCR smoke failed: $LASTEXITCODE" }
-    Assert-JUnitZeroIssues -Path $ocrJunit | Out-Null
     & $python -m pytest -q -m browser tests/ui/test_browser.py -k 'phase7 or p7_' --junitxml $browserJunit
     if ($LASTEXITCODE -ne 0) { throw "Phase 07 Microsoft Edge suite failed: $LASTEXITCODE" }
     Assert-JUnitZeroIssues -Path $browserJunit | Out-Null
