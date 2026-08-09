@@ -33,7 +33,7 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 - quick verifier：5/5 must-haves verified。
 - 默认离线回归：845 passed、73 deselected、0 failed（1 个既有依赖弃用警告）。
 - Phase 4 review fixes：102 passed，Ruff passed；3 个 Warning 已全部关闭。
-- Dify 能力矩阵：C01–C07 共 7 项全部为 `not-tested`；本地规则和固定回放不能作为云端视觉、检索、工作流或 TTS 的通过证据。
+- Dify 云端现场验证已取得真实 API、工作流、DSL 重导入与 TTS 证据；其中 C07 已于 2026-08-09 通过正式应用 `/parameters` 与 `/text-to-audio` 验证（HTTP 200、`audio/mpeg`）以及项目 live gate。版本化 `capability-matrix.json` 仍待按逐项证据统一更新；本地规则和固定回放仍不能替代云端证据。
 
 ## Remaining UAT Debt
 
@@ -53,7 +53,7 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 ## Next Order
 
 1. 先维护本地课程演示、事实证据、README 与 STATE 的一致性。
-2. 再按演示需要真实执行 Dify C01–C07；在能力矩阵仍为 `not-tested` 时不得宣称云端完成。
+2. 将已完成的 Dify C01–C07 现场实测证据整理为可复算文件，并据此统一更新能力矩阵、README 与状态口径。
 3. 保持课程材料冻结，直到 Dify 实测和事实口径稳定。
 4. 最后才统一更新 PPTX、视频、字幕和最终截图。
 
@@ -74,3 +74,4 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 | 260808-opt | Restore truthful README probe CLI commands and capability states | 2026-08-08 | 2dc5a83 | Verified | [260808-opt-readme-probe-cli](./quick/260808-opt-readme-probe-cli/) |
 | 260808-kmd | Add a versioned Dify-uploadable ModuleNotFoundError knowledge note | 2026-08-08 | this commit | Verified | [debugmate-module-not-found.md](../knowledge/notes/debugmate-module-not-found.md) |
 | 260808-dsl | Version the Dify workflow DSL after a successful six-node re-import check | 2026-08-08 | this commit | Verified | [app.dsl.yml](../platform/dify/app.dsl.yml) |
+| 260808-tts | Enable and live-verify the published Dify workflow text-to-speech API feature | 2026-08-09 | this commit | Verified | [app.dsl.yml](../platform/dify/app.dsl.yml) |
