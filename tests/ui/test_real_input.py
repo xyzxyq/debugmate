@@ -23,6 +23,7 @@ from debugmate.results.contracts import (
     ResultViewState,
     SafeFailure,
 )
+from debugmate.ui import app as app_module
 from debugmate.ui import presentation as presentation_module
 from debugmate.ui import serve as serve_module
 from debugmate.ui.app import build_app
@@ -311,6 +312,65 @@ def test_local_dependencies_construct_one_shared_production_ocr(
     assert provider._redacted_root == dependencies.redacted_root
     assert dependencies.redacted_root.is_absolute()
     assert dependencies.preview_workspace == dependencies.redacted_root
+
+
+def test_real_input_components_lock_four_fields_and_preview_surfaces() -> None:
+    app = build_app(serve_module._local_service(approval_key=secrets.token_bytes(32)))
+    config = app.get_config_file()
+    by_id = {
+        component.get("props", {}).get("elem_id"): component
+        for component in config["components"]
+        if component.get("props", {}).get("elem_id")
+    }
+
+    assert by_id["error-input"]["type"] == "textbox"
+    upload = by_id["screenshot-input"]
+    assert upload["type"] == "file"
+    assert upload["props"]["file_count"] == "single"
+    assert upload["props"]["type"] == "filepath"
+    assert upload["props"]["file_types"] == [".png", ".jpg", ".jpeg"]
+    assert by_id["code-input"]["type"] == "textbox"
+    assert by_id["environment-input"]["type"] == "textbox"
+    assert by_id["preview-screenshot"]["type"] == "image"
+
+
+def test_environment_parser_is_deterministic_and_preserves_duplicate_details() -> None:
+    parse = getattr(app_module, "_parse_environment", None)
+    assert callable(parse)
+    assert parse(
+        "Python: 3.13；OS=Windows 11\nCUDA: 12.4\nCUDA=12.5\nextra detail"
+    ) == {
+        "python": "3.13",
+        "os": "Windows 11",
+        "cuda": "12.4",
+        "detail_001": "CUDA=12.5",
+        "detail_002": "extra detail",
+    }
+
+
+def test_upload_boundary_accepts_only_regular_files_below_absolute_cache_root(
+    tmp_path: Path,
+) -> None:
+    require_upload = getattr(app_module, "_require_cached_upload", None)
+    assert callable(require_upload)
+    cache = (tmp_path / "cache").absolute()
+    cache.mkdir()
+    valid = cache / "input.png"
+    Image.new("RGB", (2, 2), "white").save(valid)
+
+    assert require_upload(str(valid), cache) == valid.resolve(strict=True)
+    with pytest.raises(ValueError):
+        require_upload(str(tmp_path / "outside.png"), cache)
+    with pytest.raises(ValueError):
+        require_upload("relative.png", cache)
+
+    link = cache / "linked.png"
+    try:
+        link.symlink_to(valid)
+    except OSError:
+        return
+    with pytest.raises(ValueError):
+        require_upload(str(link), cache)
 
 
 def test_phase7_contract_orthogonal_state() -> None:
