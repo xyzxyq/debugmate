@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import secrets
 import socket
 import threading
@@ -270,6 +271,20 @@ def test_phase7_contract_construction_local_only(
     )
 
     assert poison_calls == []
+
+
+def test_phase7_serve_source_has_no_cloud_or_edge_adapter_imports() -> None:
+    source = inspect.getsource(serve_module)
+
+    for forbidden in (
+        "results.tts.dify",
+        "results.tts.edge",
+        "DifyTtsAdapter",
+        "EdgeTtsAdapter",
+        "DebugMateSettings",
+        "httpx",
+    ):
+        assert forbidden not in source
 
 
 def test_local_dependencies_construct_one_shared_production_ocr(

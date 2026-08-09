@@ -22,7 +22,6 @@ from debugmate.privacy.text_redactor import build_preview
 from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.card import CardRenderFailure, render_card
 from debugmate.results.consistency import validate_result_candidates
-from debugmate.results.contracts import ResultMode
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.outcome_store import DiagnosisOutcomeStore
 from debugmate.results.presentation import build_presentation
@@ -31,10 +30,7 @@ from debugmate.results.recap import compose_recap
 from debugmate.results.report import render_citations, render_report
 from debugmate.results.service import ResultApplicationService
 from debugmate.results.tts.base import TtsAdapterError, TtsRequestIdentity
-from debugmate.results.tts.dify import DifyTtsAdapter
-from debugmate.results.tts.edge import EdgeTtsAdapter
 from debugmate.results.tts.sapi import SapiTtsAdapter
-from debugmate.settings import DebugMateSettings
 from debugmate.ui.app import WORKBENCH_CSS, build_app, ensure_content_endpoint
 
 
@@ -80,19 +76,12 @@ class _UnavailableTtsAdapter:
         raise TtsAdapterError()
 
 
-def _optional_tts_adapter(backend: str, factory):
-    try:
-        return factory()
-    except (OSError, TypeError, ValueError):
-        return _UnavailableTtsAdapter(backend)
-
-
 def _local_composer(
     *,
     project_root: Path,
     runtime_root: Path,
     results_root: TrustedResultRoot,
-    replay_local_only: bool = False,
+    replay_local_only: bool = True,
     qa_result_mode: str | None = None,
 ):
     """Build the real Phase 4 chain used by fixed replay demonstrations."""
@@ -118,18 +107,10 @@ def _local_composer(
                     SapiTtsAdapter(project_root=project_root),
                 )
             )
-        elif mode is ResultMode.LIVE or replay_local_only:
-            tts = TtsFallbackChain((SapiTtsAdapter(project_root=project_root),), local_only=True)
         else:
-            settings = DebugMateSettings.from_env()
             tts = TtsFallbackChain(
-                (
-                    _optional_tts_adapter("dify", lambda: DifyTtsAdapter(settings)),
-                    _optional_tts_adapter("edge_tts", lambda: EdgeTtsAdapter(timeout_seconds=5.0)),
-                    _optional_tts_adapter(
-                        "sapi", lambda: SapiTtsAdapter(project_root=project_root)
-                    ),
-                )
+                (SapiTtsAdapter(project_root=project_root),),
+                local_only=True,
             )
         presentation = build_presentation(source, context)
         if stage_callback is not None:
@@ -189,7 +170,7 @@ def _local_dependencies(
     *,
     runtime_root: Path | None = None,
     approval_key: bytes | None = None,
-    replay_local_only: bool = False,
+    replay_local_only: bool = True,
     qa_result_mode: str | None = None,
 ) -> LocalAppDependencies:
     project_root = Path(__file__).resolve().parents[3]
@@ -238,7 +219,7 @@ def _local_service(
     *,
     runtime_root: Path | None = None,
     approval_key: bytes | None = None,
-    replay_local_only: bool = False,
+    replay_local_only: bool = True,
     qa_result_mode: str | None = None,
 ) -> ResultApplicationService:
     """Compatibility façade while Phase 07 UI consumes the explicit graph."""

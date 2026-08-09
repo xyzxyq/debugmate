@@ -324,8 +324,8 @@ def test_local_live_path_never_constructs_cloud_tts_or_touches_network(
     def poisoned(*_args: object, **_kwargs: object):
         raise AssertionError("network or cloud adapter boundary touched")
 
-    monkeypatch.setattr(serve_module, "DifyTtsAdapter", poisoned)
-    monkeypatch.setattr(serve_module, "EdgeTtsAdapter", poisoned)
+    monkeypatch.setattr(serve_module, "DifyTtsAdapter", poisoned, raising=False)
+    monkeypatch.setattr(serve_module, "EdgeTtsAdapter", poisoned, raising=False)
     monkeypatch.setattr(httpx, "Client", poisoned)
     monkeypatch.setattr(socket, "create_connection", poisoned)
     project_root = Path.cwd()
