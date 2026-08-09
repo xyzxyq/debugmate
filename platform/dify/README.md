@@ -35,25 +35,26 @@
 |---|---|---|
 | C01 Authentication/API | `pass` | [`dify-upload.json`](../../evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json) |
 | C02 File upload | `pass` | 与 C01 共享同一份真实上传响应证据 |
-| C03 Vision extraction | `not-tested` | 尚无真实截图视觉抽取的独立版本化执行证据 |
-| C04 Knowledge retrieval | `not-tested` | 尚无真实 retrieval chunk 与来源元数据的独立版本化证据 |
+| C03 Vision extraction | `pass` | [`vision-retrieval-evidence.json`](../../evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json) 绑定 target-free request manifest、真实 PNG 上传、Workflow run 指纹和 exact VLM extraction |
+| C04 Knowledge retrieval | `pass` | 同一能力记录另绑定 [`retriever-resource.json`](../../evidence/dify-live/2026-08-09/c03-c04/retriever-resource.json)；主证据来自 Knowledge Retrieval node execution direct output，含 chunk/source URL/locator/score |
 | C05 Structured JSON | `pass` | [`diagnosis.json`](../../evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json) 已通过严格合同校验 |
-| C06 DSL export/import | `not-tested` | 已保存 DSL 和历史重导入观察，但尚无导出、重导入、复跑的版本化执行记录 |
+| C06 DSL export/import | `blocked` | [`dsl-roundtrip-evidence.json`](../../evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json) 记录真实尝试：控制台可用，但本地文件上传被浏览器扩展权限阻断，页面内导入接口返回 401；没有重导出或复跑，不得标 pass |
 | C07 TTS MP3 | `pass` | [`dify-recap.mp3`](../../evidence/dify-live/2026-08-09/tts/dify-recap.mp3) 与 [`tts-evidence.json`](../../evidence/dify-live/2026-08-09/tts/tts-evidence.json) |
 
 任何能力只有在 `evidence_path` 存在且 SHA-256 可复算时才能标记 `pass`。fixture 成功不等于 C01–C07 通过。
 
-视觉或检索节点出现在 DSL 中、诊断输出含知识引用字段，均不能代替 C03/C04 的真实运行证据；同理，历史上观察到 DSL 重导入成功也不能代替 C06 的可复算复跑记录。
+C03/C04 的 `pass` 分别由图像请求链和 direct retrieval node log 证明，不能只从 DSL 节点或 diagnosis.evidence 推断；同理，历史上观察到 DSL 重导入成功也不能代替 C06 的可复算复跑记录。
 
 ## 版本化现场证据复验
 
-[`evidence/dify-live/`](../../evidence/dify-live/) 保存无秘密的现场证据。cloud bundle 原样保留 2026-08-08 探针结果；TTS 目录保存 2026-08-09 通过正式 Dify live gate 生成并经 FFprobe 检查的 MP3。
+[`evidence/dify-live/`](../../evidence/dify-live/) 保存无秘密的现场证据。cloud bundle 原样保留 2026-08-08 探针结果；`c03-c04/` 保存图像请求与检索节点证据；`c06/` 保存准确 blocker；TTS 目录保存 2026-08-09 通过正式 Dify live gate 生成并经 FFprobe 检查的 MP3。
 
 ```powershell
 $python = (Resolve-Path -LiteralPath '.venv\Scripts\python.exe').Path
 $env:PYTHONPATH = (Resolve-Path -LiteralPath 'src').Path
 $bundle = (Resolve-Path -LiteralPath 'evidence\dify-live\2026-08-08\cloud-probe\case_d2c4d21672c14d9bad7f7fe95ee86653').Path
 & $python -m debugmate.cli verify-bundle $bundle
+& $python -m debugmate.dify_live_evidence validate-published --repository-root . --evidence-root 'evidence\dify-live\2026-08-09'
 ffprobe -v error -show_entries stream=codec_name,channels -show_entries format=duration,size -of json 'evidence\dify-live\2026-08-09\tts\dify-recap.mp3'
 Get-FileHash -Algorithm SHA256 -LiteralPath 'evidence\dify-live\2026-08-09\tts\dify-recap.mp3'
 ```

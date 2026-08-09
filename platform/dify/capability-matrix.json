@@ -3,10 +3,10 @@
   "capabilities": [
     {"capability_id": "C01", "description": "Authentication/API", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json", "sha256": "608ebdbd5990f3e09f6cafd1682ff25441057768e1c59506e611531831b3cab1"},
     {"capability_id": "C02", "description": "File upload", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json", "sha256": "608ebdbd5990f3e09f6cafd1682ff25441057768e1c59506e611531831b3cab1"},
-    {"capability_id": "C03", "description": "Vision extraction", "status": "not-tested", "evidence_path": null, "sha256": null},
-    {"capability_id": "C04", "description": "Knowledge retrieval", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C03", "description": "Vision extraction", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json", "sha256": "8bb4211a945b1717608a7cb9eac9aa2e83ec6363de62d790ec97480fd5b75428"},
+    {"capability_id": "C04", "description": "Knowledge retrieval", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json", "sha256": "8bb4211a945b1717608a7cb9eac9aa2e83ec6363de62d790ec97480fd5b75428"},
     {"capability_id": "C05", "description": "Structured DiagnosisRecord JSON", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-08/cloud-probe/case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json", "sha256": "75b2d9a8c2b555418173410592222e8d504fcc7530779ccbae652770658d0d26"},
-    {"capability_id": "C06", "description": "DSL export/import", "status": "not-tested", "evidence_path": null, "sha256": null},
+    {"capability_id": "C06", "description": "DSL export/import", "status": "blocked", "evidence_path": "evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json", "sha256": "2a038c534eb9b021161ccfff636f8af631cae082b6e36178c044a12ad98f50ca"},
     {"capability_id": "C07", "description": "TTS MP3", "status": "pass", "evidence_path": "evidence/dify-live/2026-08-09/tts/dify-recap.mp3", "sha256": "a7d7821743b4364e1278b650b80e3d869ce2d06621a0745a4eb5fd45bca02328"}
   ]
 }

@@ -372,16 +372,31 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
         "case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json",
         "C02": "evidence/dify-live/2026-08-08/cloud-probe/"
         "case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json",
+        "C03": "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json",
+        "C04": "evidence/dify-live/2026-08-09/c03-c04/vision-retrieval-evidence.json",
         "C05": "evidence/dify-live/2026-08-08/cloud-probe/"
         "case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json",
+        "C06": "evidence/dify-live/2026-08-09/c06/dsl-roundtrip-evidence.json",
         "C07": "evidence/dify-live/2026-08-09/tts/dify-recap.mp3",
+    }
+    expected_statuses = {
+        "C01": "pass",
+        "C02": "pass",
+        "C03": "pass",
+        "C04": "pass",
+        "C05": "pass",
+        "C06": "blocked",
+        "C07": "pass",
     }
 
     assert tuple(item["capability_id"] for item in matrix["capabilities"]) == CAPABILITY_IDS
     for item in matrix["capabilities"]:
-        if item["status"] == "pass":
+        capability_id = item["capability_id"]
+        assert item["status"] in {"pass", "not-tested", "blocked"}
+        assert item["status"] == expected_statuses[capability_id]
+        if item["status"] in {"pass", "blocked"}:
             evidence_path = item["evidence_path"]
-            assert evidence_path == expected_evidence[item["capability_id"]]
+            assert evidence_path == expected_evidence[capability_id]
             relative_path = Path(evidence_path)
             assert not relative_path.is_absolute()
             assert ".." not in relative_path.parts
@@ -402,6 +417,17 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
                 capture_output=True,
             )
             assert item["sha256"] == hashlib.sha256(resolved_path.read_bytes()).hexdigest()
+            if item["status"] == "blocked":
+                blocker_text = resolved_path.read_text(encoding="utf-8")
+                blocker = json.loads(blocker_text)
+                assert blocker["capability_id"] == capability_id
+                assert blocker["status"] == "blocked"
+                assert blocker["reason_code"]
+                assert not re.search(
+                    r"(?i)(bearer\s+|authorization\s*[:=]|api[_ -]?key\s*[:=]|"
+                    r"csrf|session[_ -]?token|cookie\s*[:=]|[A-Z]:\\Users\\)",
+                    blocker_text,
+                )
         elif item["status"] == "not-tested":
             assert item["evidence_path"] is None
             assert item["sha256"] is None
@@ -412,7 +438,7 @@ def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
     passing_ids = {
         capability_id for capability_id, status in status_by_id.items() if status == "pass"
     }
-    assert passing_ids == set(expected_evidence)
+    assert passing_ids == {"C01", "C02", "C03", "C04", "C05", "C07"}
 
 
 def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:
