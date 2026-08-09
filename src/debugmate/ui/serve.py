@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import secrets
 import socket
 from collections.abc import Sequence
@@ -240,10 +241,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.host != "127.0.0.1":
         parser.error("host must be literal 127.0.0.1")
     approval_key = secrets.token_bytes(32)
+    project_root = Path(__file__).resolve().parents[3]
+    cache_root = (project_root / ".debugmate-runtime" / "gradio-cache").absolute()
+    cache_root.mkdir(parents=True, exist_ok=True)
+    os.environ["GRADIO_TEMP_DIR"] = str(cache_root)
+    dependencies = _local_dependencies(approval_key=approval_key)
     app = build_app(
-        _local_service(approval_key=approval_key),
+        dependencies.service,
         content_origin=f"http://{args.host}:{args.port}",
         approval_key=approval_key,
+        preview_builder=dependencies.build_preview,
+        upload_root=cache_root,
+        redacted_root=dependencies.redacted_root,
     )
     app.launch(
         server_name=args.host,
@@ -253,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         quiet=True,
         show_error=False,
         prevent_thread_lock=True,
+        max_file_size="10mb",
         css=WORKBENCH_CSS,
     )
     ensure_content_endpoint(app)

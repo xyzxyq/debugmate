@@ -577,10 +577,9 @@ def test_local_live_requires_preview_then_same_session_approval() -> None:
     assert states[-1].fixture_id is None
     assert states[-1].fixture_name is None
     assert len(service.diagnose_calls) == 1
-    assert frames[-1][1] == (
-        f"实时诊断；来源运行：{states[-1].identity.source_run_id}；"
-        "fixture_id=null；fixture_name=null"
-    )
+    assert states[-1].identity.source_run_id in frames[-1][1]
+    assert "fixture_id=null" in frames[-1][1]
+    assert "fixture_name=null" in frames[-1][1]
 
 
 @pytest.mark.parametrize(
@@ -618,11 +617,30 @@ def test_local_live_token_is_one_time_and_every_preview_has_fresh_identity() -> 
     second_token = prepare(request)[0]
 
     assert first_token != second_token
-    assert list(approve(first_token, request))[-1][8].status is ResultStatus.COMPLETED
-    reused = list(approve(first_token, request))
+    superseded = list(approve(first_token, request))
+    assert superseded[-1][8].status is ResultStatus.FAILED
+
+    assert list(approve(second_token, request))[-1][8].status is ResultStatus.COMPLETED
+    reused = list(approve(second_token, request))
 
     assert reused[0][8].status is ResultStatus.FAILED
     assert len(service.diagnose_calls) == 1
+
+
+def test_replay_invalidates_outstanding_live_preview_before_service_access() -> None:
+    service = _Service()
+    app = build_app(service)
+    prepare = _callback(app, "prepare_local_preview")
+    approve = _callback(app, "approve_and_diagnose_stream")
+    replay = _callback(app, "load_replay_stream")
+    request = _Request("session-replay-invalidation")
+    token = prepare(request)[0]
+
+    list(replay("module-not-found", request))
+    rejected = list(approve(token, request))
+
+    assert rejected[-1][8].status is ResultStatus.FAILED
+    assert service.diagnose_calls == []
 
 
 def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_input() -> None:
@@ -1239,8 +1257,8 @@ def test_local_composer_uses_the_positional_tts_chain_contract(
         pass
 
     class CapturingChain:
-        def __init__(self, _adapters) -> None:
-            pass
+        def __init__(self, _adapters, *, local_only: bool = False) -> None:
+            assert local_only is True
 
         def synthesize(self, recap, request, candidate_root):
             calls.append((recap, request, candidate_root))

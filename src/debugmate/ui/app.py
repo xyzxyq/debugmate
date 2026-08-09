@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import secrets
+import stat
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import gradio as gr
@@ -12,10 +16,13 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 from starlette.datastructures import URL
 
-from debugmate.contracts import DiagnosisRecord
+from debugmate.contracts import DiagnosisRecord, new_case_id
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.hashing import sha256_bytes
 from debugmate.privacy.approval import approve_preview
+from debugmate.privacy.image_models import validate_screenshot
+from debugmate.privacy.models import InputEnvelope, PreviewBundle
+from debugmate.privacy.text_redactor import redact_input
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -514,6 +521,31 @@ class _UiContentStore:
         ):
             raise ResultServiceError("download_invalid")
         payload = download.read_bytes()
+        return self.issue_bytes(
+            payload,
+            filename=filename,
+            mime_type=mime_type,
+            attachment=attachment,
+        )
+
+    def issue_bytes(
+        self, payload: bytes, *, filename: str, mime_type: str, attachment: bool
+    ) -> UiContentUrl:
+        """Issue already-verified bytes without exposing their server path."""
+
+        if not isinstance(payload, bytes):
+            raise ResultServiceError("download_invalid")
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or "/" in filename
+            or "\\" in filename
+            or ":" in filename
+            or "\x00" in filename
+            or not isinstance(mime_type, str)
+            or not mime_type
+        ):
+            raise ResultServiceError("download_invalid")
         content = UiContent(
             payload=payload,
             filename=filename,
@@ -1288,14 +1320,108 @@ def _retry_control_updates(payload: CallbackPayload) -> tuple[object, str | None
     return gr.update(value="安全重试", visible=False, interactive=False), None, None
 
 
+_ENVIRONMENT_KEYS = {
+    "python": "python",
+    "python版本": "python",
+    "os": "os",
+    "操作系统": "os",
+    "system": "os",
+    "cuda": "cuda",
+    "pytorch": "pytorch",
+    "torch": "pytorch",
+    "gpu": "gpu",
+}
+
+
+def _parse_environment(value: object) -> dict[str, str]:
+    """Parse optional environment notes without guessing or dropping details."""
+
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    result: dict[str, str] = {}
+    detail_index = 1
+    for raw_line in value.replace("；", "\n").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        colon = line.find(":")
+        equals = line.find("=")
+        positions = [position for position in (colon, equals) if position >= 0]
+        split_at = min(positions) if positions else -1
+        if split_at > 0:
+            raw_key = line[:split_at].strip()
+            parsed_value = line[split_at + 1 :].strip()
+            normalized = _ENVIRONMENT_KEYS.get(raw_key.casefold())
+            if normalized is not None and parsed_value and normalized not in result:
+                result[normalized] = parsed_value
+                continue
+        result[f"detail_{detail_index:03d}"] = line
+        detail_index += 1
+    return result
+
+
+def _has_reparse_attribute(path: Path) -> bool:
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(attributes & reparse)
+
+
+def _require_cached_upload(value: object, cache_root: Path) -> Path:
+    """Confine one regular upload to the configured Gradio cache before reading bytes."""
+
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError("invalid screenshot upload")
+    candidate = Path(value)
+    root = Path(cache_root)
+    if not candidate.is_absolute() or not root.is_absolute():
+        raise ValueError("invalid screenshot upload")
+    if ".." in candidate.parts:
+        raise ValueError("invalid screenshot upload")
+    lexical_root = Path(os.path.abspath(root))
+    lexical_candidate = Path(os.path.abspath(candidate))
+    try:
+        if os.path.commonpath((str(lexical_root), str(lexical_candidate))) != str(
+            lexical_root
+        ):
+            raise ValueError("invalid screenshot upload")
+    except ValueError:
+        raise ValueError("invalid screenshot upload") from None
+
+    root_info = lexical_root.lstat()
+    if (
+        stat.S_ISLNK(root_info.st_mode)
+        or _has_reparse_attribute(lexical_root)
+        or not lexical_root.is_dir()
+    ):
+        raise ValueError("invalid screenshot upload")
+    root_resolved = lexical_root.resolve(strict=True)
+    relative = lexical_candidate.relative_to(lexical_root)
+    current = lexical_root
+    for part in relative.parts:
+        current = current / part
+        info = current.lstat()
+        if stat.S_ISLNK(info.st_mode) or _has_reparse_attribute(current):
+            raise ValueError("invalid screenshot upload")
+    resolved = lexical_candidate.resolve(strict=True)
+    if os.path.commonpath((str(root_resolved), str(resolved))) != str(root_resolved):
+        raise ValueError("invalid screenshot upload")
+    if not resolved.is_file():
+        raise ValueError("invalid screenshot upload")
+    validate_screenshot(resolved)
+    return resolved
+
+
 def build_app(
     service: ResultApplicationService,
     *,
     content_origin: str = _DEFAULT_CONTENT_ORIGIN,
     preview_store: LocalPreviewStore | None = None,
     approval_key: bytes | None = None,
+    preview_builder: Callable[[InputEnvelope], PreviewBundle] | None = None,
+    upload_root: Path | None = None,
+    redacted_root: Path | None = None,
 ) -> gr.Blocks:
-    """Build the compact workbench without an upload, path, or shell boundary."""
+    """Build the compact workbench with a confined local-upload boundary."""
 
     with gr.Blocks(
         title="DebugMate 学习诊断助手",
@@ -1308,6 +1434,14 @@ def build_app(
         preview_token_state = gr.State(value=None)
         local_previews = preview_store or LocalPreviewStore()
         local_approval_key = approval_key or secrets.token_bytes(32)
+        local_preview_builder = preview_builder or redact_input
+        configured_upload_root = Path(
+            upload_root
+            or os.environ.get("GRADIO_TEMP_DIR", ".debugmate-runtime/gradio-cache")
+        ).absolute()
+        configured_redacted_root = (
+            None if redacted_root is None else Path(redacted_root).absolute()
+        )
         correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
         correction_run = gr.State(value=None)
         correction_draft = gr.State(value=None)
@@ -1336,16 +1470,71 @@ def build_app(
             with gr.Column(elem_classes=["region", "control-rail"]):
                 gr.Markdown("## 开始诊断")
                 gr.Markdown("粘贴报错，获得原因、步骤与复盘材料。")
+                error_input = gr.Textbox(
+                    label="报错文本（与截图至少填写一项）",
+                    lines=6,
+                    elem_id="error-input",
+                    placeholder="粘贴终端报错、Traceback 或关键日志。",
+                )
+                screenshot_input = gr.File(
+                    label="报错截图（与文本至少填写一项）",
+                    type="filepath",
+                    file_count="single",
+                    file_types=[".png", ".jpg", ".jpeg"],
+                    elem_id="screenshot-input",
+                )
+                with gr.Accordion("可选：代码与环境", open=False):
+                    code_input = gr.Textbox(
+                        label="相关代码（可选）",
+                        lines=6,
+                        elem_id="code-input",
+                    )
+                    environment_input = gr.Textbox(
+                        label="环境信息（可选）",
+                        lines=4,
+                        elem_id="environment-input",
+                        placeholder="例如：Python: 3.13；OS=Windows 11",
+                    )
                 redacted_input = gr.Textbox(
                     label="脱敏后的输入",
                     interactive=False,
                     lines=5,
+                    elem_id="preview-error-text",
                     placeholder="已审批的脱敏输入将在此显示。",
                 )
+                preview_code = gr.Textbox(
+                    label="脱敏后的代码",
+                    interactive=False,
+                    lines=4,
+                    elem_id="preview-code",
+                )
+                preview_environment = gr.JSON(
+                    label="脱敏后的环境信息",
+                    value={},
+                    elem_id="preview-environment",
+                )
+                preview_screenshot = gr.Image(
+                    label="脱敏后的截图",
+                    interactive=False,
+                    type="filepath",
+                    sources=None,
+                    buttons=[],
+                    elem_id="preview-screenshot",
+                )
                 preview_audit = gr.Textbox(
+                    elem_id="preview-audit",
                     label="脱敏审计摘要",
                     interactive=False,
                     value="请先生成本地脱敏预览。",
+                )
+                preview_validity = gr.Markdown(
+                    "尚未生成脱敏预览。",
+                    elem_id="preview-validity",
+                )
+                ocr_technical_error = gr.Markdown(
+                    "",
+                    visible=False,
+                    elem_id="ocr-technical-error",
                 )
                 preview_button = gr.Button(
                     "1. 生成脱敏预览",
@@ -1640,6 +1829,8 @@ def build_app(
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
+            if request is not None:
+                local_previews.invalidate_current(_request_session(request))
             lease = callbacks.issue_session_lease(request)
             for payload in callbacks.load_replay_events(fixture_id, request=request):
                 callbacks.publish_session_state(request, payload.state)
@@ -1654,27 +1845,126 @@ def build_app(
                 raise ResultServiceError("result_bundle_invalid")
             return session
 
-        def prepare_local_preview(request: gr.Request) -> tuple[object, ...]:
+        def redacted_screenshot_capability(preview: PreviewBundle) -> object:
+            relative = preview.redacted.redacted_screenshot_path
+            expected_sha256 = preview.redacted.redacted_screenshot_sha256
+            if relative is None or expected_sha256 is None:
+                return None
+            if configured_redacted_root is None:
+                raise ValueError("redacted preview root is unavailable")
+            root = configured_redacted_root.resolve(strict=True)
+            candidate = root.joinpath(*relative.split("/"))
+            current = root
+            for part in Path(relative).parts:
+                current = current / part
+                info = current.lstat()
+                if stat.S_ISLNK(info.st_mode) or _has_reparse_attribute(current):
+                    raise ValueError("invalid redacted preview")
+            resolved = candidate.resolve(strict=True)
+            if os.path.commonpath((str(root), str(resolved))) != str(root):
+                raise ValueError("invalid redacted preview")
+            payload = resolved.read_bytes()
+            if sha256_bytes(payload) != expected_sha256:
+                raise ValueError("invalid redacted preview")
+            issued = callbacks._content.issue_bytes(
+                payload,
+                filename="redacted.png",
+                mime_type="image/png",
+                attachment=False,
+            )
+            return _capability_file_data(issued)
+
+        def prepare_local_preview(
+            error_text: object = None,
+            screenshot_path: object = None,
+            code: object = None,
+            environment_text: object = None,
+            request: gr.Request | None = None,
+        ) -> tuple[object, ...]:
+            """Build and publish only a redacted preview for the captured revision."""
+
+            legacy = request is None and hasattr(error_text, "session_hash")
+            if legacy:
+                request = error_text  # type: ignore[assignment]
+                error_text = "ModuleNotFoundError: No module named 'demo_pkg'"
+                screenshot_path = None
+                code = None
+                environment_text = None
             try:
-                prepared = local_previews.create(_request_session(request))
-            except (TypeError, ValueError):
+                session = _request_session(request)
+                normalized_error = error_text.strip() if isinstance(error_text, str) else None
+                normalized_code = code.strip() if isinstance(code, str) else None
+                normalized_screenshot = None
+                if screenshot_path is not None:
+                    normalized_screenshot = str(
+                        _require_cached_upload(screenshot_path, configured_upload_root)
+                    )
+                envelope = InputEnvelope(
+                    case_id=new_case_id(),
+                    error_text=normalized_error or None,
+                    screenshot_path=normalized_screenshot,
+                    code=normalized_code or None,
+                    environment=_parse_environment(environment_text),
+                )
+                revision = local_previews.snapshot_revision(session)
+                preview = local_preview_builder(envelope)
+                prepared = local_previews.publish_if_current(session, revision, preview)
+                if prepared is None:
+                    raise ValueError("stale preview")
+                screenshot_capability = redacted_screenshot_capability(preview)
+            except (OSError, TypeError, ValueError):
+                if legacy:
+                    return None, gr.update(interactive=False), "", "无法生成脱敏预览。"
                 return (
                     None,
                     gr.update(interactive=False),
                     "",
-                    "无法生成脱敏预览。",
+                    "",
+                    {},
+                    None,
+                    "未创建可确认的预览。",
+                    "请粘贴报错文本或上传报错截图。",
+                    gr.update(value="", visible=False),
+                )
+            if legacy:
+                return (
+                    prepared.token,
+                    gr.update(interactive=True),
+                    prepared.redacted_display,
+                    prepared.audit_display,
                 )
             return (
                 prepared.token,
                 gr.update(interactive=True),
-                prepared.redacted_display,
+                preview.redacted.error_text or "",
+                preview.redacted.code or "",
+                preview.redacted.environment,
+                screenshot_capability,
                 prepared.audit_display,
+                "脱敏预览已就绪，请确认后开始诊断。",
+                gr.update(value="", visible=False),
+            )
+
+        def invalidate_live_preview(request: gr.Request) -> tuple[object, ...]:
+            local_previews.invalidate_and_increment(_request_session(request))
+            return (
+                None,
+                gr.update(interactive=False),
+                "",
+                "",
+                {},
+                None,
+                "输入已更改；旧预览已失效。",
+                "输入已更改，请重新生成脱敏预览。",
+                gr.update(value="", visible=False),
             )
 
         def approve_and_diagnose_stream(preview_token: str | None, request: gr.Request):
             lease = callbacks.issue_session_lease(request)
             try:
-                record = local_previews.consume(preview_token, _request_session(request))
+                record = local_previews.consume_current(
+                    preview_token, _request_session(request)
+                )
                 if record is None:
                     raise ResultServiceError("result_bundle_invalid")
                 approved = approve_preview(record.preview, local_approval_key)
@@ -1823,8 +2113,18 @@ def build_app(
         )
         preview_button.click(
             prepare_local_preview,
-            inputs=None,
-            outputs=[preview_token_state, start_button, redacted_input, preview_audit],
+            inputs=[error_input, screenshot_input, code_input, environment_input],
+            outputs=[
+                preview_token_state,
+                start_button,
+                redacted_input,
+                preview_code,
+                preview_environment,
+                preview_screenshot,
+                preview_audit,
+                preview_validity,
+                ocr_technical_error,
+            ],
             api_name=False,
             queue=True,
             trigger_mode="once",
@@ -1832,6 +2132,33 @@ def build_app(
             concurrency_id="debugmate-case",
             postprocess=False,
         )
+        for live_input in (
+            error_input,
+            screenshot_input,
+            code_input,
+            environment_input,
+        ):
+            live_input.change(
+                invalidate_live_preview,
+                inputs=None,
+                outputs=[
+                    preview_token_state,
+                    start_button,
+                    redacted_input,
+                    preview_code,
+                    preview_environment,
+                    preview_screenshot,
+                    preview_audit,
+                    preview_validity,
+                    ocr_technical_error,
+                ],
+                api_name=False,
+                queue=True,
+                trigger_mode="once",
+                concurrency_limit=1,
+                concurrency_id="debugmate-case",
+                postprocess=False,
+            )
         # The only browser-held live authority is a one-time opaque token.
         diagnosis_completed = start_button.click(
             approve_and_diagnose_stream,
