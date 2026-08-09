@@ -130,7 +130,9 @@ def test_preview_store_invalidation_removes_every_session_token() -> None:
 
 
 def test_preview_presentation_never_discloses_server_paths_or_strict_objects() -> None:
-    preview = _preview(r"token=secret-value C:\Users\student\private.py")
+    preview = _preview(
+        r"token=secret-value C:\Users\student\private.py"  # PHASE7_SYNTHETIC_SECRET
+    )
     preview = preview.model_copy(
         update={
             "redacted": preview.redacted.model_copy(

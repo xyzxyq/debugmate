@@ -624,7 +624,7 @@ def _validate_phase7_evidence_row(
 
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     assert not re.search(
-        r"(?:Traceback|\[REDACTED:|[A-Za-z]:\\|/Users/|/home/|"
+        r"(?:Traceback|\[REDACTED:|[A-Za-z]:\\|/Users/|/home/|"  # PHASE7_SCAN_PATTERN
         r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|gh[pousr]_[A-Za-z0-9]+)",
         serialized,
     )
@@ -1107,7 +1107,7 @@ def test_p7_security_scope_clean_repository_exits_zero(tmp_path: Path) -> None:
 def test_p7_security_scope_injected_values_exit_nonzero(tmp_path: Path, finding: str) -> None:
     repository, baseline = _phase7_security_fixture(tmp_path)
     value = (
-        "API_TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz123456'\n"
+        "API_TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz123456'\n"  # PHASE7_SYNTHETIC_SECRET
         if finding == "secret"
         else r"LOCAL = 'C:\Users\phase7\cache'" + "\n"  # PHASE7_SYNTHETIC_SECRET
     )
@@ -1115,6 +1115,27 @@ def test_p7_security_scope_injected_values_exit_nonzero(tmp_path: Path, finding:
     result = _run_phase7_security(repository, baseline)
     assert result.returncode != 0
     assert "secret/path scan" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ["scripts/phase7-check.ps1", "platform/dify/app.dsl.yml", "debugmate.toml"],
+)
+def test_p7_security_scope_scans_scripts_and_configuration(
+    tmp_path: Path, relative_path: str
+) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    target = repository / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "API_TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz123456'\n",  # PHASE7_SYNTHETIC_SECRET
+        encoding="utf-8",
+    )
+
+    result = _run_phase7_security(repository, baseline)
+
+    assert result.returncode != 0
+    assert relative_path in result.stderr
 
 
 def test_p7_security_scope_modified_frozen_hash_exits_nonzero(tmp_path: Path) -> None:
@@ -1161,13 +1182,13 @@ def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
     browser_base_url: str, tmp_path: Path
 ) -> None:
     screenshot = tmp_path / "terminal.png"
+    synthetic_path = "C:\\Users\\phase7\\app.py"  # PHASE7_SYNTHETIC_SECRET
+    synthetic_token = "ghp_abcdefghijklmnopqrstuvwxyz123456"  # PHASE7_SYNTHETIC_SECRET
     image = Image.new("RGB", (1200, 280), "white")
     font = ImageFont.truetype("C:/Windows/Fonts/consola.ttf", 34)
     ImageDraw.Draw(image).multiline_text(
         (24, 24),
-        "Traceback (most recent call last):\n"
-        "C:\\Users\\phase7\\app.py\n"
-        "TOKEN=ghp_abcdefghijklmnopqrstuvwxyz123456",
+        f"Traceback (most recent call last):\n{synthetic_path}\nTOKEN={synthetic_token}",
         fill="black",
         font=font,
         spacing=12,
@@ -1193,13 +1214,13 @@ def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
             browser_surface = _phase7_browser_owned_surface(page)
             assert sentinel not in browser_surface
             assert str(tmp_path) not in browser_surface
-            assert "ghp_abcdefghijklmnopqrstuvwxyz123456" not in browser_surface
-            assert "C:\\Users\\phase7\\app.py" not in browser_surface
+            assert synthetic_token not in browser_surface
+            assert synthetic_path not in browser_surface
             config = context.request.get(f"{browser_base_url}/config").text()
             for raw_value in (
                 sentinel,
-                "ghp_abcdefghijklmnopqrstuvwxyz123456",
-                "C:\\Users\\phase7\\app.py",
+                synthetic_token,
+                synthetic_path,
             ):
                 assert raw_value not in config
             assert _body_overflow(page) is False
@@ -1284,7 +1305,10 @@ def test_phase7_p7_vq_04_ocr_failure_selector_and_safe_copy_are_frozen(
                 assert "ModuleNotFoundError: p7_fixture" not in browser_surface
                 decoded_surface = browser_surface.replace("\\\\", "\\")
                 assert str(tmp_path) not in decoded_surface
-                assert not re.search(r"(?:[A-Za-z]:\\Users\\|/Users/|/home/)", decoded_surface)
+                assert not re.search(
+                    r"(?:[A-Za-z]:\\Users\\|/Users/|/home/)",  # PHASE7_SCAN_PATTERN
+                    decoded_surface,
+                )
                 _capture_phase7_evidence(page, "P7-VQ-04")
             finally:
                 if context is not None:
@@ -2951,7 +2975,7 @@ def test_vq_08_safe_failure_and_vq_09_fallback_truth_in_real_edge(
                 page_surface = page.content()
                 assert "/debugmate-content/" not in page_surface
                 assert not re.search(
-                    r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)",
+                    r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)",  # PHASE7_SCAN_PATTERN
                     page.locator("body").inner_text(),
                 )
                 _write_qa_staging(page, context, browser_base_url, "vq-08")

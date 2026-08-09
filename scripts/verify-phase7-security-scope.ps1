@@ -28,6 +28,31 @@ function Get-Phase7ChangedFiles {
     return @($paths | Sort-Object)
 }
 
+function Test-Phase7ReviewableTextPath {
+    param([Parameter(Mandatory)][string]$RelativePath)
+    $normalized = $RelativePath.Replace('\', '/')
+    # Workflow metadata is separately frozen by assert-phase7-frozen-scope.ps1;
+    # binary/media deliverables are intentionally outside a line-oriented scan.
+    if ($normalized -like '.planning/*' -or $normalized -like 'deliverables/*' -or
+        $normalized -like 'output/*') { return $false }
+    $binaryExtensions = @(
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.docx', '.pptx',
+        '.mp3', '.wav', '.mp4', '.srt', '.zip', '.onnx', '.sqlite', '.db', '.pyc'
+    )
+    $extension = [IO.Path]::GetExtension($normalized).ToLowerInvariant()
+    if ($binaryExtensions -contains $extension) { return $false }
+    $textExtensions = @(
+        '.py', '.pyi', '.ps1', '.psm1', '.psd1', '.js', '.jsx', '.ts', '.tsx',
+        '.json', '.jsonl', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.conf', '.env',
+        '.md', '.txt', '.rst', '.css', '.scss', '.html', '.xml', '.sql', '.sh',
+        '.bash', '.bat', '.cmd', '.properties', '.example'
+    )
+    $leaf = [IO.Path]::GetFileName($normalized)
+    return $textExtensions -contains $extension -or $leaf -in @(
+        '.gitignore', '.gitattributes', 'Dockerfile', 'Makefile', 'Procfile'
+    )
+}
+
 function Assert-Phase7ValueSafeFiles {
     param(
         [Parameter(Mandatory)][string]$Root,
@@ -35,11 +60,11 @@ function Assert-Phase7ValueSafeFiles {
     )
     $patterns = @(
         '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
-        '(?i)(?:token|password|secret|signature|approval[_-]?token)\s*[:=]\s*["'']?(?!\[?REDACTED|null|none|empty|token\b|password\b|secret\b|signature\b)[A-Za-z0-9_\-]{8,}',
+        '(?i)(?:token|password|secret|signature|approval[_-]?token)\s*[:=]\s*["''](?!\[?REDACTED|null|none|empty|token\b|password\b|secret\b|signature\b)[^"'']{8,}',
         '(?i)gh[pousr]_[A-Za-z0-9]{12,}',
-        '(?i)C:\\Users\\',
-        '/Users/',
-        '/home/',
+        '(?i)[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}', # PHASE7_SCAN_PATTERN
+        '/Users/', # PHASE7_SCAN_PATTERN
+        '/home/', # PHASE7_SCAN_PATTERN
         '(?i)(?:gradio|rapidocr).{0,24}(?:temp|cache|models?)[\\/]',
         '云端运行成功|Dify\s*(?:运行|调用|诊断)成功'
     )
@@ -54,7 +79,12 @@ function Assert-Phase7ValueSafeFiles {
             foreach ($pattern in $patterns) {
                 if ($line -match $pattern) {
                     if (-not $isEvidence -and $relative -like 'tests/*' -and
-                        $line -match 'PHASE7_SYNTHETIC_SECRET') { continue }
+                        $line -match '#\s*PHASE7_SYNTHETIC_SECRET\s*$') { continue }
+                    if ($relative -in @(
+                            'scripts/run-phase7-real-input-qa.ps1',
+                            'scripts/verify-phase7-security-scope.ps1',
+                            'tests/ui/test_browser.py'
+                        ) -and $line -match '(?:#|;)\s*PHASE7_SCAN_PATTERN\s*$') { continue }
                     [void]$findings.Add("$relative`:$lineNumber")
                     break
                 }
@@ -87,9 +117,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'baseline_commit is not an ancestor of current HEAD.' }
 
     $changed = @(Get-Phase7ChangedFiles -Root $root -BaselineCommit $baselineCommit)
-    $scan = @($changed | Where-Object {
-            $_ -like 'src/*' -or $_ -like 'evidence/ui/phase7/*'
-        })
+    $scan = @($changed | Where-Object { Test-Phase7ReviewableTextPath -RelativePath $_ })
     $trackedEvidence = @(Invoke-GitChecked -Root $root -Arguments @('ls-files', 'evidence/ui/phase7'))
     foreach ($path in $trackedEvidence) { if ($scan -notcontains $path) { $scan += $path } }
     $scan = @($scan | Sort-Object -Unique)

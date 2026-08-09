@@ -111,8 +111,8 @@ def test_raw_input_repr_hides_sensitive_values() -> None:
     value = InputEnvelope(
         case_id=new_case_id(),
         error_text=f"token={sentinel}",
-        screenshot_path=f"C:/Users/{sentinel}/error.png",
-        code=f"password = '{sentinel}'",
+        screenshot_path=f"C:/Users/{sentinel}/error.png",  # PHASE7_SYNTHETIC_SECRET
+        code=f"password = '{sentinel}'",  # PHASE7_SYNTHETIC_SECRET
         environment={"username": sentinel},
     )
     assert sentinel not in repr(value)

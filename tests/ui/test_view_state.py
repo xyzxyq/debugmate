@@ -398,4 +398,4 @@ def test_privacy_state_rejects_undeclared_raw_or_path_values() -> None:
     assert privacy_type is not None
     assert {item.value for item in privacy_type} == set(_PRIVACY_EXPECTATIONS)
     with pytest.raises(ValueError):
-        privacy_type("raw=C:\\Users\\student")
+        privacy_type("raw=C:\\Users\\student")  # PHASE7_SYNTHETIC_SECRET

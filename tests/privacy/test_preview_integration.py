@@ -26,7 +26,7 @@ class FakeOcr:
         self.calls.append(path)
         return [
             OcrToken(
-                text=r"C:\Users\student\secret.py",
+                text=r"C:\Users\student\secret.py",  # PHASE7_SYNTHETIC_SECRET
                 box=((10, 10), (180, 10), (180, 35), (10, 35)),
                 score=0.99,
             )
@@ -87,7 +87,7 @@ def test_sensitive_screenshot_audit_is_value_and_path_free(tmp_path: Path) -> No
     assert audit.finding_count == 1
     assert sum(audit.counts_by_kind.values()) == 1
     serialized = audit.model_dump_json()
-    assert r"C:\Users\student\secret.py" not in serialized
+    assert r"C:\Users\student\secret.py" not in serialized  # PHASE7_SYNTHETIC_SECRET
     assert str(tmp_path) not in serialized
     assert all(word not in serialized.casefold() for word in ("text", "box", "path"))
 

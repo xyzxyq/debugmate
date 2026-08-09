@@ -136,7 +136,7 @@ function Assert-Phase7EvidenceSet {
             throw "Ledger timestamp is outside the current runner interval: $($entry.Scenario)"
         }
         $serialized = Get-Content -Raw -LiteralPath $ledgerPath -Encoding utf8
-        if ($serialized -match '(?i)(?:BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|[A-Za-z]:\\Users\\|/Users/|/home/|gh[pousr]_[A-Za-z0-9]+|(?:token|password|secret|signature)\s*[:=]\s*(?!null|redacted)["'']?[A-Za-z0-9])') {
+        if ($serialized -match '(?i)(?:BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|[A-Za-z]:\\Users\\|/Users/|/home/|gh[pousr]_[A-Za-z0-9]+|(?:token|password|secret|signature)\s*[:=]\s*(?!null|redacted)["'']?[A-Za-z0-9])') { # PHASE7_SCAN_PATTERN
             throw "Ledger contains a secret or local path: $($entry.Scenario)"
         }
     }
