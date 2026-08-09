@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -363,13 +365,53 @@ def test_schema_export_is_deterministic(tmp_path: Path) -> None:
 
 
 def test_capability_matrix_has_exact_ids_and_no_unproven_pass() -> None:
+    repository = Path.cwd().resolve()
     matrix = json.loads(Path("platform/dify/capability-matrix.json").read_text(encoding="utf-8"))
+    expected_evidence = {
+        "C01": "evidence/dify-live/2026-08-08/cloud-probe/"
+        "case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json",
+        "C02": "evidence/dify-live/2026-08-08/cloud-probe/"
+        "case_d2c4d21672c14d9bad7f7fe95ee86653/dify-upload.json",
+        "C05": "evidence/dify-live/2026-08-08/cloud-probe/"
+        "case_d2c4d21672c14d9bad7f7fe95ee86653/diagnosis.json",
+        "C07": "evidence/dify-live/2026-08-09/tts/dify-recap.mp3",
+    }
 
     assert tuple(item["capability_id"] for item in matrix["capabilities"]) == CAPABILITY_IDS
     for item in matrix["capabilities"]:
         if item["status"] == "pass":
-            assert item["evidence_path"]
-            assert item["sha256"]
+            evidence_path = item["evidence_path"]
+            assert evidence_path == expected_evidence[item["capability_id"]]
+            relative_path = Path(evidence_path)
+            assert not relative_path.is_absolute()
+            assert ".." not in relative_path.parts
+            resolved_path = (repository / relative_path).resolve(strict=True)
+            resolved_path.relative_to(repository)
+            assert resolved_path.is_file()
+            assert (
+                subprocess.run(
+                    ["git", "check-ignore", "--", evidence_path],
+                    check=False,
+                    capture_output=True,
+                ).returncode
+                == 1
+            )
+            subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "--", evidence_path],
+                check=True,
+                capture_output=True,
+            )
+            assert item["sha256"] == hashlib.sha256(resolved_path.read_bytes()).hexdigest()
+        elif item["status"] == "not-tested":
+            assert item["evidence_path"] is None
+            assert item["sha256"] is None
+        else:
+            raise AssertionError(f"unsupported capability status: {item['status']}")
+
+    status_by_id = {item["capability_id"]: item["status"] for item in matrix["capabilities"]}
+    assert {capability_id for capability_id, status in status_by_id.items() if status == "pass"} == set(
+        expected_evidence
+    )
 
 
 def test_reconstruction_docs_and_examples_are_truthful_and_secret_free() -> None:
