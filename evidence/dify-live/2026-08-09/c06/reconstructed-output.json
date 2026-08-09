@@ -1,0 +1,15 @@
+{
+  "evidence_schema_version": "1.0.0",
+  "started_at_utc": "2026-08-09T05:21:46Z",
+  "completed_at_utc": "2026-08-09T05:22:04Z",
+  "status": "SUCCESS",
+  "duration_seconds": 18.515,
+  "total_tokens": 6019,
+  "total_steps": 6,
+  "workflow_run_id_sha256": "94a89d3fe4e77fa0a1255e39dbfd565f184076a12d6248c93fd314f09cb3531f",
+  "diagnosis_valid": true,
+  "diagnosis_schema_version": "1.1.0",
+  "diagnosis_category": "dependency_environment",
+  "knowledge_chunk_id": "python-exceptions:module-not-found-error",
+  "source_url": "https://docs.python.org/3/library/exceptions.html"
+}
