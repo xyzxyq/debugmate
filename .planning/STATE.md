@@ -2,23 +2,23 @@
 gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: course-demo
-status: complete
-stopped_at: Quick task 260809-icj implementation and verification complete
-last_updated: "2026-08-09T06:00:00Z"
-last_activity: 2026-08-09 -- Promoted C06 through independent roundtrip and authoritative rerun evidence
+status: in_progress
+stopped_at: Milestone audit created gap-closure phases 7-10
+last_updated: "2026-08-09T06:35:00Z"
+last_activity: 2026-08-09 -- Audited live-input, unified Dify E2E, evaluation and final-media freshness gaps
 progress:
-  total_phases: 6
+  total_phases: 10
   completed_phases: 6
   total_plans: 24
   completed_plans: 24
-  percent: 100
+  percent: 60
 ---
 
 # Project State
 
 ## Current Position
 
-DebugMate V0.1 的路线图功能范围为 `status: complete`：6/6 phases complete，当前本地 Windows 课程演示闭环已经形成。
+DebugMate V0.1 已完成原 6 个阶段，但里程碑审计证明真实输入、Dify 统一端到端链和当前课程提交包仍有缺口。路线图现扩展为 10 个阶段，状态为 `in_progress`：6/10 phases complete，当前进入 Phase 7。
 
 GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24 份对应 SUMMARY，即 24/24（100%）。Phase 4 的 `04-11-SUMMARY.md` 与 `04-12-SUMMARY.md` 已补齐；不得再使用旧的 22/24 或无法解释的 “26/26 plans completed” 口径。
 
@@ -55,10 +55,10 @@ GSD 文件记账现已与路线图一致：现场共有 24 份阶段 PLAN 和 24
 
 ## Next Order
 
-1. 先维护本地课程演示、事实证据、README 与 STATE 的一致性。
-2. 保持 C06 independent roundtrip/rerun 证据、矩阵和说明文档的 SHA-256 一致性。
-3. 保持课程材料冻结；本 quick 未刷新 PPTX、视频、字幕或最终截图。
-4. 最后才统一更新 PPTX、视频、字幕和最终截图。
+1. Phase 7：接通真实文本、代码、环境与截图输入，并复用脱敏预览/审批合同。
+2. Phase 8：将已批准输入接入 Dify workflow 和现有三模态结果/ZIP 服务。
+3. Phase 9：重跑当前代表案例和 V1-V4 同案例提示词证据。
+4. Phase 10：最后统一更新 PPTX、视频、字幕和最终截图，并完成 freshness/claim/hash QA。
 
 ## Quick Tasks Completed
 
