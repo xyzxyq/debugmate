@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "32d8837ec9be8d02e053e25faaa6f9beb9954f92",
+  "captured_at_utc": "2026-08-09T08:05:12Z",
+  "frozen_files": {
+    "deliverables/asset-manifest.json": "7fe315ffc8bea83ee239feedea492e5b79b573dcd58092e0946428a7eed3542e",
+    "deliverables/DebugMate-V0.1.pptx": "3522a589932ae37cb4c6c6c0aa493cbca5773e047ffaf7ecca98f585fb6b87a9",
+    "deliverables/DebugMate-V0.1-demo.mp4": "78464aadd30599bbc2d6776f062b001be6022f34b56000fb0fe021cd4aaecb1b",
+    "deliverables/DebugMate-V0.1-subtitles.srt": "ad9b17d0e27eb5b63d416b99c1860e44fdeab54ea727e9d3a964671f32e7552a",
+    "deliverables/video-manifest.json": "78f2883fb49b92a910e872e92072c03dfb5b596455317416626cea510b9e67a3",
+    "evidence/course-v0.1/manifest.json": "987fe22f400bac7465cf8baa6eab0c96887127c726242b67adb2b3add528fa0f",
+    "evidence/course-v0.1/screenshots/01-completed-overview.png": "2c826b40123418f95eab0cd7a7d0075cd306666973007d80a0ac04b85249b49d",
+    "evidence/course-v0.1/screenshots/02-tts-partial.png": "ba24d724188073f9f03e30f2017188c12cc3c9cd2d8ff1def4a427e8c76297de",
+    "evidence/course-v0.1/screenshots/03-card-partial.png": "801cc5765744eee1aad63508a282dabc767f4b0939a114b840715fab169ba75e",
+    "evidence/ui/phase4/archive/GAP-01-VQ-01-failing.png": "12be2e55e45f78ddee0f8c6cdbc9cce4ffdd4c494192d63c2c22c6ef61fd10cc",
+    "evidence/ui/phase4/GAP-01-layout-green.png": "e3d839f4c5ac745d1f75280def49be77889de8eb64c6aab09eca7705aeda5699",
+    "evidence/ui/phase4/local-live-vq01.json": "f9e8a5a78b46d7311c71c586cb411d5e66e6012fc50f219682bda23654aaed36",
+    "evidence/ui/phase4/VQ-01.png": "12be2e55e45f78ddee0f8c6cdbc9cce4ffdd4c494192d63c2c22c6ef61fd10cc",
+    "evidence/ui/phase4/VQ-01-live-local.png": "a09fec9d23db14f31af646e0c834df2c401846c267521e8fcbdb49ce02124142"
+  }
+}
