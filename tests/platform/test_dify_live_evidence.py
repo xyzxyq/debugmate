@@ -109,6 +109,42 @@ def test_c03_pass_requires_png_manifest_vlm_exact_match_and_real_run(tmp_path: P
             validate_c03_record(record | patch, tmp_path)
 
 
+def test_c03_accepts_only_ordered_exact_multi_fact_coverage(tmp_path: Path) -> None:
+    record = _c03_record(tmp_path) | {
+        "extracted_text": None,
+        "extracted_facts": [
+            "ModuleNotFoundError",
+            "No module named 'debugmate_demo_pkg'",
+        ],
+        "extraction_match_kind": "ordered_exact_coverage",
+    }
+    assert validate_c03_record(record, tmp_path)["status"] == "pass"
+
+    with pytest.raises(ValueError, match="exact target"):
+        validate_c03_record(
+            record
+            | {
+                "extracted_facts": [
+                    "ModuleNotFoundError",
+                    "unrelated text",
+                    "No module named 'debugmate_demo_pkg'",
+                ]
+            },
+            tmp_path,
+        )
+    with pytest.raises(ValueError, match="exact target"):
+        validate_c03_record(
+            record
+            | {
+                "extracted_facts": [
+                    "No module named 'debugmate_demo_pkg'",
+                    "ModuleNotFoundError",
+                ]
+            },
+            tmp_path,
+        )
+
+
 def test_c04_pass_requires_direct_node_resource_and_source_metadata(tmp_path: Path) -> None:
     resource = {
         "source_kind": "knowledge_retrieval_node_resource",

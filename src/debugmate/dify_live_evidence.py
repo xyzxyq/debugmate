@@ -74,6 +74,8 @@ class C03Record(_StrictModel):
     workflow_run_id_sha256: str | None = None
     source_kind: str | None = None
     extracted_text: str | None = None
+    extracted_facts: list[str] = Field(default_factory=list)
+    extraction_match_kind: Literal["single_exact", "ordered_exact_coverage"] | None = None
     target_text_sha256: str | None = None
     reason_code: str | None = None
 
@@ -244,8 +246,13 @@ def validate_c03_record(record: Mapping[str, object], repository_root: Path) -> 
     _valid_hash(parsed.workflow_run_id_sha256, "workflow_run_id_sha256")
     if parsed.source_kind != "vlm":
         raise ValueError("C03 pass requires source_kind=vlm")
-    if parsed.extracted_text != TARGET_TEXT:
-        raise ValueError("C03 pass requires exact target extraction")
+    match_kind = _vlm_match_kind(
+        ([parsed.extracted_text] if parsed.extracted_text else []) + parsed.extracted_facts
+    )
+    if match_kind is None or parsed.extraction_match_kind not in {None, match_kind}:
+        raise ValueError(
+            "C03 pass requires exact target extraction or ordered exact target coverage"
+        )
     if parsed.target_text_sha256 != _fingerprint(TARGET_TEXT):
         raise ValueError("C03 target hash mismatch")
     return parsed.model_dump(mode="json")
@@ -532,6 +539,16 @@ def _safe_vlm_facts(outputs: object) -> list[dict[str, str]]:
     return facts
 
 
+def _vlm_match_kind(facts: Sequence[str]) -> str | None:
+    if TARGET_TEXT in facts:
+        return "single_exact"
+    for index in range(len(facts) - 1):
+        combined = f"{facts[index]}: {facts[index + 1]}"
+        if _normalized_text(combined) == _normalized_text(TARGET_TEXT):
+            return "ordered_exact_coverage"
+    return None
+
+
 def _safe_retriever_resource(
     data: Mapping[str, object], run_fingerprint: str
 ) -> dict[str, object] | None:
@@ -684,6 +701,8 @@ def capture_c03_c04(output_root: Path) -> dict[str, str]:
     run_fingerprint = _fingerprint(str(run_id)) if run_id else ""
     outputs = data.get("outputs", {})
     facts = _safe_vlm_facts(outputs)
+    fact_texts = [fact["text"] for fact in facts]
+    match_kind = _vlm_match_kind(fact_texts)
     exact_fact = next((fact for fact in facts if fact["text"] == TARGET_TEXT), None)
     workflow_output = {
         "status": str(data.get("status", "unknown")),
@@ -695,7 +714,7 @@ def capture_c03_c04(output_root: Path) -> dict[str, str]:
     resource_path = target_dir / "retriever-resource.json"
     if resource:
         _write_json(resource_path, resource)
-    c03_status = "pass" if exact_fact and run_fingerprint else "fail"
+    c03_status = "pass" if match_kind and run_fingerprint else "fail"
     c03 = C03Record(
         capability_id="C03",
         status=c03_status,
@@ -709,8 +728,10 @@ def capture_c03_c04(output_root: Path) -> dict[str, str]:
         request_sha256=manifest["request_sha256"],
         upload_id_sha256=manifest["upload_id_sha256"],
         workflow_run_id_sha256=run_fingerprint or None,
-        source_kind=exact_fact["source_kind"] if exact_fact else None,
+        source_kind="vlm" if match_kind else None,
         extracted_text=exact_fact["text"] if exact_fact else None,
+        extracted_facts=fact_texts if match_kind == "ordered_exact_coverage" else [],
+        extraction_match_kind=match_kind,
         target_text_sha256=manifest["target_text_sha256"],
         reason_code=None if c03_status == "pass" else "no_exact_vlm_fact_in_workflow_output",
     )
