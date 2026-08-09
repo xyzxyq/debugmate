@@ -100,6 +100,14 @@ _PHASE7_LEDGER_KEYS = {
 _PHASE7_QA_RUN_ID_ENV = "DEBUGMATE_PHASE7_QA_RUN_ID"
 _PHASE7_STAGING_ENV = "DEBUGMATE_PHASE7_STAGING_DIR"
 _PHASE7_QA_RUN_ID = re.compile(r"p7qa_[0-9a-f]{32}\Z")
+_PHASE7_TEST_IDENTITY_HASHES = tuple(
+    hashlib.sha256(value.encode("utf-8")).hexdigest()
+    for value in (
+        "case_00000000000000000000000000000000",
+        "run_19a9caf71e973d78e0698ae92732dc6d",
+        "result_00000000000000000000000000000000",
+    )
+)
 _PHASE7_STABLE_SELECTORS = {
     "error": "#error-input",
     "screenshot": "#screenshot-input",
@@ -590,18 +598,11 @@ def _validate_phase7_evidence_row(
     assert isinstance(payload["qa_run_id"], str)
     assert _PHASE7_QA_RUN_ID.fullmatch(payload["qa_run_id"])
     assert payload["scenario_id"] in _PHASE7_SCENARIOS
-    assert payload["privacy_state"] in {
-        "idle",
-        "ready",
-        "stale",
-        "ocr_unavailable",
-        "replay",
-        "responsive",
-        "keyboard",
-        "zoom_200",
-    }
-    assert payload["result_status"] in {"idle", "completed", "not_applicable"}
-    assert payload["mode"] in {"live", "replay"}
+    scenario = str(payload["scenario_id"])
+    contract = _PHASE7_SCENARIOS[scenario]
+    assert payload["privacy_state"] == contract["privacy_state"]
+    assert payload["result_status"] == ("completed" if scenario == "P7-VQ-07" else "idle")
+    assert payload["mode"] == contract["mode"]
     assert payload["ocr_backend"] in {"rapidocr", "not_applicable", "unavailable"}
     assert payload["ocr_status"] in {"completed", "not_applicable", "unavailable"}
     assert isinstance(payload["body_horizontal_overflow"], bool)
@@ -615,8 +616,11 @@ def _validate_phase7_evidence_row(
     assert parsed.tzinfo is UTC
     for identity_key in ("case_id_sha256", "source_run_id_sha256", "result_id_sha256"):
         identity_hash = payload[identity_key]
-        assert isinstance(identity_hash, str)
-        assert re.fullmatch(r"[0-9a-f]{64}", identity_hash)
+        if scenario == "P7-VQ-07":
+            assert isinstance(identity_hash, str)
+            assert re.fullmatch(r"[0-9a-f]{64}", identity_hash)
+        else:
+            assert identity_hash is None
 
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     assert not re.search(
@@ -626,7 +630,12 @@ def _validate_phase7_evidence_row(
     )
 
 
-def _phase7_ledger_fixture(scenario: str, screenshot: bytes = b"phase7-png") -> dict[str, object]:
+def _phase7_ledger_fixture(
+    scenario: str,
+    screenshot: bytes = b"phase7-png",
+    *,
+    identity_hashes: tuple[str, str, str] | None = None,
+) -> dict[str, object]:
     contract = _PHASE7_SCENARIOS[scenario]
     width, height = contract["viewport"]
     state = str(contract["privacy_state"])
@@ -644,13 +653,39 @@ def _phase7_ledger_fixture(scenario: str, screenshot: bytes = b"phase7-png") -> 
         "mode": contract["mode"],
         "ocr_backend": ocr_backend,
         "ocr_status": ocr_status,
-        "case_id_sha256": hashlib.sha256(f"{scenario}:case".encode()).hexdigest(),
-        "source_run_id_sha256": hashlib.sha256(f"{scenario}:run".encode()).hexdigest(),
-        "result_id_sha256": hashlib.sha256(f"{scenario}:result".encode()).hexdigest(),
+        "case_id_sha256": None if identity_hashes is None else identity_hashes[0],
+        "source_run_id_sha256": None if identity_hashes is None else identity_hashes[1],
+        "result_id_sha256": None if identity_hashes is None else identity_hashes[2],
         "body_horizontal_overflow": False,
         "screenshot_sha256": hashlib.sha256(screenshot).hexdigest(),
         "verified_at_utc": "2026-08-09T08:30:00Z",
     }
+
+
+def _phase7_observed_identity_hashes(page, scenario: str) -> tuple[str, str, str] | None:
+    """Hash only identities observed in a server-verified result bundle."""
+
+    if scenario != "P7-VQ-07":
+        return None
+    page.get_by_role("tab", name="引用与下载", exact=True).click()
+    manifest = _download_verified_bundle(page, page.context, partial=False)
+    identity = manifest.get("identity")
+    assert isinstance(identity, dict)
+    values = (
+        identity.get("case_id"),
+        identity.get("source_run_id"),
+        manifest.get("result_id"),
+    )
+    patterns = (
+        re.compile(r"case_[0-9a-f]{32}\Z"),
+        re.compile(r"run_[0-9a-f]{32}\Z"),
+        re.compile(r"result_[0-9a-f]{32}\Z"),
+    )
+    assert all(
+        isinstance(value, str) and pattern.fullmatch(value)
+        for value, pattern in zip(values, patterns, strict=True)
+    )
+    return tuple(hashlib.sha256(value.encode("utf-8")).hexdigest() for value in values)
 
 
 def _capture_phase7_evidence(page, scenario: str) -> None:
@@ -670,7 +705,11 @@ def _capture_phase7_evidence(page, scenario: str) -> None:
     ledger_path = staging / f"{scenario}.json"
     assert not png_path.exists() and not ledger_path.exists()
     page.screenshot(path=str(png_path), full_page=True)
-    payload = _phase7_ledger_fixture(scenario, png_path.read_bytes())
+    payload = _phase7_ledger_fixture(
+        scenario,
+        png_path.read_bytes(),
+        identity_hashes=_phase7_observed_identity_hashes(page, scenario),
+    )
     payload["qa_run_id"] = run_id
     payload["body_horizontal_overflow"] = _body_overflow(page)
     payload["verified_at_utc"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -787,8 +826,31 @@ def test_p7_ledger_uses_exact_value_free_allowlist() -> None:
     screenshot = b"synthetic-phase7-screenshot"
     for scenario in _PHASE7_SCENARIOS:
         _validate_phase7_evidence_row(
-            _phase7_ledger_fixture(scenario, screenshot),
+            _phase7_ledger_fixture(
+                scenario,
+                screenshot,
+                identity_hashes=(
+                    _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None
+                ),
+            ),
             screenshot_bytes=screenshot,
+        )
+
+
+def test_p7_ledger_identity_presence_matches_observed_result_state() -> None:
+    for scenario in _PHASE7_SCENARIOS:
+        payload = _phase7_ledger_fixture(
+            scenario,
+            identity_hashes=(
+                _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None
+            ),
+        )
+        observed = tuple(
+            payload[key]
+            for key in ("case_id_sha256", "source_run_id_sha256", "result_id_sha256")
+        )
+        assert observed == (
+            _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else (None, None, None)
         )
 
 
@@ -828,7 +890,13 @@ def _write_phase7_set(directory: Path, run_id: str, verified_at: str) -> None:
     for scenario in _PHASE7_SCENARIOS:
         png = directory / f"{scenario}.png"
         Image.new("RGB", (32, 24), "white").save(png)
-        ledger = _phase7_ledger_fixture(scenario, png.read_bytes())
+        ledger = _phase7_ledger_fixture(
+            scenario,
+            png.read_bytes(),
+            identity_hashes=(
+                _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None
+            ),
+        )
         ledger["qa_run_id"] = run_id
         ledger["verified_at_utc"] = verified_at
         (directory / f"{scenario}.json").write_text(
@@ -1207,6 +1275,7 @@ def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
             expect(page.locator("#diagnostic-status")).to_contain_text(
                 "离线回放", timeout=90_000
             )
+            _wait_for_terminal_status(page, "✓ 已完成")
             assert "云端运行成功" not in page.locator("body").inner_text()
             status_text = page.locator("#diagnostic-status").inner_text()
             assert "↺" in status_text and "离线回放" in status_text

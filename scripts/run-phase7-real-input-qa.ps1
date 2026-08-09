@@ -79,8 +79,19 @@ function Assert-Phase7EvidenceSet {
             $ledger.viewport.height -ne $entry.Height -or $ledger.body_horizontal_overflow -ne $false) {
             throw "Ledger identity/viewport contract failed: $($entry.Scenario)"
         }
-        foreach ($hashName in @('case_id_sha256', 'source_run_id_sha256', 'result_id_sha256', 'screenshot_sha256')) {
-            if ([string]$ledger.$hashName -cnotmatch '^[0-9a-f]{64}$') {
+        foreach ($hashName in @('case_id_sha256', 'source_run_id_sha256', 'result_id_sha256')) {
+            $identityHash = $ledger.$hashName
+            if ($entry.Scenario -ceq 'P7-VQ-07') {
+                if ($identityHash -isnot [string] -or $identityHash -cnotmatch '^[0-9a-f]{64}$') {
+                    throw "Ledger observed identity hash invalid: $($entry.Scenario)/$hashName"
+                }
+            }
+            elseif ($null -ne $identityHash) {
+                throw "Ledger identity must be null without an observed result: $($entry.Scenario)/$hashName"
+            }
+        }
+        foreach ($hashName in @('screenshot_sha256')) {
+            if ($ledger.$hashName -isnot [string] -or $ledger.$hashName -cnotmatch '^[0-9a-f]{64}$') {
                 throw "Ledger hash invalid: $($entry.Scenario)/$hashName"
             }
         }
