@@ -1297,6 +1297,21 @@ def _component_updates(payload: CallbackPayload) -> tuple[object, ...]:
             value=_status_text(view),
             elem_classes=["status-indicator", f"tone-{view.state_tone}"],
         ),
+        (
+            "@media (min-resolution: 1.5dppx) { #workbench-grid.workbench-layout "
+            "{ grid-template-columns: 1fr; } "
+            "#workbench-grid.workbench-layout .control-rail { grid-row: auto; } "
+            "#workbench-grid.workbench-layout .privacy-workspace, "
+            "#workbench-grid.workbench-layout .diagnosis-canvas, "
+            "#workbench-grid.workbench-layout .result-workspace "
+            "{ grid-column: auto; grid-row: auto; } "
+            ".command-bar { position: static; } "
+            ".command-bar > .styler { grid-template-columns: 1fr; } "
+            ".command-bar > .styler > .product-title, "
+            ".command-bar > .styler > #diagnostic-status, "
+            ".command-bar > .styler > #accessible-status "
+            "{ grid-column: auto; grid-row: auto; } }"
+        ),
         view.result_metadata,
         failure,
         gr.update(value=payload.report_markdown or "尚未生成诊断结果"),

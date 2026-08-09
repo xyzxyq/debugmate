@@ -1296,7 +1296,7 @@ def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
             assert page.locator("#preview-environment").is_hidden()
             assert page.locator("#preview-screenshot").is_hidden()
             for selector in ("#local-preview", "#local-approve"):
-                box = page.locator(selector).bounding_box()
+                box = page.locator(selector).first.bounding_box()
                 assert box is not None and box["y"] + box["height"] <= 768
             _assert_major_regions_within_viewport(page)
             assert _body_overflow(page) is False
@@ -1599,11 +1599,23 @@ def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_mse
                 },
             )
             page.wait_for_function("() => innerWidth === 683 && devicePixelRatio === 2")
+            grid_columns = page.locator("#workbench-grid.workbench-layout").first.evaluate(
+                "element => getComputedStyle(element).gridTemplateColumns"
+            )
+            assert len(grid_columns.split()) == 1, grid_columns
             for selector in ("#local-preview", "#local-approve", "#preview-validity"):
                 page.locator(selector).scroll_into_view_if_needed()
                 assert page.locator(selector).is_visible()
             assert _body_overflow(page) is False
             _assert_major_regions_within_viewport(page)
+            for selector in (
+                ".product-title",
+                "#diagnostic-status",
+                "#privacy-overview",
+                "#student-overview",
+            ):
+                box = page.locator(selector).first.bounding_box()
+                assert box is not None and box["x"] + box["width"] <= 684, (selector, box)
             _capture_phase7_evidence(page, "P7-VQ-11")
         finally:
             if context is not None:
