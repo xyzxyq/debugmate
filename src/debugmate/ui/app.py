@@ -49,10 +49,10 @@ WORKBENCH_CSS = "\n".join(
         (
             ":root { --canvas: #f5f7fb; --surface-1: #ffffff; --surface-2: #f8fafc; "
             "--sidebar: #edf2f7; --text: #0f172a; --muted: #5f6b7a; "
-            "--border: #d8dee8; --primary: #007aff; --primary-soft: #e9f2ff; "
-            "--warning-surface: #fff7ed; --warning: #ff9f0a; "
-            "--failure-surface: #fff1f2; --failure: #ff3b30; "
-            "--success-surface: #ecfdf3; --success: #34c759; --accent: #007aff; }"
+            "--border: #d8dee8; --primary: #0056B3; --primary-soft: #e9f2ff; "
+            "--warning-surface: #fff7ed; --warning: #92400E; "
+            "--failure-surface: #fff1f2; --failure: #B42318; "
+            "--success-surface: #ecfdf3; --success: #166534; --accent: #0056B3; }"
         ),
         "* { box-sizing: border-box; }",
         (
@@ -62,7 +62,7 @@ WORKBENCH_CSS = "\n".join(
         (
             ".gradio-container { width: 100% !important; max-width: 1440px !important; "
             "margin: 0 auto; "
-            "padding: 14px 16px 18px !important; --body-background-fill: var(--canvas); "
+            "padding: 16px !important; --body-background-fill: var(--canvas); "
             "--background-fill-primary: var(--surface-1); "
             "--background-fill-secondary: var(--surface-2); "
             "--block-background-fill: var(--surface-1); "
@@ -91,19 +91,19 @@ WORKBENCH_CSS = "\n".join(
             "background: transparent !important; border: 0 !important; padding: 0 !important; }"
         ),
         (
-            ".command-bar { margin: 0 0 12px !important; padding: 8px 12px !important; "
+            ".command-bar { margin: 0 0 16px !important; padding: 8px 16px !important; "
             "background: var(--surface-1) !important; border: 1px solid var(--border) "
             "!important; border-radius: 8px !important; box-shadow: none; }"
         ),
         ".command-bar .product-title { min-width: 0; }",
         ".command-bar .product-title h1 { margin: 0; color: var(--text); font-size: 18px; }",
         (
-            ".command-bar .product-title p { margin: 2px 0 0; color: var(--muted); "
-            "font-size: 13px; line-height: 1.35; }"
+            ".command-bar .product-title p { margin: 4px 0 0; color: var(--muted); "
+            "font-size: 14px; line-height: 1.35; }"
         ),
         (
             ".command-bar .status-indicator { min-width: 0; display: flex; "
-            "flex-direction: column; align-items: center; gap: 6px; }"
+            "flex-direction: column; align-items: center; gap: 8px; }"
         ),
         (
             ".command-bar .status-indicator p { margin: 0; max-width: 100%; "
@@ -112,7 +112,7 @@ WORKBENCH_CSS = "\n".join(
         (
             ".command-bar .status-indicator p:first-child { display: inline-flex; "
             "align-items: center; "
-            "border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; "
+            "border: 1px solid var(--border); border-radius: 8px; padding: 8px 16px; "
             "font-weight: 700; }"
         ),
         (
@@ -162,11 +162,11 @@ WORKBENCH_CSS = "\n".join(
             "border-color: var(--border) !important; }"
         ),
         (
-            ".region h2 { margin: 0 0 12px; color: var(--text); font-size: 16px; "
+            ".region h2 { margin: 0 0 16px; color: var(--text); font-size: 16px; "
             "font-weight: 700; letter-spacing: 0; }"
         ),
         (
-            ".section-kicker p { margin: 12px 0 7px; color: var(--muted); font-size: 12px; "
+            ".section-kicker p { margin: 16px 0 8px; color: var(--muted); font-size: 12px; "
             "font-weight: 700; letter-spacing: 0; }"
         ),
         (
@@ -266,7 +266,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".diagnosis-summary p { margin: 0; }",
         (
-            ".block.next-steps { margin-top: 12px; padding: 12px 16px; "
+            ".block.next-steps { margin-top: 16px; padding: 16px; "
             "background: var(--surface-2); "
             "border: 1px solid var(--border); border-radius: 8px; }"
         ),
@@ -288,7 +288,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             ".result-workspace .tab-nav button { color: var(--muted) !important; "
-            "background: var(--surface-2) !important; border-radius: 10px !important; }"
+            "background: var(--surface-2) !important; border-radius: 8px !important; }"
         ),
         (
             ".result-workspace .tab-nav button.selected { color: var(--text) !important; "
@@ -304,7 +304,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         ".report-panel { max-height: 560px; max-width: 80ch; overflow: auto; }",
         (
-            ".report-summary { margin: 0 0 12px; padding: 12px 16px; "
+            ".report-summary { margin: 0 0 16px; padding: 16px; "
             "background: var(--success-surface); border: 1px solid var(--border); "
             "border-radius: 8px; }"
         ),
@@ -328,11 +328,11 @@ WORKBENCH_CSS = "\n".join(
             "font-size: 12px; background: var(--surface-1); }"
         ),
         (
-            ".region th { padding: 8px 9px; background: var(--surface-2); color: var(--muted); "
+            ".region th { padding: 8px; background: var(--surface-2); color: var(--muted); "
             "border: 0; border-bottom: 1px solid var(--border); text-align: left; }"
         ),
         (
-            ".region td { padding: 8px 9px; border: 0; border-bottom: 1px solid var(--border); "
+            ".region td { padding: 8px; border: 0; border-bottom: 1px solid var(--border); "
             "vertical-align: top; overflow-wrap: anywhere; }"
         ),
         "#diagnostic-commands td:nth-child(2) { white-space: pre-wrap; overflow-wrap: anywhere; }",
@@ -349,7 +349,7 @@ WORKBENCH_CSS = "\n".join(
             "height: auto; object-fit: contain; }"
         ),
         (
-            ":focus-visible { outline: 2px solid var(--accent) !important; "
+            ":focus-visible { outline: 2px solid var(--primary) !important; "
             "outline-offset: 2px !important; }"
         ),
         (
@@ -1549,7 +1549,9 @@ def build_app(
                 )
                 with gr.Accordion("运行与隐私说明", open=False):
                     gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
-                with gr.Accordion("查看示例", open=False, elem_classes="example-panel"):
+                with gr.Accordion(
+                    "离线回放（可选）", open=False, elem_classes="example-panel"
+                ):
                     replay = gr.Dropdown(
                         choices=[
                             ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),

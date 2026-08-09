@@ -283,7 +283,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "DebugMate 学习诊断助手",
         "1. 生成脱敏预览",
         "2. 确认并开始诊断",
-        "查看示例",
+        "离线回放（可选）",
         "示例案例",
         "抽取字段与纠错",
         "粘贴报错，获得原因、步骤与复盘材料。",
