@@ -648,9 +648,10 @@ def test_replay_invalidates_outstanding_live_preview_before_service_access() -> 
     request = _Request("session-replay-invalidation")
     token = prepare(request)[0]
 
-    list(replay("module-not-found", request))
+    replay_frames = list(replay("module-not-found", request))
     rejected = list(approve(token, request))
 
+    assert replay_frames[0][-7] is None
     assert rejected[-1][8].status is ResultStatus.FAILED
     assert service.diagnose_calls == []
 
@@ -1126,12 +1127,12 @@ def test_replay_button_callback_streams_running_states_and_disables_repeat_actio
     )
     assert all(frame[22]["interactive"] is False for frame in frames[:-1])
     assert all(
-        all(update["interactive"] is False for update in frame[-5:-1])
+        all(update["interactive"] is False for update in frame[-11:-7])
         for frame in frames[:-1]
     )
     assert frames[-1][8].status is ResultStatus.COMPLETED
     assert all(update["interactive"] is True for update in frames[-1][9:15])
-    assert all(update["interactive"] is True for update in frames[-1][-5:-1])
+    assert all(update["interactive"] is True for update in frames[-1][-11:-7])
 
 
 def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> None:
@@ -1175,7 +1176,7 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
     )
 
     partial_frame = list(callback("module-not-found", None))[-1]
-    assert all(update["interactive"] is True for update in partial_frame[-5:-1])
+    assert all(update["interactive"] is True for update in partial_frame[-11:-7])
     assert partial_frame[31]["visible"] is True
     assert partial_frame[31]["interactive"] is True
 
@@ -1186,7 +1187,7 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
         if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
     )
     failed_frame = list(failed_callback("../not-allowlisted", None))[-1]
-    assert all(update["interactive"] is False for update in failed_frame[-5:-1])
+    assert all(update["interactive"] is False for update in failed_frame[-11:-7])
     assert failed_frame[31]["visible"] is False
     assert failed_frame[31]["interactive"] is False
 

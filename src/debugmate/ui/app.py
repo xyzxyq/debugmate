@@ -1836,7 +1836,16 @@ def build_app(
             lease = callbacks.issue_session_lease(request)
             for payload in callbacks.load_replay_events(fixture_id, request=request):
                 callbacks.publish_session_state(request, payload.state)
-                yield (*apply_payload(payload), lease)
+                yield (
+                    *apply_payload(payload),
+                    None,
+                    "",
+                    {},
+                    None,
+                    "回放模式不使用实时预览。",
+                    gr.update(value="", visible=False),
+                    lease,
+                )
 
         def replay_button_enabled(fixture_id: object) -> dict[str, bool]:
             return gr.update(interactive=fixture_id in {"module-not-found", "long-content"})
@@ -2087,7 +2096,16 @@ def build_app(
         replay_completed = replay_button.click(
             load_replay_stream,
             inputs=[replay],
-            outputs=[*result_outputs, session_lease],
+            outputs=[
+                *result_outputs,
+                preview_token_state,
+                preview_code,
+                preview_environment,
+                preview_screenshot,
+                preview_validity,
+                ocr_technical_error,
+                session_lease,
+            ],
             api_name=False,
             queue=True,
             trigger_mode="once",
