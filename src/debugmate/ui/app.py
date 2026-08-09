@@ -649,11 +649,20 @@ class _UiSessionStateStore:
         while len(self._session_order) > self._max_sessions:
             self._drop_session(next(iter(self._session_order)))
 
-    def _store(self, key: str, checked: ResultViewState) -> None:
+    def _store(
+        self,
+        key: str,
+        checked: ResultViewState,
+        *,
+        preserve_lease_source: bool = False,
+    ) -> None:
         self._values[key] = checked
         lease = self._lease_by_session.get(key)
-        if lease is not None and checked.identity is not None:
-            self._lease_sources[lease] = checked.identity.source_run_id
+        if lease is not None:
+            if checked.identity is not None:
+                self._lease_sources[lease] = checked.identity.source_run_id
+            elif not preserve_lease_source:
+                self._lease_sources.pop(lease, None)
         self._touch_session(key)
 
     def issue_lease(self, request: object) -> str | None:
@@ -699,7 +708,7 @@ class _UiSessionStateStore:
             if self._lease_sources.get(lease) != expected_source_run_id:
                 self._record_event("publish_lease", key, checked, success=False)
                 return False
-            self._store(key, checked)
+            self._store(key, checked, preserve_lease_source=True)
             self._record_event("publish_lease", key, checked, success=True)
         return True
 

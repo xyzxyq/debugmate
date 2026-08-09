@@ -569,6 +569,70 @@ def test_server_session_state_registry_isolated_strict_bounded_and_clearable() -
     assert len(store) == 0
 
 
+@pytest.mark.parametrize(
+    "identityless_state",
+    [
+        ResultViewState(
+            mode=ResultMode.LIVE,
+            status=ResultStatus.RUNNING,
+            current_stage="source",
+            availability=ArtifactAvailability(),
+        ),
+        ResultViewState(
+            mode=ResultMode.LIVE,
+            status=ResultStatus.FAILED,
+            availability=ArtifactAvailability(),
+            failure=SafeFailure(
+                code="source_bundle_invalid",
+                failed_stage="source",
+                retry_scope="source",
+            ),
+        ),
+    ],
+    ids=["new-running-request", "failed-request"],
+)
+def test_identityless_request_publish_revokes_stale_correction_lease(
+    identityless_state: ResultViewState,
+) -> None:
+    store = _UiSessionStateStore()
+    request = _Request("session-stale-correction")
+    lease = store.issue_lease(request)
+    completed = _completed_state()
+    source_run_id = completed.identity.source_run_id
+    assert isinstance(lease, str)
+    assert store.publish(request, completed) is True
+
+    assert store.publish(request, identityless_state) is True
+
+    assert store.publish_lease(lease, completed, source_run_id) is False
+    assert store.read(request) == identityless_state
+
+
+def test_correction_lease_transition_preserves_checked_prior_source() -> None:
+    store = _UiSessionStateStore()
+    request = _Request("session-correction-transition")
+    lease = store.issue_lease(request)
+    completed = _completed_state()
+    source_run_id = completed.identity.source_run_id
+    failed = ResultViewState(
+        mode=ResultMode.LIVE,
+        status=ResultStatus.FAILED,
+        availability=ArtifactAvailability(),
+        failure=SafeFailure(
+            code="source_bundle_invalid",
+            failed_stage="source",
+            retry_scope="source",
+        ),
+    )
+    assert isinstance(lease, str)
+    assert store.publish(request, completed) is True
+
+    assert store.publish_lease(lease, failed, source_run_id) is True
+
+    assert store.publish_lease(lease, completed, source_run_id) is True
+    assert store.read(request) == completed
+
+
 def test_local_live_requires_preview_then_same_session_approval() -> None:
     service = _Service()
     app = build_app(service)
