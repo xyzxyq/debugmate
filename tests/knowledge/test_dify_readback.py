@@ -22,23 +22,55 @@ def _seventeen_source_build(tmp_path: Path):
     headings = "".join(
         f"<h2>{heading}</h2><p>Deterministic fixture content for {heading}.</p>"
         for heading in (
-            "Syntax Errors", "Exceptions", "Handling Exceptions", "Raising Exceptions",
-            "Creating virtual environments", "How venvs work", "The import system",
-            "Searching", "Loading", "Dependency Resolution", "Backtracking",
-            "Reduce the number of versions pip is trying to use", "Installing Packages",
-            "Requirements Files", "Constraints Files", "CUDA semantics",
-            "Asynchronous execution", "Memory management", "Serialization semantics",
-            "Saving and loading tensors", "torch.load with weights_only=True",
-            "torch.Tensor.view", "CUDA Compatibility", "System Requirements",
-            "Installing CUDA Development Tools", "Verifying the Installation", "Installation",
-            "Install with pip", "Offline mode", "Understand caching", "Cache limitations",
-            "Cache-system reference", "Install Ultralytics", "Headless Server Installation",
-            "Use Ultralytics with Python", "Model Prediction with Ultralytics YOLO",
-            "Key Features of Predict Mode", "Inference Sources", "about_Environment_Variables",
-            "Use the variable syntax", "Create persistent environment variables in Windows",
-            "Path information", "About Execution Policies", "PowerShell execution policies",
-            "Manage the execution policy", "File path formats on Windows systems",
-            "Traditional DOS paths", "UNC paths", "Path normalization",
+            "Syntax Errors",
+            "Exceptions",
+            "Handling Exceptions",
+            "Raising Exceptions",
+            "Creating virtual environments",
+            "How venvs work",
+            "The import system",
+            "Searching",
+            "Loading",
+            "Dependency Resolution",
+            "Backtracking",
+            "Reduce the number of versions pip is trying to use",
+            "Installing Packages",
+            "Requirements Files",
+            "Constraints Files",
+            "CUDA semantics",
+            "Asynchronous execution",
+            "Memory management",
+            "Serialization semantics",
+            "Saving and loading tensors",
+            "torch.load with weights_only=True",
+            "torch.Tensor.view",
+            "CUDA Compatibility",
+            "System Requirements",
+            "Installing CUDA Development Tools",
+            "Verifying the Installation",
+            "Installation",
+            "Install with pip",
+            "Offline mode",
+            "Understand caching",
+            "Cache limitations",
+            "Cache-system reference",
+            "Install Ultralytics",
+            "Headless Server Installation",
+            "Use Ultralytics with Python",
+            "Model Prediction with Ultralytics YOLO",
+            "Key Features of Predict Mode",
+            "Inference Sources",
+            "about_Environment_Variables",
+            "Use the variable syntax",
+            "Create persistent environment variables in Windows",
+            "Path information",
+            "About Execution Policies",
+            "PowerShell execution policies",
+            "Manage the execution policy",
+            "File path formats on Windows systems",
+            "Traditional DOS paths",
+            "UNC paths",
+            "Path normalization",
         )
     ).encode()
 
@@ -64,14 +96,16 @@ def test_paginated_inventory_collects_all_pages_and_rejects_duplicates() -> None
         return httpx.Response(
             200,
             json={
-                "data": [{
-                    "id": document_id,
-                    "name": source_id,
-                    "doc_metadata": [
-                        {"name": "source_id", "value": source_id},
-                        {"name": "content_sha256", "value": "a" * 64},
-                    ],
-                }],
+                "data": [
+                    {
+                        "id": document_id,
+                        "name": source_id,
+                        "doc_metadata": [
+                            {"name": "source_id", "value": source_id},
+                            {"name": "content_sha256", "value": "a" * 64},
+                        ],
+                    }
+                ],
                 "page": page,
                 "limit": 1,
                 "total": 2,
@@ -79,25 +113,45 @@ def test_paginated_inventory_collects_all_pages_and_rejects_duplicates() -> None
             },
         )
 
-    with httpx.Client(base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)) as client:
-        manifest = list_remote_documents(client, "dataset", {"Authorization": "Bearer key"}, page_size=1)
+    with httpx.Client(
+        base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)
+    ) as client:
+        manifest = list_remote_documents(
+            client, "dataset", {"Authorization": "Bearer key"}, page_size=1
+        )
 
     assert [item.source_id for item in manifest.documents] == ["source-one", "source-two"]
     assert [request.url.params["page"] for request in requests] == ["1", "2"]
 
     def duplicate_handler(request: httpx.Request) -> httpx.Response:
         page = int(request.url.params["page"])
-        return httpx.Response(200, json={
-            "data": [{"id": f"doc-{page}", "name": "source-one", "doc_metadata": [
-                {"name": "source_id", "value": "source-one"},
-                {"name": "content_sha256", "value": "a" * 64},
-            ]}],
-            "page": page, "limit": 1, "total": 2, "has_more": page == 1,
-        })
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": f"doc-{page}",
+                        "name": "source-one",
+                        "doc_metadata": [
+                            {"name": "source_id", "value": "source-one"},
+                            {"name": "content_sha256", "value": "a" * 64},
+                        ],
+                    }
+                ],
+                "page": page,
+                "limit": 1,
+                "total": 2,
+                "has_more": page == 1,
+            },
+        )
 
-    with httpx.Client(base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(duplicate_handler)) as client:
-        with pytest.raises(KnowledgeSyncError, match="duplicate"):
-            list_remote_documents(client, "dataset", {"Authorization": "Bearer key"}, page_size=1)
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(duplicate_handler)
+        ) as client,
+        pytest.raises(KnowledgeSyncError, match="duplicate"),
+    ):
+        list_remote_documents(client, "dataset", {"Authorization": "Bearer key"}, page_size=1)
 
 
 def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads_back(
@@ -114,16 +168,30 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
         requests.append(request)
         path = request.url.path
         if request.method == "GET" and path.endswith("/documents"):
-            return httpx.Response(200, json={"data": documents, "page": 1, "limit": 100, "total": len(documents), "has_more": False})
+            return httpx.Response(
+                200,
+                json={
+                    "data": documents,
+                    "page": 1,
+                    "limit": 100,
+                    "total": len(documents),
+                    "has_more": False,
+                },
+            )
         if request.method == "POST" and path.endswith("/document/create-by-text"):
             payload = json.loads(request.content)
             assert "doc_metadata" not in payload
             index = len(documents)
             document = {"id": f"doc-{index}", "name": payload["name"], "doc_metadata": []}
             documents.append(document)
-            return httpx.Response(200, json={"document": {"id": document["id"]}, "batch": f"batch-{index}"})
+            return httpx.Response(
+                200, json={"document": {"id": document["id"]}, "batch": f"batch-{index}"}
+            )
         if request.method == "GET" and path.endswith("/indexing-status"):
-            return httpx.Response(200, json={"data": [{"id": "opaque", "indexing_status": "completed", "error": None}]})
+            return httpx.Response(
+                200,
+                json={"data": [{"id": "opaque", "indexing_status": "completed", "error": None}]},
+            )
         if request.method == "GET" and path.endswith("/metadata"):
             return httpx.Response(200, json={"doc_metadata": fields})
         if request.method == "POST" and path.endswith("/metadata") and "/documents/" not in path:
@@ -136,19 +204,37 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
                 pending_metadata[operation["document_id"]] = operation["metadata_list"]
             for document in documents:
                 document["doc_metadata"] = [
-                    {"id": item["id"], "name": next(field["name"] for field in fields if field["id"] == item["id"]), "value": item["value"]}
+                    {
+                        "id": item["id"],
+                        "name": next(
+                            field["name"] for field in fields if field["id"] == item["id"]
+                        ),
+                        "value": item["value"],
+                    }
                     for item in pending_metadata[str(document["id"])]
                 ]
             return httpx.Response(200, json={"result": "success"})
         if request.method == "GET" and path.endswith("/datasets/dataset"):
-            return httpx.Response(200, json={
-                "indexing_technique": "high_quality",
-                "retrieval_model_dict": {"search_method": "semantic_search", "top_k": 3, "score_threshold_enabled": True, "score_threshold": 0.5},
-                "process_rule": {"rules": {"segmentation": {"max_tokens": 800, "chunk_overlap": 120}}},
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "indexing_technique": "high_quality",
+                    "retrieval_model_dict": {
+                        "search_method": "semantic_search",
+                        "top_k": 3,
+                        "score_threshold_enabled": True,
+                        "score_threshold": 0.5,
+                    },
+                    "process_rule": {
+                        "rules": {"segmentation": {"max_tokens": 800, "chunk_overlap": 120}}
+                    },
+                },
+            )
         raise AssertionError(f"unexpected request: {request.method} {path}")
 
-    with httpx.Client(base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)) as client:
+    with httpx.Client(
+        base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)
+    ) as client:
         attestation = synchronize_knowledge(
             build.path,
             client=client,
@@ -163,10 +249,14 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
     assert len(attestation.document_fingerprints) == 17
     serialized = attestation.model_dump_json()
     assert "dataset-key" not in serialized
-    assert "dataset\"" not in serialized
+    assert 'dataset"' not in serialized
     assert all(str(document["id"]) not in serialized for document in documents)
-    metadata_call = next(i for i, request in enumerate(requests) if request.url.path.endswith("/documents/metadata"))
-    last_poll = max(i for i, request in enumerate(requests) if request.url.path.endswith("/indexing-status"))
+    metadata_call = next(
+        i for i, request in enumerate(requests) if request.url.path.endswith("/documents/metadata")
+    )
+    last_poll = max(
+        i for i, request in enumerate(requests) if request.url.path.endswith("/indexing-status")
+    )
     assert metadata_call > last_poll
 
 
@@ -178,31 +268,51 @@ def test_live_sync_fails_before_mutation_for_key_delete_and_index_error(tmp_path
         calls.append(request)
         raise AssertionError("no request expected")
 
-    with httpx.Client(base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(poison)) as client:
-        with pytest.raises(MissingDatasetKey, match="dataset_key_missing"):
-            synchronize_knowledge(build.path, client=client, dataset_key=None, dataset_id="dataset")
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(poison)
+        ) as client,
+        pytest.raises(MissingDatasetKey, match="dataset_key_missing"),
+    ):
+        synchronize_knowledge(build.path, client=client, dataset_key=None, dataset_id="dataset")
     assert calls == []
 
-    remote = {"id": "doc-stale", "name": "stale-source", "doc_metadata": [
-        {"name": "source_id", "value": "stale-source"},
-        {"name": "content_sha256", "value": "a" * 64},
-    ]}
+    remote = {
+        "id": "doc-stale",
+        "name": "stale-source",
+        "doc_metadata": [
+            {"name": "source_id", "value": "stale-source"},
+            {"name": "content_sha256", "value": "a" * 64},
+        ],
+    }
 
     def stale_handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        return httpx.Response(200, json={"data": [remote], "page": 1, "limit": 100, "total": 1, "has_more": False})
+        return httpx.Response(
+            200, json={"data": [remote], "page": 1, "limit": 100, "total": 1, "has_more": False}
+        )
 
     calls.clear()
-    with httpx.Client(base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(stale_handler)) as client:
-        with pytest.raises(SyncConfirmationRequired):
-            synchronize_knowledge(build.path, client=client, dataset_key="key", dataset_id="dataset")
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(stale_handler)
+        ) as client,
+        pytest.raises(SyncConfirmationRequired),
+    ):
+        synchronize_knowledge(build.path, client=client, dataset_key="key", dataset_id="dataset")
     assert all(request.method == "GET" for request in calls)
 
 
 def test_missing_inventory_page_fails_closed() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [], "page": 1, "limit": 100, "total": 1, "has_more": False})
+        return httpx.Response(
+            200, json={"data": [], "page": 1, "limit": 100, "total": 1, "has_more": False}
+        )
 
-    with httpx.Client(base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(KnowledgeSyncError, match="pagination"):
-            list_remote_documents(client, "dataset", {"Authorization": "Bearer key"})
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)
+        ) as client,
+        pytest.raises(KnowledgeSyncError, match="pagination"),
+    ):
+        list_remote_documents(client, "dataset", {"Authorization": "Bearer key"})
