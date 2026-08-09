@@ -319,7 +319,9 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     source = Path("src/debugmate/ui/app.py").read_text(encoding="utf-8")
     assert source.count("gr.HTML(") == 1
     assert "<script" not in source.lower()
-    assert "#workbench-grid:has(> #workbench-grid)" in app.css
+    assert "workbench-layout" in workbench_grids[0]["props"]["elem_classes"]
+    assert ":has(" not in app.css
+    assert "#workbench-grid.workbench-layout" in app.css
     approved_colors = {
         "#f5f7fb",
         "#ffffff",
@@ -336,6 +338,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "#b42318",
         "#ecfdf3",
         "#166534",
+        "#007aff",
     }
     for token in (
         "--canvas: #f5f7fb",
@@ -345,7 +348,8 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "--text: #0f172a",
         "--muted: #5f6b7a",
         "--border: #d8dee8",
-        "--primary: #0056B3",
+        "--primary: #007AFF",
+        "--information: #0056B3",
         "--primary-soft: #e9f2ff",
         "--warning-surface: #fff7ed",
         "--warning: #92400E",
@@ -384,6 +388,32 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert not re.search(r"font-weight:\s*(?:500|600|650)\b", app.css)
     assert "min-height: 40px" in app.css
     assert "outline: 2px solid var(--primary)" in app.css
+    assert (
+        'font-family: Inter, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", '
+        "sans-serif"
+    ) in app.css
+    assert "margin-top: 12px" not in app.css
+
+    for exact_copy in (
+        "● 诊断我的报错（本地预处理）",
+        "报错文本（与截图至少填一项）",
+        "粘贴完整 Traceback 或终端报错。请保留第一行和最后一行。",
+        "终端截图（可选）",
+        "拖放 PNG/JPEG 截图，或点击上传",
+        "仅支持 PNG/JPEG，最大 10 MiB、2000 万像素；先在本机 OCR 和遮挡。",
+        "Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。",
+    ):
+        assert exact_copy in rendered
+
+    preview_components = {
+        component["props"].get("elem_id"): component
+        for component in config["components"]
+        if component["props"].get("elem_id", "").startswith("preview-")
+    }
+    assert preview_components["preview-error-text"]["props"]["visible"] == "hidden"
+    assert preview_components["preview-code"]["props"]["visible"] == "hidden"
+    assert preview_components["preview-environment"]["props"]["visible"] == "hidden"
+    assert preview_components["preview-screenshot"]["props"]["visible"] == "hidden"
 
     accordions = {
         component["props"].get("label"): component
@@ -804,7 +834,8 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
     assert buttons["2. 确认并开始诊断"]["props"]["interactive"] is False
     assert any(
         component["type"] == "markdown"
-        and component["props"].get("value") == "后端：local-rule-v1（本地规则，无云端调用）"
+        and component["props"].get("value")
+        == "Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。"
         for component in config["components"]
     )
     assert "approved_payload = gr.State" not in source
@@ -815,7 +846,8 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
         )
     ]
     assert "load_replay" not in live_callback_source
-    assert "Dify" not in source
+    assert source.count("Dify") == 1
+    assert "DifyTtsAdapter" not in source
     assert "EdgeTtsAdapter" not in source
     for mojibake in ("鐢熸垚", "纭", "鍚庣", "鏂囧瓧", "寮曠敤", "瀹屾垚"):
         assert mojibake not in source

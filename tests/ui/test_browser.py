@@ -730,6 +730,27 @@ def _phase7_open_page(browser, browser_base_url: str, viewport: tuple[int, int])
     return context, page
 
 
+def _assert_major_regions_within_viewport(page) -> None:
+    geometry = page.evaluate(
+        """() => ({
+            viewport: document.documentElement.clientWidth,
+            regions: [...document.querySelectorAll(
+                '.command-bar, .control-rail, .privacy-workspace, .diagnosis-canvas, '
+                + '.result-workspace'
+            )].filter(element => getComputedStyle(element).display !== 'none')
+              .map(element => {
+                  const box = element.getBoundingClientRect();
+                  return {classes: element.className, left: box.left, right: box.right};
+              })
+        })"""
+    )
+    assert geometry["regions"]
+    assert all(
+        region["left"] >= -1 and region["right"] <= geometry["viewport"] + 1
+        for region in geometry["regions"]
+    ), geometry
+
+
 def _phase7_assert_stable_selectors(page) -> None:
     disclosures = (
         "补充诊断信息（可选）：代码、环境",
@@ -1261,8 +1282,23 @@ def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
             _phase7_assert_stable_selectors(page)
             for selector in ("#error-input", "#screenshot-input", "#local-preview"):
                 assert page.locator(selector).is_visible()
+            expect(page.locator("#diagnostic-status")).to_contain_text(
+                "诊断我的报错（本地预处理）"
+            )
+            localized_upload = page.locator("#screenshot-input button > .wrap").evaluate(
+                "element => getComputedStyle(element, '::after').content"
+            )
+            assert "拖放 PNG/JPEG 截图，或点击上传" in localized_upload
             assert page.locator("#local-approve").is_disabled()
             expect(page.locator("#privacy-overview")).to_contain_text("先生成脱敏预览")
+            assert page.locator("#preview-error-text").is_hidden()
+            assert page.locator("#preview-code").is_hidden()
+            assert page.locator("#preview-environment").is_hidden()
+            assert page.locator("#preview-screenshot").is_hidden()
+            for selector in ("#local-preview", "#local-approve"):
+                box = page.locator(selector).bounding_box()
+                assert box is not None and box["y"] + box["height"] <= 768
+            _assert_major_regions_within_viewport(page)
             assert _body_overflow(page) is False
             assert _phase7_effective_status_contrast(page) >= 4.5
             _capture_phase7_evidence(page, "P7-VQ-01")
@@ -1299,13 +1335,14 @@ def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
             page.locator("#screenshot-input input[type=file]").set_input_files(str(screenshot))
             page.locator("#local-preview").click()
             expect(page.locator("#preview-validity")).to_contain_text(
-                "脱敏预览已就绪", timeout=60_000
+                "脱敏预览已就绪，请逐项检查后再确认。", timeout=60_000
             )
             expect(page.locator("#local-approve")).to_be_enabled()
             expect(page.locator("#preview-error-text textarea")).to_have_value(
                 re.compile(r"\[REDACTED:EMAIL\]")
             )
             assert page.locator("#preview-screenshot img").is_visible()
+            _assert_major_regions_within_viewport(page)
             browser_surface = _phase7_browser_owned_surface(page)
             assert sentinel not in browser_surface
             assert str(tmp_path) not in browser_surface
@@ -1361,6 +1398,16 @@ def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
                 )
                 assert page.locator("#local-approve").is_disabled()
                 if changed_field != "screenshot":
+                    # Successful preview generation deletes the cached raw upload by design.
+                    # Re-select the synthetic screenshot for each new screenshot-backed preview.
+                    clear_upload = page.locator(
+                        "#screenshot-input button[aria-label=Clear]"
+                    )
+                    if clear_upload.count():
+                        clear_upload.click()
+                    page.locator("#screenshot-input input[type=file]").set_input_files(
+                        str(screenshot)
+                    )
                     page.locator("#local-preview").click()
                     expect(page.locator("#local-approve")).to_be_enabled(timeout=60_000)
             _capture_phase7_evidence(page, "P7-VQ-03")
@@ -1456,11 +1503,12 @@ def test_phase7_p7_vq_08_responsive_input_preview_result_order_in_msedge(
             context, page = _phase7_open_page(browser, browser_base_url, viewport)
             boxes = [
                 page.locator(selector).bounding_box()
-                for selector in (".control-rail", "#privacy-preview", ".diagnosis-canvas")
+                for selector in (".control-rail", ".privacy-workspace", ".diagnosis-canvas")
             ]
             assert all(box is not None for box in boxes)
             assert boxes[0]["y"] < boxes[1]["y"] < boxes[2]["y"]
             assert _body_overflow(page) is False
+            _assert_major_regions_within_viewport(page)
             scenario = "P7-VQ-08-1024" if viewport[0] == 1024 else "P7-VQ-08-768"
             _capture_phase7_evidence(page, scenario)
         finally:
@@ -1489,6 +1537,7 @@ def test_phase7_p7_vq_09_mobile_copy_and_targets_fit_in_msedge(
                 box = locator.bounding_box()
                 assert box is not None and box["width"] <= 375 and box["height"] >= 40
             assert _body_overflow(page) is False
+            _assert_major_regions_within_viewport(page)
         finally:
             if context is not None:
                 context.close()
@@ -1554,6 +1603,7 @@ def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_mse
                 page.locator(selector).scroll_into_view_if_needed()
                 assert page.locator(selector).is_visible()
             assert _body_overflow(page) is False
+            _assert_major_regions_within_viewport(page)
             _capture_phase7_evidence(page, "P7-VQ-11")
         finally:
             if context is not None:
