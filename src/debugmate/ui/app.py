@@ -21,6 +21,7 @@ from debugmate.diagnosis.extraction import FieldId
 from debugmate.hashing import sha256_bytes
 from debugmate.privacy.approval import approve_preview
 from debugmate.privacy.image_models import validate_screenshot
+from debugmate.privacy.image_redactor import OcrUnavailable
 from debugmate.privacy.models import InputEnvelope, PreviewBundle
 from debugmate.privacy.text_redactor import redact_input
 from debugmate.results.contracts import (
@@ -1469,7 +1470,7 @@ def build_app(
         with gr.Group(elem_id="workbench-grid"):
             with gr.Column(elem_classes=["region", "control-rail"]):
                 gr.Markdown("## 开始诊断")
-                gr.Markdown("粘贴报错，获得原因、步骤与复盘材料。")
+                gr.Markdown("填写真实报错，先在本机检查脱敏结果，再明确确认。")
                 error_input = gr.Textbox(
                     label="报错文本（与截图至少填写一项）",
                     lines=6,
@@ -1477,13 +1478,13 @@ def build_app(
                     placeholder="粘贴终端报错、Traceback 或关键日志。",
                 )
                 screenshot_input = gr.File(
-                    label="报错截图（与文本至少填写一项）",
+                    label="终端截图（与报错文本至少填一项）",
                     type="filepath",
                     file_count="single",
                     file_types=[".png", ".jpg", ".jpeg"],
                     elem_id="screenshot-input",
                 )
-                with gr.Accordion("可选：代码与环境", open=False):
+                with gr.Accordion("补充诊断信息（可选）：代码、环境", open=False):
                     code_input = gr.Textbox(
                         label="相关代码（可选）",
                         lines=6,
@@ -1495,47 +1496,53 @@ def build_app(
                         elem_id="environment-input",
                         placeholder="例如：Python: 3.13；OS=Windows 11",
                     )
-                redacted_input = gr.Textbox(
-                    label="脱敏后的输入",
-                    interactive=False,
-                    lines=5,
-                    elem_id="preview-error-text",
-                    placeholder="已审批的脱敏输入将在此显示。",
+                gr.Markdown(
+                    "### 先生成脱敏预览\n\n"
+                    "填写报错文本或上传终端截图。DebugMate 会先在本机遮蔽敏感信息。",
+                    elem_id="privacy-overview",
                 )
-                preview_code = gr.Textbox(
-                    label="脱敏后的代码",
-                    interactive=False,
-                    lines=4,
-                    elem_id="preview-code",
-                )
-                preview_environment = gr.JSON(
-                    label="脱敏后的环境信息",
-                    value={},
-                    elem_id="preview-environment",
-                )
-                preview_screenshot = gr.Image(
-                    label="脱敏后的截图",
-                    interactive=False,
-                    type="filepath",
-                    sources=None,
-                    buttons=[],
-                    elem_id="preview-screenshot",
-                )
-                preview_audit = gr.Textbox(
-                    elem_id="preview-audit",
-                    label="脱敏审计摘要",
-                    interactive=False,
-                    value="请先生成本地脱敏预览。",
-                )
-                preview_validity = gr.Markdown(
-                    "尚未生成脱敏预览。",
-                    elem_id="preview-validity",
-                )
-                ocr_technical_error = gr.Markdown(
-                    "",
-                    visible=False,
-                    elem_id="ocr-technical-error",
-                )
+                with gr.Column(elem_id="privacy-preview"):
+                    redacted_input = gr.Textbox(
+                        label="脱敏后的输入",
+                        interactive=False,
+                        lines=5,
+                        elem_id="preview-error-text",
+                        placeholder="已审批的脱敏输入将在此显示。",
+                    )
+                    preview_code = gr.Textbox(
+                        label="脱敏后的代码",
+                        interactive=False,
+                        lines=4,
+                        elem_id="preview-code",
+                    )
+                    preview_environment = gr.JSON(
+                        label="脱敏后的环境信息",
+                        value={},
+                        elem_id="preview-environment",
+                    )
+                    preview_screenshot = gr.Image(
+                        label="脱敏后的截图",
+                        interactive=False,
+                        type="filepath",
+                        sources=None,
+                        buttons=[],
+                        elem_id="preview-screenshot",
+                    )
+                    preview_audit = gr.Textbox(
+                        elem_id="preview-audit",
+                        label="脱敏审计摘要",
+                        interactive=False,
+                        value="请先生成本地脱敏预览。",
+                    )
+                    preview_validity = gr.Markdown(
+                        "尚未生成脱敏预览。",
+                        elem_id="preview-validity",
+                    )
+                    ocr_technical_error = gr.Markdown(
+                        "",
+                        visible=False,
+                        elem_id="ocr-technical-error",
+                    )
                 preview_button = gr.Button(
                     "1. 生成脱敏预览",
                     variant="secondary",
@@ -1550,8 +1557,11 @@ def build_app(
                 with gr.Accordion("运行与隐私说明", open=False):
                     gr.Markdown("后端：local-rule-v1（本地规则，无云端调用）")
                 with gr.Accordion(
-                    "离线回放（可选）", open=False, elem_classes="example-panel"
+                    "演示回放（独立模式）", open=False, elem_classes="example-panel"
                 ):
+                    gr.Markdown(
+                        "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。"
+                    )
                     replay = gr.Dropdown(
                         choices=[
                             ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
@@ -1923,6 +1933,21 @@ def build_app(
                 if prepared is None:
                     raise ValueError("stale preview")
                 screenshot_capability = redacted_screenshot_capability(preview)
+            except OcrUnavailable:
+                if legacy:
+                    return None, gr.update(interactive=False), "", "本地 OCR 暂不可用"
+                return (
+                    None,
+                    gr.update(interactive=False),
+                    "",
+                    "",
+                    {},
+                    None,
+                    "本地 OCR 暂不可用",
+                    "截图尚未完成脱敏，不能确认或继续。请移除截图后仅用报错文本继续，"
+                    "或修复 RapidOCR 后重新生成预览。未进行云端调用。",
+                    gr.update(value="ocr_unavailable", visible=True),
+                )
             except (OSError, TypeError, ValueError):
                 if legacy:
                     return None, gr.update(interactive=False), "", "无法生成脱敏预览。"
@@ -1965,8 +1990,8 @@ def build_app(
                 "",
                 {},
                 None,
-                "输入已更改；旧预览已失效。",
-                "输入已更改，请重新生成脱敏预览。",
+                "输入已修改，旧预览已失效。请重新生成脱敏预览。",
+                "输入已修改，旧预览已失效。请重新生成脱敏预览。",
                 gr.update(value="", visible=False),
             )
 

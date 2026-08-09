@@ -1,0 +1,20 @@
+{
+  "evidence_version": 1,
+  "qa_run_id": "p7qa_458a8510aaf346c0b6b6dae37ad1cd79",
+  "scenario_id": "P7-VQ-07",
+  "viewport": {
+    "width": 1366,
+    "height": 768
+  },
+  "privacy_state": "replay",
+  "result_status": "completed",
+  "mode": "replay",
+  "ocr_backend": "not_applicable",
+  "ocr_status": "not_applicable",
+  "case_id_sha256": "8d87e3fc1e8d1fa9c3e94d5783a020dad8428a1ed81b83e323cee831683123a6",
+  "source_run_id_sha256": "d240f6623e1c55922638cf916bba11a508161dd890b0351cf134dbdd6be74add",
+  "result_id_sha256": "ec10169f0bfe2c0af90e6eb0ac84a33c92ce4a3dc6d0f07d24223d090e00156f",
+  "body_horizontal_overflow": false,
+  "screenshot_sha256": "e8f567a2bd5da77f6c436a7180119d48f40abb8a1e2c5118e211bf9c83910200",
+  "verified_at_utc": "2026-08-09T15:29:57.183780Z"
+}

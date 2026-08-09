@@ -1,0 +1,20 @@
+{
+  "evidence_version": 1,
+  "qa_run_id": "p7qa_458a8510aaf346c0b6b6dae37ad1cd79",
+  "scenario_id": "P7-VQ-03",
+  "viewport": {
+    "width": 1366,
+    "height": 768
+  },
+  "privacy_state": "stale",
+  "result_status": "idle",
+  "mode": "live",
+  "ocr_backend": "rapidocr",
+  "ocr_status": "completed",
+  "case_id_sha256": "0eed8d63aa956675191752cddd255a82303e3086e9dc661f64bdb1dfc63d30d6",
+  "source_run_id_sha256": "fe385f69d8afdadc1a3e63581cad638804d16b44f7ba7d71d6fffbcaae0f07ac",
+  "result_id_sha256": "64cc86fd2ce04ae37e4ef8bad121cd00f3379205a6aebbc5b860b9f0a6acee5b",
+  "body_horizontal_overflow": false,
+  "screenshot_sha256": "205c049de9f79328cf2709d24735a7edb05187552d12fd4fe039d9f2f232e124",
+  "verified_at_utc": "2026-08-09T15:29:46.832200Z"
+}

@@ -173,6 +173,7 @@ def _local_dependencies(
     approval_key: bytes | None = None,
     replay_local_only: bool = True,
     qa_result_mode: str | None = None,
+    qa_ocr_unavailable: bool = False,
 ) -> LocalAppDependencies:
     project_root = Path(__file__).resolve().parents[3]
     runtime_root = runtime_root or project_root / ".debugmate-runtime"
@@ -183,7 +184,12 @@ def _local_dependencies(
     results_root = TrustedResultRoot.for_testing(runtime_root / "results")
     redacted_root = (runtime_root / "redacted").absolute()
     redacted_root.mkdir(parents=True, exist_ok=True)
+    def unavailable_ocr_factory():
+        raise RuntimeError("controlled OCR unavailable gate")
+
     ocr_backend = RapidOcrBackend()
+    if qa_ocr_unavailable:
+        ocr_backend.factory = unavailable_ocr_factory
     approval_key = approval_key or secrets.token_bytes(32)
     snapshot = load_local_rule_snapshot(project_root)
     workflow = DiagnosisWorkflow(
@@ -237,6 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m debugmate.ui.serve")
     parser.add_argument("--host", required=True)
     parser.add_argument("--port", required=True, type=_available_loopback_port)
+    parser.add_argument("--qa-ocr-unavailable", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.host != "127.0.0.1":
         parser.error("host must be literal 127.0.0.1")
@@ -245,7 +252,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache_root = (project_root / ".debugmate-runtime" / "gradio-cache").absolute()
     cache_root.mkdir(parents=True, exist_ok=True)
     os.environ["GRADIO_TEMP_DIR"] = str(cache_root)
-    dependencies = _local_dependencies(approval_key=approval_key)
+    dependencies = _local_dependencies(
+        approval_key=approval_key,
+        qa_ocr_unavailable=args.qa_ocr_unavailable,
+    )
     app = build_app(
         dependencies.service,
         content_origin=f"http://{args.host}:{args.port}",

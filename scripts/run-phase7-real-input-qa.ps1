@@ -85,7 +85,11 @@ function Assert-Phase7EvidenceSet {
             }
         }
         $bytes = [IO.File]::ReadAllBytes($pngPath)
-        if ($bytes.Length -le 8 -or [Convert]::ToHexString($bytes[0..7]) -cne '89504E470D0A1A0A') {
+        $pngHeader = if ($bytes.Length -gt 8) {
+            ([BitConverter]::ToString($bytes[0..7])).Replace('-', '')
+        }
+        else { '' }
+        if ($pngHeader -cne '89504E470D0A1A0A') {
             throw "Evidence PNG invalid: $($entry.Scenario)"
         }
         $actualHash = (Get-FileHash -LiteralPath $pngPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -175,9 +179,15 @@ function Test-ConfigReady {
     try {
         $response = Invoke-WebRequest -Uri "$BaseUrl/config" -TimeoutSec 1 -UseBasicParsing
         if ($response.StatusCode -ne 200) { return $false }
-        $config = $response.Content | ConvertFrom-Json
-        return $null -ne $config -and $config.PSObject.Properties.Name -contains 'components' -and
-            $config.components -is [System.Array]
+        Add-Type -AssemblyName System.Web.Extensions
+        $config = [System.Web.Script.Serialization.JavaScriptSerializer]::new().DeserializeObject(
+            [string]$response.Content
+        )
+        if ($config -is [Collections.IDictionary]) {
+            return $config.Keys -contains 'components' -and
+                $config['components'] -is [Collections.IList]
+        }
+        return $false
     }
     catch { return $false }
 }

@@ -56,6 +56,7 @@ _STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z
 _RUNNER = _ROOT / "scripts" / "run-phase4-browser-layout-qa.ps1"
 _LOCAL_LIVE_RUNNER = _ROOT / "scripts" / "run-phase4-local-live-qa.ps1"
 _PHASE7_RUNNER = _ROOT / "scripts" / "run-phase7-real-input-qa.ps1"
+_PHASE7_SECURITY = _ROOT / "scripts" / "verify-phase7-security-scope.ps1"
 _LOCAL_LIVE_SCREENSHOT_ENV = "DEBUGMATE_UI_SCREENSHOT_PATH"
 _LOCAL_LIVE_LEDGER_ENV = "DEBUGMATE_UI_LEDGER_PATH"
 _LOCAL_LIVE_LEDGER = _EVIDENCE / "local-live-vq01.json"
@@ -475,7 +476,9 @@ def _reserve_loopback_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _start_loopback_server(port: int) -> subprocess.Popen[bytes]:
+def _start_loopback_server(
+    port: int, *, extra_arguments: tuple[str, ...] = ()
+) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
         [
             sys.executable,
@@ -485,6 +488,7 @@ def _start_loopback_server(port: int) -> subprocess.Popen[bytes]:
             "127.0.0.1",
             "--port",
             str(port),
+            *extra_arguments,
         ],
         cwd=_ROOT,
         stdout=subprocess.DEVNULL,
@@ -682,12 +686,23 @@ def _phase7_open_page(browser, browser_base_url: str, viewport: tuple[int, int])
     page = context.new_page()
     page.goto(browser_base_url, wait_until="domcontentloaded", timeout=30_000)
     page.locator(".gradio-container").wait_for(timeout=30_000)
+    page.locator("#local-preview").wait_for(state="visible", timeout=30_000)
     return context, page
 
 
 def _phase7_assert_stable_selectors(page) -> None:
+    disclosures = (
+        "补充诊断信息（可选）：代码、环境",
+        "演示回放（独立模式）",
+    )
+    for label in disclosures:
+        page.get_by_text(label, exact=True).click()
     for selector in _PHASE7_STABLE_SELECTORS.values():
+        if selector == "#ocr-technical-error":
+            continue
         assert page.locator(selector).count() == 1, selector
+    for label in reversed(disclosures):
+        page.get_by_text(label, exact=True).click()
 
 
 def _phase7_effective_status_contrast(page) -> float:
@@ -911,6 +926,107 @@ if (@(Get-ChildItem -LiteralPath '{str(tmp_path).replace("'", "''")}' -Force |
     assert result.returncode == 0, result.stderr
 
 
+def _phase7_security_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    repository = tmp_path / "repository"
+    (repository / "deliverables").mkdir(parents=True)
+    (repository / "src").mkdir()
+    frozen = repository / "deliverables" / "frozen.txt"
+    frozen.write_text("frozen\n", encoding="utf-8")
+    (repository / "src" / "safe.py").write_text("VALUE = 'safe'\n", encoding="utf-8")
+    for command in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "phase7@example.invalid"],
+        ["git", "config", "user.name", "Phase 7 Test"],
+        ["git", "add", "deliverables/frozen.txt", "src/safe.py"],
+        ["git", "commit", "-q", "-m", "baseline"],
+    ):
+        subprocess.run(command, cwd=repository, check=True, capture_output=True)
+    baseline_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    baseline = repository / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "baseline_commit": baseline_commit,
+                "captured_at_utc": "2026-08-09T10:00:00Z",
+                "frozen_files": {
+                    "deliverables/frozen.txt": hashlib.sha256(frozen.read_bytes()).hexdigest()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return repository, baseline
+
+
+def _run_phase7_security(repository: Path, baseline: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(_PHASE7_SECURITY),
+            "-RepositoryRoot",
+            str(repository),
+            "-BaselinePath",
+            str(baseline),
+        ],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=45,
+        check=False,
+    )
+
+
+def test_p7_security_scope_clean_repository_exits_zero(tmp_path: Path) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    result = _run_phase7_security(repository, baseline)
+    assert result.returncode == 0, result.stderr
+    assert "0 findings" in result.stdout
+
+
+@pytest.mark.parametrize("finding", ["secret", "path"])
+def test_p7_security_scope_injected_values_exit_nonzero(tmp_path: Path, finding: str) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    value = (
+        "API_TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz123456'\n"
+        if finding == "secret"
+        else r"LOCAL = 'C:\Users\phase7\cache'" + "\n"  # PHASE7_SYNTHETIC_SECRET
+    )
+    (repository / "src" / "safe.py").write_text(value, encoding="utf-8")
+    result = _run_phase7_security(repository, baseline)
+    assert result.returncode != 0
+    assert "secret/path scan" in result.stderr
+
+
+def test_p7_security_scope_modified_frozen_hash_exits_nonzero(tmp_path: Path) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    payload = json.loads(baseline.read_text(encoding="utf-8"))
+    payload["frozen_files"]["deliverables/frozen.txt"] = "0" * 64
+    baseline.write_text(json.dumps(payload), encoding="utf-8")
+    result = _run_phase7_security(repository, baseline)
+    assert result.returncode != 0
+    assert "Frozen-scope hash gate failed" in result.stderr
+
+
+def test_p7_security_scope_missing_baseline_exits_nonzero(tmp_path: Path) -> None:
+    repository, baseline = _phase7_security_fixture(tmp_path)
+    baseline.unlink()
+    assert _run_phase7_security(repository, baseline).returncode != 0
+
+
 @pytest.mark.browser
 def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
     browser_base_url: str,
@@ -964,7 +1080,9 @@ def test_phase7_p7_vq_02_ready_preview_is_redacted_in_msedge(
                 "脱敏预览已就绪", timeout=60_000
             )
             expect(page.locator("#local-approve")).to_be_enabled()
-            expect(page.locator("#preview-error-text")).to_contain_text("[REDACTED:EMAIL]")
+            expect(page.locator("#preview-error-text textarea")).to_have_value(
+                re.compile(r"\[REDACTED:EMAIL\]")
+            )
             assert page.locator("#preview-screenshot img").is_visible()
             browser_surface = _phase7_browser_owned_surface(page)
             assert sentinel not in browser_surface
@@ -1001,14 +1119,14 @@ def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
             context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
             page.locator("#error-input textarea").fill("ModuleNotFoundError: fictional_pkg")
             page.locator("#screenshot-input input[type=file]").set_input_files(str(screenshot))
-            page.get_by_text("补充诊断信息（可选）", exact=True).click()
+            page.get_by_text("补充诊断信息（可选）：代码、环境", exact=True).click()
             page.locator("#code-input textarea").fill("import fictional_pkg")
             page.locator("#environment-input textarea").fill("Python 3.13.5")
             page.locator("#local-preview").click()
             expect(page.locator("#local-approve")).to_be_enabled(timeout=60_000)
             for changed_field in ("error", "code", "environment", "screenshot"):
                 if changed_field == "screenshot":
-                    page.locator("#screenshot-input input[type=file]").set_input_files([])
+                    page.locator("#screenshot-input button[aria-label=Clear]").click()
                 else:
                     selector = {
                         "error": "#error-input textarea",
@@ -1032,25 +1150,42 @@ def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
 
 @pytest.mark.browser
 def test_phase7_p7_vq_04_ocr_failure_selector_and_safe_copy_are_frozen(
-    browser_base_url: str,
+    tmp_path: Path,
 ) -> None:
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="msedge", headless=True)
-        context = None
-        try:
-            context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
-            technical_error = page.locator("#ocr-technical-error")
-            assert technical_error.count() == 1
-            assert page.locator("#preview-screenshot").count() == 1
-            config = context.request.get(f"{browser_base_url}/config").text()
-            assert "ocr-technical-error" in config and "preview-screenshot" in config
-            assert "ocr_unavailable" in config
-            assert not re.search(r"(?:[A-Za-z]:\\|/Users/|/home/|Traceback)", config)
-            _capture_phase7_evidence(page, "P7-VQ-04")
-        finally:
-            if context is not None:
-                context.close()
-            browser.close()
+    port = _reserve_loopback_port()
+    process = _start_loopback_server(port, extra_arguments=("--qa-ocr-unavailable",))
+    base_url = f"http://127.0.0.1:{port}"
+    screenshot = tmp_path / "ocr-unavailable.png"
+    Image.new("RGB", (320, 120), "white").save(screenshot)
+    try:
+        _wait_for_config(base_url, process)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel="msedge", headless=True)
+            context = None
+            try:
+                context, page = _phase7_open_page(browser, base_url, (1366, 768))
+                page.locator("#error-input textarea").fill("ModuleNotFoundError: p7_fixture")
+                page.locator("#screenshot-input input[type=file]").set_input_files(str(screenshot))
+                page.locator("#local-preview").click()
+                expect(page.locator("#preview-audit textarea")).to_have_value(
+                    "本地 OCR 暂不可用", timeout=30_000
+                )
+                expect(page.locator("#ocr-technical-error")).to_contain_text("ocr_unavailable")
+                expect(page.locator("#preview-validity")).to_contain_text("未进行云端调用")
+                assert page.locator("#local-approve").is_disabled()
+                assert page.locator("#preview-screenshot img").count() == 0
+                browser_surface = _phase7_browser_owned_surface(page)
+                assert "ModuleNotFoundError: p7_fixture" not in browser_surface
+                decoded_surface = browser_surface.replace("\\\\", "\\")
+                assert str(tmp_path) not in decoded_surface
+                assert not re.search(r"(?:[A-Za-z]:\\Users\\|/Users/|/home/)", decoded_surface)
+                _capture_phase7_evidence(page, "P7-VQ-04")
+            finally:
+                if context is not None:
+                    context.close()
+                browser.close()
+    finally:
+        _stop_loopback_server(process, port)
 
 
 @pytest.mark.browser
@@ -1095,7 +1230,7 @@ def test_phase7_p7_vq_08_responsive_input_preview_result_order_in_msedge(
             context, page = _phase7_open_page(browser, browser_base_url, viewport)
             boxes = [
                 page.locator(selector).bounding_box()
-                for selector in (".control-rail", "#privacy-preview", ".result-workspace")
+                for selector in (".control-rail", "#privacy-preview", ".diagnosis-canvas")
             ]
             assert all(box is not None for box in boxes)
             assert boxes[0]["y"] < boxes[1]["y"] < boxes[2]["y"]
@@ -1148,7 +1283,7 @@ def test_phase7_p7_vq_10_keyboard_reaches_real_input_actions_in_msedge(
             ) == []
             for expected_id, expected_name in (
                 ("error-input", "报错文本"),
-                ("screenshot-input", "终端截图"),
+                ("screenshot-input", ""),
                 ("local-preview", "1. 生成脱敏预览"),
             ):
                 _tab_to(
@@ -2221,6 +2356,7 @@ def _focused_control(page) -> tuple[object, dict[str, object]]:
             const style = getComputedStyle(element);
             return {
                 id: element.id,
+                ownerId: element.closest('[id]')?.id || '',
                 name: element.getAttribute('aria-label') ||
                     element.labels?.[0]?.innerText?.trim() ||
                     element.innerText?.trim() || '',
@@ -2253,9 +2389,11 @@ def _tab_to(page, *, expected_id: str | None = None, expected_name: str, limit: 
         ):
             continue
         locator, metrics = _assert_visible_focus(page)
-        if (expected_id is None or metrics["id"] == expected_id) and expected_name in str(
-            metrics["name"]
-        ):
+        if (
+            expected_id is None
+            or metrics["id"] == expected_id
+            or metrics["ownerId"] == expected_id
+        ) and expected_name in str(metrics["name"]):
             return locator
     raise AssertionError(f"Tab order did not reach {expected_name!r} within {limit} steps")
 

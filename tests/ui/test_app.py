@@ -277,16 +277,19 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "result-tabs",
         "student-overview",
         "technical-details",
+        "privacy-overview",
+        "privacy-preview",
     } <= elem_ids
 
     for text in (
         "DebugMate 学习诊断助手",
         "1. 生成脱敏预览",
         "2. 确认并开始诊断",
-        "离线回放（可选）",
+        "演示回放（独立模式）",
         "示例案例",
         "抽取字段与纠错",
-        "粘贴报错，获得原因、步骤与复盘材料。",
+        "填写真实报错，先在本机检查脱敏结果，再明确确认。",
+        "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。",
         "运行与隐私说明",
         "两步开始诊断",
         "技术详情与恢复信息",
@@ -383,8 +386,8 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         for component in config["components"]
         if component["type"] == "accordion"
     }
-    assert accordions["可选：代码与环境"]["props"]["open"] is False
-    assert accordions["离线回放（可选）"]["props"]["open"] is False
+    assert accordions["补充诊断信息（可选）：代码、环境"]["props"]["open"] is False
+    assert accordions["演示回放（独立模式）"]["props"]["open"] is False
 
     result_tabs = next(
         component
