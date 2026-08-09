@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
     [switch]$Online,
+    [switch]$Phase8CloudSync,
+    [switch]$ConfirmDelete,
+    [string]$AttestationOutput,
     [string]$OutputRoot
 )
 
@@ -23,6 +26,20 @@ if (-not (Test-Path -LiteralPath $registry -PathType Leaf)) {
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $projectRoot '.artifacts\knowledge-build'
+}
+if ($Phase8CloudSync) {
+    if ([string]::IsNullOrWhiteSpace($env:DIFY_DATASET_API_KEY)) {
+        throw 'dataset_key_missing'
+    }
+    if ([string]::IsNullOrWhiteSpace($env:DIFY_DATASET_ID)) {
+        throw 'dataset_binding_missing'
+    }
+    if (-not $Online) {
+        throw 'phase8_cloud_requires_online_build'
+    }
+    if ([string]::IsNullOrWhiteSpace($AttestationOutput)) {
+        $AttestationOutput = Join-Path $OutputRoot 'phase8-dify-readback-attestation.json'
+    }
 }
 
 Push-Location -LiteralPath $projectRoot
@@ -66,9 +83,21 @@ try {
         throw "Coverage report failed with exit code $LASTEXITCODE"
     }
 
-    & $python -m debugmate.cli knowledge-sync $buildPath --dry-run
+    if ($Phase8CloudSync) {
+        $syncArguments = @(
+            '-m', 'debugmate.cli', 'knowledge-sync', $buildPath,
+            '--execute', '--attestation-output', $AttestationOutput
+        )
+        if ($ConfirmDelete) {
+            $syncArguments += '--confirm-delete'
+        }
+        & $python @syncArguments
+    }
+    else {
+        & $python -m debugmate.cli knowledge-sync $buildPath
+    }
     if ($LASTEXITCODE -ne 0) {
-        throw "Dify dry-run plan failed with exit code $LASTEXITCODE"
+        throw "Knowledge sync gate failed with exit code $LASTEXITCODE"
     }
 
     & $python -m pytest -q tests/knowledge -m 'not cloud and not ocr'

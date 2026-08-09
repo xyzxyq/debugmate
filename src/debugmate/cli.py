@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -25,7 +27,13 @@ from debugmate.knowledge.retrieval import (
     run_offline_retrieval,
     write_offline_retrieval_evidence,
 )
-from debugmate.knowledge.sync import create_sync_plan, execute_sync
+from debugmate.knowledge.sync import (
+    DifyReadbackAttestation,
+    KnowledgeSyncError,
+    create_sync_plan,
+    execute_sync,
+    synchronize_knowledge,
+)
 from debugmate.probe import ProbeOutcome, run_cloud_probe, run_fixture_probe
 from debugmate.settings import DebugMateSettings
 
@@ -79,8 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode = knowledge_sync.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", default=True)
     mode.add_argument("--execute", action="store_false", dest="dry_run")
-    knowledge_sync.add_argument("--dataset-id")
     knowledge_sync.add_argument("--confirm-delete", action="store_true")
+    knowledge_sync.add_argument("--attestation-output", type=Path)
     diagnosis_view = commands.add_parser("diagnosis-view")
     diagnosis_view.add_argument("path", type=Path)
     diagnosis_publish = commands.add_parser("diagnosis-publish")
@@ -95,6 +103,32 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _ascii_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
+def _write_attestation_atomically(path: Path, attestation: DifyReadbackAttestation) -> Path:
+    """Strict-validate and atomically publish a sanitized attestation."""
+
+    serialized = attestation.model_dump_json().encode("utf-8") + b"\n"
+    DifyReadbackAttestation.model_validate_json(serialized, strict=True)
+    path = path.absolute()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and (not path.is_file() or path.is_symlink()):
+        raise KnowledgeSyncError("attestation_output_invalid")
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(serialized)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        DifyReadbackAttestation.model_validate_json(path.read_text(encoding="utf-8"), strict=True)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return path
 
 
 def extraction_cli_view(record: ExtractionRecord) -> dict[str, object]:
@@ -284,26 +318,56 @@ def main(argv: Sequence[str] | None = None) -> int:
             else {"documents": []}
         )
         plan = create_sync_plan(args.path, remote_manifest)
+        if args.dry_run:
+            result = execute_sync(plan, client=None, dry_run=True)
+            print(
+                _ascii_json(
+                    {
+                        "build_id": result.build_id,
+                        "document_count": plan.document_count,
+                        "executed": False,
+                        "operation_count": result.operation_count,
+                    }
+                )
+            )
+            return 0
         settings = DebugMateSettings.from_env()
         dataset_key = (
             settings.dify_dataset_api_key.get_secret_value()
             if settings.dify_dataset_api_key is not None
             else None
         )
+        if not dataset_key:
+            print(_ascii_json({"code": "dataset_key_missing", "ok": False}))
+            return 1
+        dataset_id = os.environ.get("DIFY_DATASET_ID") or None
+        if not dataset_id:
+            print(_ascii_json({"code": "dataset_binding_missing", "ok": False}))
+            return 1
+        if args.attestation_output is None:
+            print(_ascii_json({"code": "attestation_output_missing", "ok": False}))
+            return 1
         with httpx.Client(base_url=f"{settings.dify_base_url.rstrip('/')}/") as client:
-            result = execute_sync(
-                plan,
-                client=client,
-                dataset_key=dataset_key,
-                dataset_id=args.dataset_id,
-                confirm_delete=args.confirm_delete,
-                dry_run=args.dry_run,
-            )
+            try:
+                attestation = synchronize_knowledge(
+                    args.path,
+                    client=client,
+                    dataset_key=dataset_key,
+                    dataset_id=dataset_id,
+                    confirm_delete=args.confirm_delete,
+                )
+            except KnowledgeSyncError:
+                print(_ascii_json({"code": "knowledge_sync_failed", "ok": False}))
+                return 1
+        attestation_path = _write_attestation_atomically(args.attestation_output, attestation)
         print(
             _ascii_json(
                 {
-                    "plan": plan.model_dump(mode="json"),
-                    "result": result.model_dump(mode="json"),
+                    "attestation_path": str(attestation_path),
+                    "build_id": attestation.knowledge_build_id,
+                    "document_count": attestation.document_count,
+                    "executed": True,
+                    "ok": True,
                 }
             )
         )

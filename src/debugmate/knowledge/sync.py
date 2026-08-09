@@ -1069,7 +1069,7 @@ def verify_remote_readback(
 def execute_sync(
     plan: SyncPlan,
     *,
-    client: httpx.Client,
+    client: httpx.Client | None,
     dataset_key: str | None = None,
     dataset_id: Identifier | None = None,
     confirm_delete: bool = False,
@@ -1094,6 +1094,8 @@ def execute_sync(
         raise MissingDatasetKey("DIFY_DATASET_API_KEY is required for real sync")
     if not dataset_id or re.fullmatch(r"[A-Za-z0-9_-]+", dataset_id) is None:
         raise KnowledgeSyncError("dataset_id must be a safe non-empty identifier")
+    if client is None:
+        raise KnowledgeSyncError("HTTP client is required for real sync")
     if prepared.deletes and not confirm_delete:
         raise SyncConfirmationRequired("remote deletions require explicit confirm_delete=True")
 

@@ -379,15 +379,18 @@ def test_attestation_output_is_strict_validated_and_atomically_written(
 
     monkeypatch.setattr(cli.httpx, "Client", lambda **_kwargs: FakeClient())
     monkeypatch.setattr(cli, "synchronize_knowledge", lambda *_args, **_kwargs: attestation)
-    assert main(
-        [
-            "knowledge-sync",
-            str(build.path),
-            "--execute",
-            "--attestation-output",
-            str(output),
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "knowledge-sync",
+                str(build.path),
+                "--execute",
+                "--attestation-output",
+                str(output),
+            ]
+        )
+        == 0
+    )
     written = DifyReadbackAttestation.model_validate_json(
         output.read_text(encoding="utf-8"), strict=True
     )
