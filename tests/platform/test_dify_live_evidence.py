@@ -14,7 +14,6 @@ from debugmate.dify_live_evidence import (
     validate_candidate_tree,
 )
 
-
 SAFE_INPUTS: dict[str, object] = {
     "error_text": "",
     "code": "",

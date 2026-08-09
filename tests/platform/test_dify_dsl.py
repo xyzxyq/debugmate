@@ -11,7 +11,6 @@ from debugmate.dify_live_evidence import (
     validate_c06_record,
 )
 
-
 SOURCE_DSL = """
 app:
   name: Original
