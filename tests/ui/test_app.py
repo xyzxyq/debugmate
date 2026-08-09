@@ -321,14 +321,14 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "#0f172a",
         "#5f6b7a",
         "#d8dee8",
-        "#007aff",
+        "#0056b3",
         "#e9f2ff",
         "#fff7ed",
-        "#ff9f0a",
+        "#92400e",
         "#fff1f2",
-        "#ff3b30",
+        "#b42318",
         "#ecfdf3",
-        "#34c759",
+        "#166534",
     }
     for token in (
         "--canvas: #f5f7fb",
@@ -338,14 +338,14 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "--text: #0f172a",
         "--muted: #5f6b7a",
         "--border: #d8dee8",
-        "--primary: #007aff",
+        "--primary: #0056B3",
         "--primary-soft: #e9f2ff",
         "--warning-surface: #fff7ed",
-        "--warning: #ff9f0a",
+        "--warning: #92400E",
         "--failure-surface: #fff1f2",
-        "--failure: #ff3b30",
+        "--failure: #B42318",
         "--success-surface: #ecfdf3",
-        "--success: #34c759",
+        "--success: #166534",
     ):
         assert token in app.css
     css_hex_colors = {
@@ -373,6 +373,18 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert "@media (max-width: 899px)" in app.css
     assert "@media (max-width: 639px)" in app.css
     assert "overflow-x: hidden" not in app.css
+    assert not re.search(r"font-size:\s*13px", app.css)
+    assert not re.search(r"font-weight:\s*(?:500|600|650)\b", app.css)
+    assert "min-height: 40px" in app.css
+    assert "outline: 2px solid var(--primary)" in app.css
+
+    accordions = {
+        component["props"].get("label"): component
+        for component in config["components"]
+        if component["type"] == "accordion"
+    }
+    assert accordions["可选：代码与环境"]["props"]["open"] is False
+    assert accordions["离线回放（可选）"]["props"]["open"] is False
 
     result_tabs = next(
         component
