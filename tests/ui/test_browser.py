@@ -590,9 +590,7 @@ def _validate_phase7_evidence_row(
     viewport = payload["viewport"]
     assert isinstance(viewport, dict) and set(viewport) == {"width", "height"}
     assert all(
-        isinstance(viewport[key], int)
-        and not isinstance(viewport[key], bool)
-        and viewport[key] > 0
+        isinstance(viewport[key], int) and not isinstance(viewport[key], bool) and viewport[key] > 0
         for key in ("width", "height")
     )
     assert payload["evidence_version"] == 1
@@ -854,9 +852,7 @@ def test_p7_ledger_uses_exact_value_free_allowlist() -> None:
             _phase7_ledger_fixture(
                 scenario,
                 screenshot,
-                identity_hashes=(
-                    _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None
-                ),
+                identity_hashes=(_PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None),
             ),
             screenshot_bytes=screenshot,
         )
@@ -866,13 +862,10 @@ def test_p7_ledger_identity_presence_matches_observed_result_state() -> None:
     for scenario in _PHASE7_SCENARIOS:
         payload = _phase7_ledger_fixture(
             scenario,
-            identity_hashes=(
-                _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None
-            ),
+            identity_hashes=(_PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None),
         )
         observed = tuple(
-            payload[key]
-            for key in ("case_id_sha256", "source_run_id_sha256", "result_id_sha256")
+            payload[key] for key in ("case_id_sha256", "source_run_id_sha256", "result_id_sha256")
         )
         assert observed == (
             _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else (None, None, None)
@@ -918,9 +911,7 @@ def _write_phase7_set(directory: Path, run_id: str, verified_at: str) -> None:
         ledger = _phase7_ledger_fixture(
             scenario,
             png.read_bytes(),
-            identity_hashes=(
-                _PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None
-            ),
+            identity_hashes=(_PHASE7_TEST_IDENTITY_HASHES if scenario == "P7-VQ-07" else None),
         )
         ledger["qa_run_id"] = run_id
         ledger["verified_at_utc"] = verified_at
@@ -1285,9 +1276,7 @@ def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
             _phase7_assert_stable_selectors(page)
             for selector in ("#error-input", "#screenshot-input", "#local-preview"):
                 assert page.locator(selector).is_visible()
-            expect(page.locator("#diagnostic-status")).to_contain_text(
-                "诊断我的报错（本地预处理）"
-            )
+            expect(page.locator("#diagnostic-status")).to_contain_text("诊断我的报错（本地预处理）")
             localized_upload = page.locator("#screenshot-input button > .wrap").evaluate(
                 "element => getComputedStyle(element, '::after').content"
             )
@@ -1302,6 +1291,11 @@ def test_phase7_p7_vq_01_idle_real_input_contract_in_msedge(
                 box = page.locator(selector).first.bounding_box()
                 assert box is not None and box["y"] + box["height"] <= 768
             _assert_major_regions_within_viewport(page)
+            privacy_box = page.locator(".privacy-workspace").bounding_box()
+            diagnosis_box = page.locator(".diagnosis-canvas").bounding_box()
+            assert privacy_box is not None and diagnosis_box is not None
+            gap = diagnosis_box["y"] - (privacy_box["y"] + privacy_box["height"])
+            assert abs(gap - 16) <= 1, gap
             assert _body_overflow(page) is False
             assert _phase7_effective_status_contrast(page) >= 4.5
             _capture_phase7_evidence(page, "P7-VQ-01")
@@ -1403,9 +1397,7 @@ def test_phase7_p7_vq_03_each_edit_invalidates_ready_preview_in_msedge(
                 if changed_field != "screenshot":
                     # Successful preview generation deletes the cached raw upload by design.
                     # Re-select the synthetic screenshot for each new screenshot-backed preview.
-                    clear_upload = page.locator(
-                        "#screenshot-input button[aria-label=Clear]"
-                    )
+                    clear_upload = page.locator("#screenshot-input button[aria-label=Clear]")
                     if clear_upload.count():
                         clear_upload.click()
                     page.locator("#screenshot-input input[type=file]").set_input_files(
@@ -1474,15 +1466,16 @@ def test_phase7_p7_vq_07_replay_is_independent_and_literal_in_msedge(
             context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
             expect(page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True)).to_be_visible()
             page.get_by_text(_REPLAY_DISCLOSURE_LABEL, exact=True).click()
-            expect(page.get_by_text(
-                "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。",
-                exact=True,
-            )).to_be_visible()
+            expect(
+                page.get_by_text(
+                    "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。",
+                    exact=True,
+                )
+            ).to_be_visible()
             page.locator("#replay-action").click()
-            expect(page.locator("#diagnostic-status")).to_contain_text(
-                "离线回放", timeout=90_000
-            )
+            expect(page.locator("#diagnostic-status")).to_contain_text("离线回放", timeout=90_000)
             _wait_for_terminal_status(page, "✓ 已完成")
+            assert page.locator(".privacy-workspace").is_hidden()
             assert "云端运行成功" not in page.locator("body").inner_text()
             status_text = page.locator("#diagnostic-status").inner_text()
             assert "↺" in status_text and "离线回放" in status_text
@@ -1556,9 +1549,12 @@ def test_phase7_p7_vq_10_keyboard_reaches_real_input_actions_in_msedge(
         context = None
         try:
             context, page = _phase7_open_page(browser, browser_base_url, (1366, 768))
-            assert page.locator("[tabindex]").evaluate_all(
-                "elements => elements.map(e => Number(e.tabIndex)).filter(value => value > 0)"
-            ) == []
+            assert (
+                page.locator("[tabindex]").evaluate_all(
+                    "elements => elements.map(e => Number(e.tabIndex)).filter(value => value > 0)"
+                )
+                == []
+            )
             for expected_id, expected_name in (
                 ("error-input", "报错文本"),
                 ("screenshot-input", ""),
@@ -1690,9 +1686,7 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
             assert page.locator("#replay-action").is_hidden()
             assert page.locator("#technical-details").is_hidden()
             assert page.locator(".block.next-steps").is_hidden()
-            assert page.get_by_role(
-                "heading", name="多模态与完整报告", exact=True
-            ).is_hidden()
+            assert page.get_by_role("heading", name="多模态与完整报告", exact=True).is_hidden()
             idle_geometry = page.evaluate(
                 "() => ({scroll: document.documentElement.scrollWidth, "
                 "client: document.documentElement.clientWidth})"
@@ -1723,9 +1717,7 @@ def test_student_result_tabs_and_learning_flow_capture_real_edge(
                 "python -c \"print(__import__('sys').executable)\""
             )
             expect(page.get_by_text("技术详情与恢复信息", exact=True)).to_be_visible()
-            expect(page.get_by_role(
-                "heading", name="多模态与完整报告", exact=True
-            )).to_be_visible()
+            expect(page.get_by_role("heading", name="多模态与完整报告", exact=True)).to_be_visible()
             page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_timeout(250)
             desktop_geometry = page.evaluate(
@@ -2332,8 +2324,10 @@ def test_completed_command_bar_keeps_title_and_truthful_status_in_real_edge(
                 assert not mobile_geometry.get("missing"), mobile_geometry
                 assert mobile_geometry["display"] == "grid", mobile_geometry
                 assert mobile_geometry["columns"] == 1, mobile_geometry
-                assert all(item and 0 <= item["x"] <= item["right"] <= mobile_geometry["viewport"]
-                           for item in mobile_geometry["items"]), mobile_geometry
+                assert all(
+                    item and 0 <= item["x"] <= item["right"] <= mobile_geometry["viewport"]
+                    for item in mobile_geometry["items"]
+                ), mobile_geometry
                 stacked = sorted(mobile_geometry["items"], key=lambda item: item["y"])
                 assert all(
                     following["y"] >= previous["bottom"] - 1
@@ -2499,17 +2493,15 @@ def test_completed_result_tabs_keep_visible_surfaces_light_in_real_edge(
                     },
                 )
                 if surface_selector == "#diagnostic-card":
-                    assert any(
-                        "#diagnostic-card" in value for value in metrics["probeLeaks"]
-                    ), metrics
+                    assert any("#diagnostic-card" in value for value in metrics["probeLeaks"]), (
+                        metrics
+                    )
                 assert metrics["leaked"] == [], metrics["leaked"]
                 assert all(
-                    target["visible"] and target["contrast"] >= 4.5
-                    for target in metrics["text"]
+                    target["visible"] and target["contrast"] >= 4.5 for target in metrics["text"]
                 ), metrics["text"]
                 assert all(
-                    target["visible"] and target["luminance"] >= 0.72
-                    for target in metrics["audio"]
+                    target["visible"] and target["luminance"] >= 0.72 for target in metrics["audio"]
                 ), metrics["audio"]
         finally:
             context.close()
@@ -2689,9 +2681,7 @@ def _tab_to(page, *, expected_id: str | None = None, expected_name: str, limit: 
             continue
         locator, metrics = _assert_visible_focus(page)
         if (
-            expected_id is None
-            or metrics["id"] == expected_id
-            or metrics["ownerId"] == expected_id
+            expected_id is None or metrics["id"] == expected_id or metrics["ownerId"] == expected_id
         ) and expected_name in str(metrics["name"]):
             return locator
     raise AssertionError(f"Tab order did not reach {expected_name!r} within {limit} steps")
@@ -2737,9 +2727,7 @@ def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
                 expected_name="1. 生成脱敏预览",
                 limit=20,
             )
-            example_accordion = _tab_to(
-                page, expected_name=_REPLAY_DISCLOSURE_LABEL, limit=3
-            )
+            example_accordion = _tab_to(page, expected_name=_REPLAY_DISCLOSURE_LABEL, limit=3)
             example_accordion.press("Space")
             expect(example_accordion).to_have_class(re.compile(r"\bopen\b"))
             _tab_to(page, expected_name="示例案例", limit=3)
@@ -2763,9 +2751,7 @@ def test_vq_13_keyboard_native_controls_and_announced_status_in_real_edge(
                 _tab_to(page, expected_name=field_label, limit=2)
             _tab_to(page, expected_name="确认创建新运行", limit=2)
 
-            command_accordion = _tab_to(
-                page, expected_name="技术详情与恢复信息", limit=6
-            )
+            command_accordion = _tab_to(page, expected_name="技术详情与恢复信息", limit=6)
             command_accordion.press("Space")
             expect(command_accordion).to_have_class(re.compile(r"\bopen\b"))
             expect(page.locator("#diagnostic-commands")).to_be_visible()
@@ -3802,9 +3788,7 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             page.locator(".gradio-container").wait_for(timeout=30_000)
             for heading in ("开始诊断", "诊断结果"):
                 page.get_by_role("heading", name=heading, exact=True).wait_for(timeout=30_000)
-            example_disclosure = _tab_to(
-                page, expected_name=_REPLAY_DISCLOSURE_LABEL, limit=20
-            )
+            example_disclosure = _tab_to(page, expected_name=_REPLAY_DISCLOSURE_LABEL, limit=20)
             example_disclosure.press("Space")
             replay_label = page.get_by_text("示例案例", exact=True)
             replay_label.wait_for(timeout=30_000)
@@ -3820,9 +3804,9 @@ def test_gap_01_real_loopback_workbench_stacks_regions_and_keeps_replay_visible_
             )
             keyboard_replay.press("Enter")
             _wait_for_terminal_status(page, "✓ 已完成")
-            page.get_by_role(
-                "heading", name="多模态与完整报告", exact=True
-            ).wait_for(timeout=30_000)
+            page.get_by_role("heading", name="多模态与完整报告", exact=True).wait_for(
+                timeout=30_000
+            )
             metrics = page.evaluate(
                 """() => ({
                     regions: [

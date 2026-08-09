@@ -145,10 +145,7 @@ WORKBENCH_CSS = "\n".join(
             "background: var(--canvas) !important; border: 0 !important; }"
         ),
         "#workbench-grid.workbench-layout > #workbench-grid { display: contents; }",
-        (
-            "#workbench-grid.workbench-layout > #workbench-grid > .styler "
-            "{ display: contents; }"
-        ),
+        ("#workbench-grid.workbench-layout > #workbench-grid > .styler { display: contents; }"),
         (
             "#workbench-grid.workbench-layout .region { min-width: 0; "
             "background: var(--surface-1); border: 1px solid var(--border); }"
@@ -157,8 +154,11 @@ WORKBENCH_CSS = "\n".join(
             "#workbench-grid.workbench-layout .region { border-radius: 8px; "
             "padding: 16px; overflow: hidden; }"
         ),
-        ".control-rail { background: var(--sidebar) !important; grid-row: 1 / span 2; }",
-        ".privacy-workspace, .diagnosis-canvas, .result-workspace { grid-column: 2; }",
+        ".control-rail { background: var(--sidebar) !important; }",
+        (
+            ".right-workspace-stack { grid-column: 2; min-width: 0; display: flex; "
+            "flex-direction: column; gap: 16px; }"
+        ),
         (
             ".region > .styler, .region .gr-accordion, .region .tabs, .region .tabitem { "
             "background: var(--surface-1) !important; color: var(--text) !important; "
@@ -291,10 +291,7 @@ WORKBENCH_CSS = "\n".join(
             ".result-workspace .tabs { background: var(--surface-1) !important; "
             "border-color: var(--border) !important; }"
         ),
-        (
-            ".result-workspace .tab-nav { border-bottom-color: var(--border) !important; "
-            "gap: 4px; }"
-        ),
+        (".result-workspace .tab-nav { border-bottom-color: var(--border) !important; gap: 4px; }"),
         (
             ".result-workspace .tab-nav button { color: var(--muted) !important; "
             "background: var(--surface-2) !important; border-radius: 8px !important; }"
@@ -328,10 +325,7 @@ WORKBENCH_CSS = "\n".join(
             "word-break: break-word; }"
         ),
         "#fact-table, #citation-table, #diagnostic-commands { max-width: 100%; overflow: auto; }",
-        (
-            "#fact-table { max-height: 430px; scrollbar-color: var(--border) "
-            "var(--surface-1); }"
-        ),
+        ("#fact-table { max-height: 430px; scrollbar-color: var(--border) var(--surface-1); }"),
         (
             ".region table { width: 100%; border-collapse: collapse; color: var(--text); "
             "font-size: 12px; background: var(--surface-1); }"
@@ -372,12 +366,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "@media (max-width: 1099px) { #workbench-grid.workbench-layout "
-            ".control-rail { grid-row: auto; } }"
-        ),
-        (
-            "@media (max-width: 1099px) { #workbench-grid.workbench-layout "
-            ".privacy-workspace, #workbench-grid.workbench-layout .diagnosis-canvas, "
-            "#workbench-grid.workbench-layout .result-workspace "
+            ".right-workspace-stack "
             "{ grid-column: auto; } }"
         ),
         (
@@ -386,9 +375,7 @@ WORKBENCH_CSS = "\n".join(
         ),
         (
             "@media (max-width: 899px) { #workbench-grid.workbench-layout "
-            ".control-rail, #workbench-grid.workbench-layout .privacy-workspace, "
-            "#workbench-grid.workbench-layout .diagnosis-canvas, "
-            "#workbench-grid.workbench-layout .result-workspace "
+            ".control-rail, #workbench-grid.workbench-layout .right-workspace-stack "
             "{ grid-column: auto; grid-row: auto; } }"
         ),
         (
@@ -404,10 +391,7 @@ WORKBENCH_CSS = "\n".join(
         (
             "@media (min-resolution: 1.5dppx) { #workbench-grid.workbench-layout "
             "{ grid-template-columns: 1fr; } "
-            "#workbench-grid.workbench-layout .control-rail { grid-row: auto; } "
-            "#workbench-grid.workbench-layout .privacy-workspace, "
-            "#workbench-grid.workbench-layout .diagnosis-canvas, "
-            "#workbench-grid.workbench-layout .result-workspace "
+            "#workbench-grid.workbench-layout .right-workspace-stack "
             "{ grid-column: auto; grid-row: auto; } "
             ".command-bar { position: static; } "
             ".command-bar > .styler { grid-template-columns: 1fr; } "
@@ -1415,9 +1399,7 @@ def _require_cached_upload(value: object, cache_root: Path) -> Path:
     lexical_root = Path(os.path.abspath(root))
     lexical_candidate = Path(os.path.abspath(candidate))
     try:
-        if os.path.commonpath((str(lexical_root), str(lexical_candidate))) != str(
-            lexical_root
-        ):
+        if os.path.commonpath((str(lexical_root), str(lexical_candidate))) != str(lexical_root):
             raise ValueError("invalid screenshot upload")
     except ValueError:
         raise ValueError("invalid screenshot upload") from None
@@ -1456,9 +1438,7 @@ def _delete_cached_upload(value: Path, cache_root: Path) -> None:
     lexical_root = Path(os.path.abspath(root))
     lexical_candidate = Path(os.path.abspath(candidate))
     try:
-        if os.path.commonpath((str(lexical_root), str(lexical_candidate))) != str(
-            lexical_root
-        ):
+        if os.path.commonpath((str(lexical_root), str(lexical_candidate))) != str(lexical_root):
             raise ValueError("invalid screenshot cleanup")
     except ValueError:
         raise ValueError("invalid screenshot cleanup") from None
@@ -1518,12 +1498,9 @@ def build_app(
         local_approval_key = approval_key or secrets.token_bytes(32)
         local_preview_builder = preview_builder or redact_input
         configured_upload_root = Path(
-            upload_root
-            or os.environ.get("GRADIO_TEMP_DIR", ".debugmate-runtime/gradio-cache")
+            upload_root or os.environ.get("GRADIO_TEMP_DIR", ".debugmate-runtime/gradio-cache")
         ).absolute()
-        configured_redacted_root = (
-            None if redacted_root is None else Path(redacted_root).absolute()
-        )
+        configured_redacted_root = None if redacted_root is None else Path(redacted_root).absolute()
         correction_original = gr.State(value=_EMPTY_FIELD_VALUES)
         correction_run = gr.State(value=None)
         correction_draft = gr.State(value=None)
@@ -1566,8 +1543,7 @@ def build_app(
                     elem_id="screenshot-input",
                 )
                 gr.Markdown(
-                    "仅支持 PNG/JPEG，最大 10 MiB、2000 万像素；"
-                    "先在本机 OCR 和遮挡。",
+                    "仅支持 PNG/JPEG，最大 10 MiB、2000 万像素；先在本机 OCR 和遮挡。",
                     elem_classes="screenshot-help",
                 )
                 with gr.Accordion("补充诊断信息（可选）：代码、环境", open=False):
@@ -1594,15 +1570,9 @@ def build_app(
                     elem_id="local-approve",
                 )
                 with gr.Accordion("运行与隐私说明", open=False):
-                    gr.Markdown(
-                        "Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。"
-                    )
-                with gr.Accordion(
-                    "演示回放（独立模式）", open=False, elem_classes="example-panel"
-                ):
-                    gr.Markdown(
-                        "回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。"
-                    )
+                    gr.Markdown("Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。")
+                with gr.Accordion("演示回放（独立模式）", open=False, elem_classes="example-panel"):
+                    gr.Markdown("回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。")
                     replay = gr.Dropdown(
                         choices=[
                             ("ModuleNotFoundError：缺少虚构依赖包", "module-not-found"),
@@ -1644,166 +1614,167 @@ def build_app(
                         return_button = gr.Button("返回检查")
                 gr.Markdown("页面仅展示已验证的脱敏输入与结果。")
 
-            with gr.Column(
-                elem_classes=["region", "privacy-workspace"],
-            ):
-                gr.Markdown(
-                    "## 先生成脱敏预览\n\n"
-                    "填写报错文本或上传终端截图。DebugMate 会先在本机遮蔽敏感信息。",
-                    elem_id="privacy-overview",
-                )
-                with gr.Column(elem_id="privacy-preview"):
-                    redacted_input = gr.Textbox(
-                        label="脱敏后的报错文本",
-                        interactive=False,
-                        lines=5,
-                        visible="hidden",
-                        elem_id="preview-error-text",
+            with gr.Column(elem_classes=["right-workspace-stack"]):
+                with gr.Column(
+                    elem_classes=["region", "privacy-workspace"],
+                ) as privacy_workspace:
+                    gr.Markdown(
+                        "## 先生成脱敏预览\n\n"
+                        "填写报错文本或上传终端截图。DebugMate 会先在本机遮蔽敏感信息。",
+                        elem_id="privacy-overview",
                     )
-                    preview_code = gr.Textbox(
-                        label="脱敏后的代码",
-                        interactive=False,
-                        lines=4,
-                        visible="hidden",
-                        elem_id="preview-code",
+                    with gr.Column(elem_id="privacy-preview"):
+                        redacted_input = gr.Textbox(
+                            label="脱敏后的报错文本",
+                            interactive=False,
+                            lines=5,
+                            visible="hidden",
+                            elem_id="preview-error-text",
+                        )
+                        preview_code = gr.Textbox(
+                            label="脱敏后的代码",
+                            interactive=False,
+                            lines=4,
+                            visible="hidden",
+                            elem_id="preview-code",
+                        )
+                        preview_environment = gr.JSON(
+                            label="脱敏后的环境信息",
+                            value={},
+                            visible="hidden",
+                            elem_id="preview-environment",
+                        )
+                        preview_screenshot = gr.Image(
+                            label="脱敏后的截图",
+                            interactive=False,
+                            type="filepath",
+                            sources=None,
+                            buttons=[],
+                            visible="hidden",
+                            elem_id="preview-screenshot",
+                        )
+                        preview_audit = gr.Textbox(
+                            elem_id="preview-audit",
+                            label="脱敏审计摘要",
+                            interactive=False,
+                            visible="hidden",
+                        )
+                        preview_validity = gr.Markdown(
+                            "请填写报错文本或上传终端截图，至少提供一项。",
+                            elem_id="preview-validity",
+                        )
+                        ocr_technical_error = gr.Markdown(
+                            "",
+                            visible=False,
+                            elem_id="ocr-technical-error",
+                        )
+
+                with gr.Column(elem_classes=["region", "diagnosis-canvas"]):
+                    gr.Markdown("## 诊断结果")
+                    category_confidence = gr.Markdown(
+                        "### 两步开始诊断\n\n先在左侧生成脱敏预览，再确认并开始诊断。",
+                        elem_classes=["diagnosis-summary", "tone-neutral"],
+                        elem_id="student-overview",
                     )
-                    preview_environment = gr.JSON(
-                        label="脱敏后的环境信息",
-                        value={},
-                        visible="hidden",
-                        elem_id="preview-environment",
-                    )
-                    preview_screenshot = gr.Image(
-                        label="脱敏后的截图",
-                        interactive=False,
-                        type="filepath",
-                        sources=None,
-                        buttons=[],
-                        visible="hidden",
-                        elem_id="preview-screenshot",
-                    )
-                    preview_audit = gr.Textbox(
-                        elem_id="preview-audit",
-                        label="脱敏审计摘要",
-                        interactive=False,
-                        visible="hidden",
-                    )
-                    preview_validity = gr.Markdown(
-                        "请填写报错文本或上传终端截图，至少提供一项。",
-                        elem_id="preview-validity",
-                    )
-                    ocr_technical_error = gr.Markdown(
-                        "",
+                    next_action = gr.Markdown(
+                        "### 现在就做这一步\n\n完成诊断后，这里会显示唯一的建议行动。",
+                        elem_classes="next-steps",
                         visible=False,
-                        elem_id="ocr-technical-error",
+                    )
+                    with gr.Accordion(
+                        "技术详情与恢复信息",
+                        open=False,
+                        visible=False,
+                        elem_id="technical-details",
+                    ) as technical_details:
+                        result_metadata = gr.Markdown(
+                            "", elem_id="result-metadata", elem_classes="metadata"
+                        )
+                        fact_table = gr.Markdown(
+                            _markdown_table("事实与证据", _FACT_HEADERS, ()),
+                            elem_id="fact-table",
+                        )
+                        gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
+                        command_table = gr.Markdown(
+                            _markdown_table("已验证诊断命令", _COMMAND_HEADERS, ()),
+                            elem_id="diagnostic-commands",
+                        )
+                    failure = gr.Markdown("", elem_id="failure-details")
+                    retry_button = gr.Button(
+                        "安全重试",
+                        variant="secondary",
+                        interactive=False,
+                        visible=False,
+                        elem_id="partial-retry",
                     )
 
-            with gr.Column(elem_classes=["region", "diagnosis-canvas"]):
-                gr.Markdown("## 诊断结果")
-                category_confidence = gr.Markdown(
-                    "### 两步开始诊断\n\n先在左侧生成脱敏预览，再确认并开始诊断。",
-                    elem_classes=["diagnosis-summary", "tone-neutral"],
-                    elem_id="student-overview",
-                )
-                next_action = gr.Markdown(
-                    "### 现在就做这一步\n\n完成诊断后，这里会显示唯一的建议行动。",
-                    elem_classes="next-steps",
+                with gr.Column(
+                    elem_classes=["region", "results-region", "result-workspace"],
                     visible=False,
-                )
-                with gr.Accordion(
-                    "技术详情与恢复信息",
-                    open=False,
-                    visible=False,
-                    elem_id="technical-details",
-                ) as technical_details:
-                    result_metadata = gr.Markdown(
-                        "", elem_id="result-metadata", elem_classes="metadata"
-                    )
-                    fact_table = gr.Markdown(
-                        _markdown_table("事实与证据", _FACT_HEADERS, ()),
-                        elem_id="fact-table",
-                    )
-                    gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
-                    command_table = gr.Markdown(
-                        _markdown_table("已验证诊断命令", _COMMAND_HEADERS, ()),
-                        elem_id="diagnostic-commands",
-                    )
-                failure = gr.Markdown("", elem_id="failure-details")
-                retry_button = gr.Button(
-                    "安全重试",
-                    variant="secondary",
-                    interactive=False,
-                    visible=False,
-                    elem_id="partial-retry",
-                )
-
-            with gr.Column(
-                elem_classes=["region", "results-region", "result-workspace"],
-                visible=False,
-            ) as result_workspace:
-                gr.Markdown("## 多模态与完整报告")
-                with gr.Tabs(elem_id="result-tabs", visible=False) as result_tabs:
-                    with gr.Tab("文字报告", interactive=False) as report_tab:
-                        report_summary = gr.Markdown(
-                            "### 结论速览\n\n完成诊断后显示学生可读结论。",
-                            elem_classes="report-summary",
-                        )
-                        report = gr.Markdown(
-                            "尚未生成诊断结果",
-                            elem_id="diagnostic-report",
-                            elem_classes="report-panel",
-                        )
-                    with gr.Tab("诊断卡", interactive=False) as card_tab:
-                        card = gr.Image(
-                            label="诊断卡",
-                            elem_id="diagnostic-card",
-                            type="filepath",
-                            interactive=False,
-                            visible=False,
-                            sources=None,
-                            buttons=[],
-                        )
-                    with gr.Tab("语音复盘", interactive=False) as audio_tab:
-                        audio = gr.Audio(
-                            label="语音复盘",
-                            elem_id="diagnostic-audio",
-                            type="filepath",
-                            interactive=False,
-                            visible=False,
-                            sources=None,
-                            recording=False,
-                            buttons=[],
-                        )
-                        audio_metadata = gr.Markdown(
-                            "", elem_id="audio-metadata", elem_classes="metadata"
-                        )
-                        recap = gr.Textbox(
-                            label="已验证复盘稿",
-                            elem_id="recap-text",
-                            interactive=False,
-                            lines=6,
-                            value="复盘稿会与语音一并经过验证后显示。",
-                        )
-                    with gr.Tab("引用与下载", interactive=False) as download_tab:
-                        citation_table = gr.Markdown(
-                            _markdown_table("引用", _CITATION_HEADERS, ()),
-                            elem_id="citation-table",
-                        )
-                        gr.File(
-                            label="已验证单个产物",
-                            elem_id="individual-artifacts",
-                            interactive=False,
-                            visible=False,
-                        )
-                        download_metadata = gr.Markdown(
-                            "", elem_id="download-metadata", elem_classes="metadata"
-                        )
-                        download = gr.DownloadButton(
-                            "下载结果包",
-                            visible=False,
-                            interactive=False,
-                            elem_id="download-result",
-                        )
+                ) as result_workspace:
+                    gr.Markdown("## 多模态与完整报告")
+                    with gr.Tabs(elem_id="result-tabs", visible=False) as result_tabs:
+                        with gr.Tab("文字报告", interactive=False) as report_tab:
+                            report_summary = gr.Markdown(
+                                "### 结论速览\n\n完成诊断后显示学生可读结论。",
+                                elem_classes="report-summary",
+                            )
+                            report = gr.Markdown(
+                                "尚未生成诊断结果",
+                                elem_id="diagnostic-report",
+                                elem_classes="report-panel",
+                            )
+                        with gr.Tab("诊断卡", interactive=False) as card_tab:
+                            card = gr.Image(
+                                label="诊断卡",
+                                elem_id="diagnostic-card",
+                                type="filepath",
+                                interactive=False,
+                                visible=False,
+                                sources=None,
+                                buttons=[],
+                            )
+                        with gr.Tab("语音复盘", interactive=False) as audio_tab:
+                            audio = gr.Audio(
+                                label="语音复盘",
+                                elem_id="diagnostic-audio",
+                                type="filepath",
+                                interactive=False,
+                                visible=False,
+                                sources=None,
+                                recording=False,
+                                buttons=[],
+                            )
+                            audio_metadata = gr.Markdown(
+                                "", elem_id="audio-metadata", elem_classes="metadata"
+                            )
+                            recap = gr.Textbox(
+                                label="已验证复盘稿",
+                                elem_id="recap-text",
+                                interactive=False,
+                                lines=6,
+                                value="复盘稿会与语音一并经过验证后显示。",
+                            )
+                        with gr.Tab("引用与下载", interactive=False) as download_tab:
+                            citation_table = gr.Markdown(
+                                _markdown_table("引用", _CITATION_HEADERS, ()),
+                                elem_id="citation-table",
+                            )
+                            gr.File(
+                                label="已验证单个产物",
+                                elem_id="individual-artifacts",
+                                interactive=False,
+                                visible=False,
+                            )
+                            download_metadata = gr.Markdown(
+                                "", elem_id="download-metadata", elem_classes="metadata"
+                            )
+                            download = gr.DownloadButton(
+                                "下载结果包",
+                                visible=False,
+                                interactive=False,
+                                elem_id="download-result",
+                            )
         gr.Markdown("诊断中的命令仅供查看，DebugMate 不会自动执行命令或安装软件。")
 
         result_outputs = [
@@ -1850,6 +1821,7 @@ def build_app(
             card_tab,
             audio_tab,
             download_tab,
+            privacy_workspace,
         ]
 
         def apply_payload(
@@ -1917,22 +1889,20 @@ def build_app(
                 gr.update(visible=payload.view.secondary_disclosure_visible),
                 gr.update(
                     value=_next_action_text(payload),
-                    visible=payload.state.status
-                    in {ResultStatus.COMPLETED, ResultStatus.PARTIAL},
+                    visible=payload.state.status in {ResultStatus.COMPLETED, ResultStatus.PARTIAL},
                 ),
                 gr.update(value=_report_summary_text(payload)),
                 gr.update(
-                    visible=payload.state.status
-                    in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+                    visible=payload.state.status in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
                 ),
                 gr.update(
-                    visible=payload.state.status
-                    in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
+                    visible=payload.state.status in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
                 ),
                 *(
                     gr.update(interactive=payload.view.tabs_enabled)
                     for _tab in (report_tab, card_tab, audio_tab, download_tab)
                 ),
+                gr.update(visible=payload.state.mode is ResultMode.LIVE),
             )
 
         def load_replay_stream(fixture_id: str | None, request: gr.Request):
@@ -2044,6 +2014,7 @@ def build_app(
                     "截图尚未完成脱敏，不能确认或继续。请移除截图后仅用报错文本继续，"
                     "或修复 RapidOCR 后重新生成预览。未进行云端调用。",
                     gr.update(value="ocr_unavailable", visible=True),
+                    gr.update(visible=True),
                 )
             except (OSError, TypeError, ValueError):
                 if legacy:
@@ -2058,6 +2029,7 @@ def build_app(
                     gr.update(value="", visible=False),
                     "请填写报错文本或上传终端截图，至少提供一项。",
                     gr.update(value="", visible=False),
+                    gr.update(visible=True),
                 )
             finally:
                 if validated_upload is not None:
@@ -2077,20 +2049,29 @@ def build_app(
                     visible=True,
                 ),
                 gr.update(
-                    value=preview.redacted.code or "",
-                    visible=preview.redacted.code is not None,
+                    value=preview.redacted.code or "未提供代码。",
+                    visible=True,
+                    lines=4 if preview.redacted.code is not None else 1,
                 ),
                 gr.update(
-                    value=preview.redacted.environment,
-                    visible=bool(preview.redacted.environment),
+                    value=(
+                        preview.redacted.environment
+                        if preview.redacted.environment
+                        else "未提供环境信息。"
+                    ),
+                    visible=True,
+                    height=None if preview.redacted.environment else 40,
                 ),
                 gr.update(
                     value=screenshot_capability,
-                    visible=screenshot_capability is not None,
+                    visible=True,
+                    height=None if screenshot_capability is not None else 40,
+                    placeholder=None if screenshot_capability is not None else "未提供截图。",
                 ),
                 gr.update(value=prepared.audit_display, visible=True),
                 "脱敏预览已就绪，请逐项检查后再确认。",
                 gr.update(value="", visible=False),
+                gr.update(visible=True),
             )
 
         def invalidate_live_preview(request: gr.Request) -> tuple[object, ...]:
@@ -2108,14 +2089,13 @@ def build_app(
                 ),
                 "输入已修改，旧预览已失效。请重新生成脱敏预览。",
                 gr.update(value="", visible=False),
+                gr.update(visible=True),
             )
 
         def approve_and_diagnose_stream(preview_token: str | None, request: gr.Request):
             lease = callbacks.issue_session_lease(request)
             try:
-                record = local_previews.consume_current(
-                    preview_token, _request_session(request)
-                )
+                record = local_previews.consume_current(preview_token, _request_session(request))
                 if record is None:
                     raise ResultServiceError("result_bundle_invalid")
                 approved = approve_preview(record.preview, local_approval_key)
@@ -2284,6 +2264,7 @@ def build_app(
                 preview_audit,
                 preview_validity,
                 ocr_technical_error,
+                privacy_workspace,
             ],
             api_name=False,
             queue=True,
@@ -2311,6 +2292,7 @@ def build_app(
                     preview_audit,
                     preview_validity,
                     ocr_technical_error,
+                    privacy_workspace,
                 ],
                 api_name=False,
                 queue=True,

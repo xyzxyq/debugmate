@@ -236,6 +236,11 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         for component in config["components"]
         if "result-workspace" in component.get("props", {}).get("elem_classes", [])
     ]
+    right_workspace_stacks = [
+        component
+        for component in config["components"]
+        if "right-workspace-stack" in component.get("props", {}).get("elem_classes", [])
+    ]
     correction_panels = [
         component
         for component in config["components"]
@@ -245,6 +250,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert len(control_rails) == 1
     assert len(diagnosis_canvases) == 1
     assert len(result_workspaces) == 1
+    assert len(right_workspace_stacks) == 1
     assert len(correction_panels) == 1
     assert correction_panels[0]["type"] == "accordion"
     assert correction_panels[0]["props"]["open"] is False
@@ -254,9 +260,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         for component in config["components"]
     )
 
-    elem_ids = {
-        component.get("props", {}).get("elem_id") for component in config["components"]
-    }
+    elem_ids = {component.get("props", {}).get("elem_id") for component in config["components"]}
     assert {
         "diagnostic-status",
         "accessible-status",
@@ -359,9 +363,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "--success: #166534",
     ):
         assert token in app.css
-    css_hex_colors = {
-        color.lower() for color in re.findall(r"#[0-9a-fA-F]{3,8}\b", app.css)
-    }
+    css_hex_colors = {color.lower() for color in re.findall(r"#[0-9a-fA-F]{3,8}\b", app.css)}
     css_function_colors = re.findall(r"\b(?:rgb|rgba)\([^)]*\)", app.css, re.IGNORECASE)
     assert css_hex_colors == approved_colors
     assert css_function_colors == []
@@ -369,8 +371,8 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert "gap: 16px;" in app.css
     assert ".command-bar { position: sticky;" in app.css
     assert ".control-rail" in app.css
-    assert ".diagnosis-canvas" in app.css
-    assert ".result-workspace" in app.css
+    assert ".right-workspace-stack" in app.css
+    assert ".control-rail { background: var(--sidebar) !important; grid-row:" not in app.css
     assert ".section-kicker" in app.css
     assert ".correction-panel" in app.css
     assert "box-shadow: none" in app.css
@@ -389,8 +391,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert "min-height: 40px" in app.css
     assert "outline: 2px solid var(--primary)" in app.css
     assert (
-        'font-family: Inter, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", '
-        "sans-serif"
+        'font-family: Inter, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif'
     ) in app.css
     assert "margin-top: 12px" not in app.css
 
@@ -432,8 +433,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         component
         for component in config["components"]
         if component["type"] == "tabitem"
-        and component["props"].get("label")
-        in {"文字报告", "诊断卡", "语音复盘", "引用与下载"}
+        and component["props"].get("label") in {"文字报告", "诊断卡", "语音复盘", "引用与下载"}
     ]
     assert result_tabs["type"] == "tabs"
     assert len(tab_items) == 4
@@ -443,9 +443,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
 
 def test_verified_diagnosis_presentation_has_four_student_sections_without_identity_noise() -> None:
     diagnosis = DiagnosisRecord.model_validate_json(
-        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(
-            encoding="utf-8"
-        ),
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(encoding="utf-8"),
         strict=True,
     )
 
@@ -469,9 +467,7 @@ def test_verified_diagnosis_presentation_has_four_student_sections_without_ident
 
 def test_verified_diagnosis_presentation_fails_closed_when_student_steps_are_missing() -> None:
     diagnosis = DiagnosisRecord.model_validate_json(
-        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(
-            encoding="utf-8"
-        ),
+        (_ROOT / "fixtures/cases/module_not_found/diagnosis.json").read_text(encoding="utf-8"),
         strict=True,
     ).model_copy(
         update={"root_cause_candidates": [], "checks": [], "fixes": [], "verification_steps": []}
@@ -718,6 +714,24 @@ def test_local_preview_deletes_raw_upload_after_success(tmp_path: Path) -> None:
 
     assert isinstance(prepared[0], str)
     assert not upload.exists()
+
+
+def test_ready_preview_shows_exact_compact_absent_category_rows() -> None:
+    app = build_app(_Service(), preview_builder=_cached_preview_builder)
+    prepare = _callback(app, "prepare_local_preview")
+
+    prepared = prepare("Traceback", None, None, None, _Request("absent-categories"))
+
+    assert prepared[3]["value"] == "未提供代码。"
+    assert prepared[3]["visible"] is True
+    assert prepared[3]["lines"] == 1
+    assert prepared[4]["value"] == "未提供环境信息。"
+    assert prepared[4]["visible"] is True
+    assert prepared[4]["height"] == 40
+    assert prepared[5]["value"] is None
+    assert prepared[5]["placeholder"] == "未提供截图。"
+    assert prepared[5]["visible"] is True
+    assert prepared[5]["height"] == 40
 
 
 def test_local_preview_deletes_raw_upload_after_invalidation(tmp_path: Path) -> None:
@@ -1292,12 +1306,11 @@ def test_replay_button_callback_streams_running_states_and_disables_repeat_actio
     )
     assert all(frame[22]["interactive"] is False for frame in frames[:-1])
     assert all(
-        all(update["interactive"] is False for update in frame[-11:-7])
-        for frame in frames[:-1]
+        all(update["interactive"] is False for update in frame[-12:-8]) for frame in frames[:-1]
     )
     assert frames[-1][8].status is ResultStatus.COMPLETED
     assert all(update["interactive"] is True for update in frames[-1][9:15])
-    assert all(update["interactive"] is True for update in frames[-1][-11:-7])
+    assert all(update["interactive"] is True for update in frames[-1][-12:-8])
 
 
 def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> None:
@@ -1316,24 +1329,20 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
             "availability": ArtifactAvailability(
                 report=True, card=True, recap_text=True, audio=False
             ),
-                "audio": AudioResult(
-                    identity=completed.identity,
-                    available=False,
-                    attempts=(
-                        AudioAttempt(
-                            backend="dify",
-                            rate_profile="normal",
-                            succeeded=False,
-                            safe_error_code="tts_failed",
-                        ),
+            "audio": AudioResult(
+                identity=completed.identity,
+                available=False,
+                attempts=(
+                    AudioAttempt(
+                        backend="dify",
+                        rate_profile="normal",
+                        succeeded=False,
+                        safe_error_code="tts_failed",
                     ),
-                failure=SafeFailure(
-                    code="tts_failed", failed_stage="audio", retry_scope="tts"
                 ),
+                failure=SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts"),
             ),
-            "failure": SafeFailure(
-                code="tts_failed", failed_stage="audio", retry_scope="tts"
-            ),
+            "failure": SafeFailure(code="tts_failed", failed_stage="audio", retry_scope="tts"),
         }
     )
     callbacks.load_replay_events = lambda _fixture_id, request=None: iter(  # type: ignore[method-assign]
@@ -1341,7 +1350,7 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
     )
 
     partial_frame = list(callback("module-not-found", None))[-1]
-    assert all(update["interactive"] is True for update in partial_frame[-11:-7])
+    assert all(update["interactive"] is True for update in partial_frame[-12:-8])
     assert partial_frame[31]["visible"] is True
     assert partial_frame[31]["interactive"] is True
 
@@ -1352,7 +1361,7 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
         if getattr(block_fn.fn, "__name__", "") == "load_replay_stream"
     )
     failed_frame = list(failed_callback("../not-allowlisted", None))[-1]
-    assert all(update["interactive"] is False for update in failed_frame[-11:-7])
+    assert all(update["interactive"] is False for update in failed_frame[-12:-8])
     assert failed_frame[31]["visible"] is False
     assert failed_frame[31]["interactive"] is False
 
