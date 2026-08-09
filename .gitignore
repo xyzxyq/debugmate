@@ -6,6 +6,8 @@
 /.superpowers/sdd/
 evidence/*
 !evidence/.gitkeep
+!evidence/dify-live/
+!evidence/dify-live/**
 __pycache__/
 *.py[cod]
 *.egg-info/

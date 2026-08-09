@@ -1,0 +1,13 @@
+{
+  "backend": "dify",
+  "content_type": "audio/mpeg",
+  "codec": "mp3",
+  "channels": 1,
+  "duration_seconds": 46.2,
+  "bytes": 739200,
+  "sha256": "a7d7821743b4364e1278b650b80e3d869ce2d06621a0745a4eb5fd45bca02328",
+  "media_path": "evidence/dify-live/2026-08-09/tts/dify-recap.mp3",
+  "gate_name": "tests/results/test_tts_live.py::test_live_dify_tts_gate",
+  "test_command": "python -m pytest -q -rs -m \"cloud and tts\" tests/results/test_tts_live.py::test_live_dify_tts_gate --basetemp=.artifacts/dify-tts-capture",
+  "executed_at_utc": "2026-08-09T03:34:19Z"
+}
