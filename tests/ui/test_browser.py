@@ -1613,7 +1613,8 @@ def test_phase7_p7_vq_11_two_hundred_percent_zoom_keeps_actions_reachable_in_mse
             assert active_grids and all(
                 len(grid["columns"].split()) == 1 for grid in active_grids
             ), grids
-            for selector in ("#local-preview", "#local-approve", "#preview-validity"):
+            # Leave the viewport on the two numbered actions for the formal zoom capture.
+            for selector in ("#preview-validity", "#local-preview", "#local-approve"):
                 page.locator(selector).scroll_into_view_if_needed()
                 assert page.locator(selector).is_visible()
             assert _body_overflow(page) is False
