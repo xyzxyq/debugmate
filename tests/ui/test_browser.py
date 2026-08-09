@@ -55,6 +55,7 @@ _QA_STAGING_ROW_KEYS = {
 _STRICT_LOOPBACK_BASE_URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})\Z")
 _RUNNER = _ROOT / "scripts" / "run-phase4-browser-layout-qa.ps1"
 _LOCAL_LIVE_RUNNER = _ROOT / "scripts" / "run-phase4-local-live-qa.ps1"
+_PHASE7_RUNNER = _ROOT / "scripts" / "run-phase7-real-input-qa.ps1"
 _LOCAL_LIVE_SCREENSHOT_ENV = "DEBUGMATE_UI_SCREENSHOT_PATH"
 _LOCAL_LIVE_LEDGER_ENV = "DEBUGMATE_UI_LEDGER_PATH"
 _LOCAL_LIVE_LEDGER = _EVIDENCE / "local-live-vq01.json"
@@ -784,6 +785,130 @@ def test_p7_ledger_rejects_sensitive_or_authority_fields(
     payload[forbidden] = "must-not-enter-ledger"
     with pytest.raises(AssertionError):
         _validate_phase7_evidence_row(payload)
+
+
+def _run_phase7_powershell(command: str) -> subprocess.CompletedProcess[str]:
+    runner = str(_PHASE7_RUNNER).replace("'", "''")
+    return subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            f"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+            f"$ErrorActionPreference='Stop'; . '{runner}'; {command}",
+        ],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=45,
+        check=False,
+    )
+
+
+def _write_phase7_set(directory: Path, run_id: str, verified_at: str) -> None:
+    directory.mkdir()
+    for scenario in _PHASE7_SCENARIOS:
+        png = directory / f"{scenario}.png"
+        Image.new("RGB", (32, 24), "white").save(png)
+        ledger = _phase7_ledger_fixture(scenario, png.read_bytes())
+        ledger["qa_run_id"] = run_id
+        ledger["verified_at_utc"] = verified_at
+        (directory / f"{scenario}.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+
+
+def test_p7_runner_static_contract_is_owned_and_phase7_only() -> None:
+    source = _PHASE7_RUNNER.read_text(encoding="utf-8")
+    for required in (
+        "Start-Process",
+        "-WindowStyle Hidden",
+        "Assert-CapturedServerOwnership",
+        "Assert-JUnitZeroIssues",
+        "Assert-Phase7EvidenceSet",
+        "DEBUGMATE_PHASE7_QA_RUN_ID",
+        "DEBUGMATE_PHASE7_STAGING_DIR",
+        "evidence\\ui\\phase7",
+        "Stop-CapturedServer",
+        "Wait-ForLoopbackPortClosed",
+    ):
+        assert required in source
+    assert "evidence\\ui\\phase4" not in source
+    assert "evidence\\course-v0.1" not in source
+    assert "deliverables" not in source
+
+
+def test_p7_skip_gate_rejects_junit_skip(tmp_path: Path) -> None:
+    junit = tmp_path / "skipped.xml"
+    junit.write_text(
+        '<testsuite tests="1" failures="0" errors="0" skipped="1"></testsuite>',
+        encoding="utf-8",
+    )
+    result = _run_phase7_powershell(
+        f"Assert-JUnitZeroIssues -Path '{str(junit).replace("'", "''")}'"
+    )
+    assert result.returncode != 0
+    assert "skipped=1" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["missing", "extra", "stale_run", "stale_time", "hash", "non_pair", "residue"],
+)
+def test_p7_inventory_validation_fails_closed(tmp_path: Path, fault: str) -> None:
+    run_id = "p7qa_" + "1" * 32
+    evidence = tmp_path / "phase7.staging"
+    _write_phase7_set(evidence, run_id, "2026-08-09T10:00:05Z")
+    if fault == "missing":
+        (evidence / "P7-VQ-01.json").unlink()
+    elif fault == "extra":
+        (evidence / "extra.json").write_text("{}", encoding="utf-8")
+    elif fault == "stale_run":
+        path = evidence / "P7-VQ-01.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["qa_run_id"] = "p7qa_" + "2" * 32
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    elif fault == "stale_time":
+        path = evidence / "P7-VQ-01.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["verified_at_utc"] = "2026-08-08T10:00:00Z"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    elif fault == "hash":
+        (evidence / "P7-VQ-01.png").write_bytes(b"not-the-ledger-png")
+    elif fault == "non_pair":
+        (evidence / "P7-VQ-02.png").unlink()
+    else:
+        (evidence / ".foreign.backup").write_bytes(b"residue")
+    command = (
+        f"Assert-Phase7EvidenceSet -Directory '{str(evidence).replace("'", "''")}' "
+        f"-QaRunId '{run_id}' -RunStartedAtUtc ([DateTimeOffset]'2026-08-09T10:00:00Z') "
+        "-RunFinishedAtUtc ([DateTimeOffset]'2026-08-09T10:00:10Z')"
+    )
+    assert _run_phase7_powershell(command).returncode != 0
+
+
+def test_p7_transaction_failure_restores_prior_formal_directory(tmp_path: Path) -> None:
+    formal = tmp_path / "phase7"
+    formal.mkdir()
+    (formal / "old.txt").write_text("old", encoding="utf-8")
+    quoted = str(formal).replace("'", "''")
+    command = rf"""
+$move = {{ param($Source, $Destination)
+    if ([string]$Source -match '\.staging$') {{ throw 'injected promotion failure' }}
+    Move-Item -LiteralPath $Source -Destination $Destination
+}}
+$transaction = New-Phase7EvidenceTransaction -FinalDirectory '{quoted}' `
+    -QaRunId ('p7qa_' + ('1' * 32)) -MoveDirectory $move
+try {{ Complete-Phase7EvidenceTransaction -Transaction $transaction }} catch {{}}
+if (-not (Test-Path -LiteralPath (Join-Path '{quoted}' 'old.txt') -PathType Leaf)) {{ exit 9 }}
+if (@(Get-ChildItem -LiteralPath '{str(tmp_path).replace("'", "''")}' -Force |
+    Where-Object {{ $_.Name -match '\.(staging|backup)$' }}).Count -ne 0) {{ exit 10 }}
+"""
+    result = _run_phase7_powershell(command)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.browser
