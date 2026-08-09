@@ -1158,6 +1158,38 @@ def test_p7_security_scope_scans_scripts_and_configuration(
             "scripts/config.ps1",
             '$env:DIFY_API_KEY = "app-abcdefghijklmnop"\n',  # PHASE7_SYNTHETIC_SECRET
         ),
+        (
+            "config.json",
+            '{"api_key": "app-abcdefghijklmnop"}\n',  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "config.json",
+            "{'api_key': 'app-abcdefghijklmnop'}\n",  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "config.json",
+            '{"api-key": app-abcdefghijklmnop}\n',  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "config.json",
+            "{'api-key': app-abcdefghijklmnop}\n",  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "debugmate.toml",
+            '"api_key" = "app-abcdefghijklmnop"\n',  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "debugmate.toml",
+            "'api_key' = 'app-abcdefghijklmnop'\n",  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "debugmate.toml",
+            '"api-key" = app-abcdefghijklmnop\n',  # PHASE7_SYNTHETIC_SECRET
+        ),
+        (
+            "debugmate.toml",
+            "'api-key' = app-abcdefghijklmnop\n",  # PHASE7_SYNTHETIC_SECRET
+        ),
     ],
 )
 def test_p7_security_scope_rejects_quoted_and_unquoted_api_keys(
@@ -1175,24 +1207,26 @@ def test_p7_security_scope_rejects_quoted_and_unquoted_api_keys(
 
 
 @pytest.mark.parametrize(
-    "value",
+    ("relative_path", "value"),
     [
-        "DIFY_API_KEY=REDACTED\n",
-        "DIFY_API_KEY=[REDACTED]\n",
-        'DIFY_API_KEY="null"\n',
-        "DIFY_API_KEY='none'\n",
-        "DIFY_API_KEY=empty\n",
-        'PASSWORD = "PASSWORD"\n',  # PHASE7_SYNTHETIC_SECRET
-        "TOKEN = token\n",
-        "CLIENT_SECRET = 'secret'\n",
-        'REQUEST_SIGNATURE = "signature"\n',  # PHASE7_SYNTHETIC_SECRET
+        (".env.example", "DIFY_API_KEY=REDACTED\n"),
+        (".env.example", "DIFY_API_KEY=[REDACTED]\n"),
+        (".env.example", 'DIFY_API_KEY="null"\n'),
+        (".env.example", "DIFY_API_KEY='none'\n"),
+        (".env.example", "DIFY_API_KEY=empty\n"),
+        (".env.example", 'PASSWORD = "PASSWORD"\n'),  # PHASE7_SYNTHETIC_SECRET
+        (".env.example", "TOKEN = token\n"),
+        (".env.example", "CLIENT_SECRET = 'secret'\n"),
+        (".env.example", 'REQUEST_SIGNATURE = "signature"\n'),  # PHASE7_SYNTHETIC_SECRET
+        ("config.json", '{"api_key": "REDACTED"}\n'),
+        ("config.json", '{"api_key": "REDACTED",}\n'),
     ],
 )
 def test_p7_security_scope_allows_explicit_api_key_placeholders(
-    tmp_path: Path, value: str
+    tmp_path: Path, relative_path: str, value: str
 ) -> None:
     repository, baseline = _phase7_security_fixture(tmp_path)
-    (repository / ".env.example").write_text(value, encoding="utf-8")
+    (repository / relative_path).write_text(value, encoding="utf-8")
 
     result = _run_phase7_security(repository, baseline)
 

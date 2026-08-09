@@ -66,8 +66,9 @@ function Assert-Phase7ValueSafeFiles {
         'token', 'password', 'secret', 'signature'
     )
     $placeholderPattern = ($placeholderValues | ForEach-Object { [regex]::Escape($_) }) -join '|'
-    $quotedCredentialPattern = '(?i){0}\s*[:=]\s*(["''])(?!(?:{1})\1(?:\s|$|[#;]))[^"'']{{8,}}\1' -f $credentialNames, $placeholderPattern # PHASE7_SCAN_PATTERN
-    $unquotedCredentialPattern = '(?i){0}\s*[:=]\s*(?!(?:{1})(?:\s*(?:[#;].*)?)?$)[A-Za-z0-9][A-Za-z0-9._/+:-]{{7,}}(?:\s*(?:[#;].*)?)?$' -f $credentialNames, $placeholderPattern # PHASE7_SCAN_PATTERN
+    $credentialKey = '(?:"{0}"|''{0}''|{0})' -f $credentialNames
+    $quotedCredentialPattern = '(?i){0}\s*[:=]\s*(["''])(?!(?:{1})\1(?:\s|$|[#;,}}\]]))[^"'']{{8,}}\1' -f $credentialKey, $placeholderPattern # PHASE7_SCAN_PATTERN
+    $unquotedCredentialPattern = '(?i){0}\s*[:=]\s*(?!(?:{1})(?=\s*(?:$|[#;,}}\]])))[A-Za-z0-9][A-Za-z0-9._/+:-]{{7,}}(?=\s*(?:$|[#;,}}\]]))' -f $credentialKey, $placeholderPattern # PHASE7_SCAN_PATTERN
     $patterns = @(
         '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
         $quotedCredentialPattern,
