@@ -628,23 +628,25 @@ Security enforcement is enabled because `.planning/config.json` does not set it 
 **Do not touch:** Phase 9 representative comparisons or Phase 10 PPTX/MP4/SRT/screenshots. `[VERIFIED: Deferred Ideas]`  
 **Exit:** one zero-skip real redacted Edge/Dify chain with strict envelope, 17-source attestation, Markdown/PNG/MP3/ZIP hashes and no secret/raw-ID findings. `[VERIFIED: D8-17/D8-19]`
 
-## Open Questions / Mandatory Live Checks
+## RESOLVED — Bounded Mandatory Live Execution Checkpoints
+
+These provider-specific shapes are not planning assumptions or open design questions. Each is assigned to an executable plan/task below. The executor must run the named checkpoint against the current configured Dify resources; if the observed shape does not satisfy the strict local contract, that task fails closed, updates the bounded sanitizer/DSL/contract and exports fresh evidence before continuing. No checkpoint may be marked passed from historical C01–C07 evidence.
 
 1. **Does the current published app still accept the singular `image_input` object from the exported `type: file` DSL?**  
    What is known: the locked decision and retained C03 live capture use the singular object; generic current API docs describe file variables as arrays. `[VERIFIED: D8-04; retained C03 evidence]` `[CITED: https://docs.dify.ai/en/api-reference/workflow-runs/run-workflow]`  
-   Execution check: call Get App Parameters, upload one committed redacted PNG with the stable user, then run the exact exported singular shape once. Fail closed and refresh DSL/tests if the published app rejects it. `[CITED: https://docs.dify.ai/en/api-reference/applications/get-app-parameters]`
+   **Resolved checkpoint — Plan 08-07 Task 1:** call Get App Parameters, verify and upload `tests/fixtures/phase8/terminal-module-not-found-redacted.png` with the stable user, then run the exact exported singular shape once. If rejected, fail closed, refresh the DSL/adapter tests, publish/re-export the corrected contract, and rerun; text-only substitution is forbidden. `[CITED: https://docs.dify.ai/en/api-reference/applications/get-app-parameters]`
 
 2. **What exact keys does the current Knowledge Retrieval `result` provide for this dataset?**  
    What is known: official docs guarantee an array with content, metadata, title and other attributes but do not freeze every nested key. `[CITED: https://docs.dify.ai/en/cloud/use-dify/nodes/knowledge-retrieval]`  
-   Execution check: use one bounded workflow debug/live output, update the sanitizer allowlist to observed keys, export fresh DSL, and retain only the sanitized projection/hash. Never depend on console logs for product acceptance. `[VERIFIED: D8-05/D8-07]`
+   **Resolved checkpoint — Plan 08-03 Task 3, confirmed by Plan 08-07 Task 1:** use one bounded workflow live output, accept only documented/observed keys through the strict sanitizer, export a fresh DSL, and retain only the sanitized projection/hash. Unknown or missing required keys fail closed; console logs never satisfy product acceptance. `[VERIFIED: D8-05/D8-07]`
 
 3. **Which current metadata field IDs and document metadata serialization does the configured dataset return?**  
    What is known: official endpoints support custom fields, batch document updates and list/readback. `[CITED: https://docs.dify.ai/en/api-reference/metadata/create-metadata-field]` `[CITED: https://docs.dify.ai/en/api-reference/metadata/update-document-metadata-in-batch]`  
-   Execution check: create/list fields, write one synthetic document's hashes, list/get it, then proceed with the sealed 17-source sync only if roundtrip equality holds. `[VERIFIED: D8-06 fail-closed requirement]`
+   **Resolved checkpoint — Plan 08-02 Task 1, executed live by Plan 08-07 Task 1:** create/list fields, write one synthetic document's hashes, list/get it, and proceed with the sealed 17-source sync only if roundtrip equality holds. Shape drift or unequal serialization fails closed and requires the strict metadata adapter/readback fixture to be refreshed before retry. `[VERIFIED: D8-06 fail-closed requirement]`
 
 4. **Does Dify report any cost/price field for the current provider/run?**  
    What is known: current blocking Workflow docs promise total tokens/steps/elapsed time but not price. `[CITED: https://docs.dify.ai/en/api-reference/workflow-runs/run-workflow]`  
-   Execution check: accept only documented/allowlisted numeric fields actually present; otherwise store `not_reported`, never `0`. `[VERIFIED: D8-18]`
+   **Resolved checkpoint — Plan 08-01 Task 2 contract, observed by Plan 08-07 Tasks 1/3:** accept only documented/allowlisted numeric fields actually present; otherwise store `not_reported`, never `0`. An unknown cost field is ignored unless explicitly added to the strict contract with tests; raw usage/provider bodies are never retained. `[VERIFIED: D8-18]`
 
 ## Assumptions Log
 
