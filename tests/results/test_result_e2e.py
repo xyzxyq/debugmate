@@ -7,13 +7,17 @@ tests: every successful assertion is based on ``verify_result_bundle`` bytes.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 from tests.results.conftest import _FailAdapter, _font_copy
 from tests.results.test_service import _service
 
+from debugmate.cloud.contracts import ExecutionBackend
+from debugmate.evidence import publish_diagnosis_evidence
 from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.card import CardRenderFailure, render_card
 from debugmate.results.consistency import validate_result_candidates
@@ -182,6 +186,50 @@ def test_completed_result_e2e(completed_source_bundle, tmp_path: Path) -> None:
         verified.manifest.identity.case_id, verified.manifest.result_id, "bundle"
     ).read_bytes()
     assert archive[:4] == b"PK\x03\x04"
+
+
+def test_strict_dify_outcome_reuses_complete_mp3_and_zip_chain(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    """A strict Dify outcome keeps one identity through every existing artifact."""
+
+    outcome, _source_path = completed_source_bundle
+    dify_outcome = outcome.model_copy(
+        update={"execution_backend": ExecutionBackend.DIFY}
+    )
+    evidence_root = tmp_path / "dify-evidence"
+    source_path = publish_diagnosis_evidence(dify_outcome, evidence_root)
+
+    _outcome, _source, root, bundle = _real_completed_bundle(
+        (dify_outcome, source_path), tmp_path
+    )
+    verified = verify_result_bundle(bundle.path)
+    service = _restore_service(
+        outcome=dify_outcome,
+        source_path=source_path,
+        root=root,
+        tmp_path=tmp_path,
+    )
+    archive_bytes = service.resolve_download(
+        verified.manifest.identity.case_id,
+        verified.manifest.result_id,
+        "bundle",
+    ).read_bytes()
+    archive_path = tmp_path / "dify-result.zip"
+    archive_path.write_bytes(archive_bytes)
+
+    assert verified.manifest.execution_backend is ExecutionBackend.DIFY
+    assert verified.manifest.audio is not None
+    assert verified.manifest.audio.backend == "sapi"
+    assert verified.manifest.audio.fallback_used is True
+    assert 30_000 <= verified.manifest.audio.duration_ms <= 60_000
+    assert (verified.path / "report.md").is_file()
+    assert (verified.path / "card.png").is_file()
+    assert (verified.path / "recap.mp3").is_file()
+    with zipfile.ZipFile(archive_path) as archive:
+        archived_manifest = json.loads(archive.read("result-manifest.json"))
+        assert archived_manifest == verified.manifest.model_dump(mode="json")
+        assert {"report.md", "card.png", "recap.mp3"} <= set(archive.namelist())
 
 
 def test_png_partial_result_e2e(candidates, tmp_path: Path) -> None:
