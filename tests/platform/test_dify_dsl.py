@@ -272,6 +272,34 @@ def test_c06_rejects_same_schema_rerun_replacement(tmp_path: Path) -> None:
         validate_c06_record(record, tmp_path)
 
 
+def test_c06_historical_record_uses_independent_reexport_after_dsl_evolves(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "platform/dify").mkdir(parents=True)
+    record, output = _valid_c06_record(tmp_path)
+    source = tmp_path / "source.yml"
+    reexport = tmp_path / "reexport.yml"
+    authoritative = tmp_path / "platform/dify/app.dsl.yml"
+    authoritative.write_text(
+        SOURCE_DSL.replace("enabled: true", "enabled: false"), encoding="utf-8"
+    )
+    record.update(
+        {
+            "source_dsl": "platform/dify/app.dsl.yml",
+            "source_sha256": sha256_file(source),
+            "source_normalized_sha256": compare_dsl_files(source, reexport)[
+                "source_normalized_sha256"
+            ],
+            "reexport_normalized_sha256": compare_dsl_files(source, reexport)[
+                "reexport_normalized_sha256"
+            ],
+            "reconstructed_output": output.name,
+        }
+    )
+
+    assert validate_c06_record(record, tmp_path)["status"] == "pass"
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

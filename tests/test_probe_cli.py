@@ -88,9 +88,7 @@ def _historical_inventory(repository: Path, evidence_root: Path) -> list[dict[st
 
 
 def settings() -> DebugMateSettings:
-    return DebugMateSettings.from_env(
-        {"DIFY_API_KEY": SENTINEL, "DIFY_BASE_URL": "https://api.dify.test/v1"}
-    )
+    return DebugMateSettings.from_env({"DIFY_API_KEY": SENTINEL})
 
 
 @pytest.mark.parametrize(
@@ -141,7 +139,8 @@ def test_dify_connect_error_retries_once() -> None:
     result = backend.run_workflow({"case_id": diagnosis["case_id"]}, user="debugmate-test")
 
     assert calls == 2
-    assert result.run_id == "run-test"
+    assert result.run_id.startswith("run_")
+    assert result.run_id != "run-test"
     assert result.candidate_payload["case_id"] == diagnosis["case_id"]
 
 

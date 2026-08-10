@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic import TypeAdapter
 
@@ -47,6 +48,21 @@ class FixtureBackend:
         return FileUploadResult(
             file_id=f"fixture:{path.name}",
             filename=path.name,
+            backend="fixture",
+        )
+
+    def upload_bytes(
+        self,
+        content: bytes,
+        *,
+        filename: str,
+        mime_type: Literal["image/png", "image/jpeg"],
+        user: str,
+    ) -> FileUploadResult:
+        del content, mime_type, user
+        return FileUploadResult(
+            file_id=f"fixture:{filename}",
+            filename=filename,
             backend="fixture",
         )
 

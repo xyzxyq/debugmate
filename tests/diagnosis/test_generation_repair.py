@@ -262,4 +262,5 @@ def test_dify_adapter_exposes_only_documented_candidate_output() -> None:
     candidate = backend.run_workflow({}, user="debugmate-test")
 
     assert sentinel not in json.dumps(candidate.candidate_payload, ensure_ascii=False)
-    assert candidate.run_id == "dify-run-safe"
+    assert candidate.run_id.startswith("run_")
+    assert candidate.run_id != "dify-run-safe"

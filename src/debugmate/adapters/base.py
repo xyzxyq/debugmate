@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
 from debugmate.cloud.contracts import DifyRunEnvelope, DifyUsage
@@ -84,10 +83,8 @@ class ApprovedImageBackend(CandidateBackend, Protocol):
 
 
 @runtime_checkable
-class DiagnosisBackend(CandidateBackend, Protocol):
+class DiagnosisBackend(ApprovedImageBackend, Protocol):
     """Backend interface shared by fixture and cloud adapters."""
-
-    def upload_file(self, path: Path, user: str) -> FileUploadResult: ...
 
     def synthesize_audio(self, text: str, user: str) -> AudioSynthesisResult: ...
 
