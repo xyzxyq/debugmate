@@ -1,0 +1,126 @@
+"""Offline contracts for Phase 08 ordinary Dify/live UI assembly."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import socket
+from pathlib import Path
+
+import httpx
+import pytest
+from pydantic import SecretStr
+
+from debugmate.cloud.contracts import ExecutionBackend
+from debugmate.cloud.workflow import DifyLiveWorkflow
+from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
+from debugmate.settings import DebugMateSettings
+from debugmate.ui import serve as serve_module
+
+
+BUILD_ID = "b" * 64
+
+
+def _write_live_authority(root: Path) -> tuple[Path, Path, str]:
+    build_root = root / BUILD_ID
+    build_root.mkdir(parents=True)
+    manifest = {
+        "build_id": BUILD_ID,
+        "sources": [
+            {
+                "source_id": f"source-{index:02d}",
+                "url": f"https://example.invalid/source-{index:02d}",
+            }
+            for index in range(17)
+        ],
+    }
+    manifest_path = build_root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    dataset_id = "configured-dataset-binding"
+    attestation = DifyReadbackAttestation(
+        knowledge_build_id=BUILD_ID,
+        dataset_fingerprint=hashlib.sha256(dataset_id.encode()).hexdigest(),
+        document_count=17,
+        document_fingerprints=[f"{index + 1:064x}" for index in range(17)],
+        config=DifySyncConfig(),
+        response_hashes=["c" * 64],
+    )
+    attestation_path = root / "knowledge-readback.json"
+    attestation_path.write_text(attestation.model_dump_json(), encoding="utf-8")
+    return manifest_path, attestation_path, dataset_id
+
+
+def _settings(*, dataset_key: bool = True) -> DebugMateSettings:
+    return DebugMateSettings(
+        dify_api_key=SecretStr("app-secret"),
+        dify_dataset_api_key=SecretStr("dataset-secret") if dataset_key else None,
+        dify_user="debugmate-phase8",
+        approval_key=SecretStr("a" * 32),
+    )
+
+
+def _poison_outbound(monkeypatch: pytest.MonkeyPatch) -> None:
+    def blocked(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("construction attempted outbound I/O")
+
+    monkeypatch.setattr(httpx.Client, "send", blocked)
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+
+
+def test_complete_local_authority_constructs_dify_without_network(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path, attestation_path, dataset_id = _write_live_authority(tmp_path)
+    _poison_outbound(monkeypatch)
+
+    dependencies = serve_module._live_dependencies(
+        settings=_settings(),
+        runtime_root=tmp_path / "runtime",
+        build_manifest=manifest_path,
+        readback_attestation=attestation_path,
+        dataset_binding=dataset_id,
+        app_ready=True,
+    )
+
+    assert dependencies.execution_backend is ExecutionBackend.DIFY
+    assert dependencies.fallback_reason is None
+    assert isinstance(dependencies.service._workflow, DifyLiveWorkflow)
+    assert dependencies.service._live_execution_backend is ExecutionBackend.DIFY
+
+
+def test_incomplete_configuration_constructs_value_free_local_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _poison_outbound(monkeypatch)
+    settings = DebugMateSettings(approval_key=SecretStr("a" * 32))
+
+    dependencies = serve_module._live_dependencies(
+        settings=settings,
+        runtime_root=tmp_path / "runtime",
+        app_ready=False,
+    )
+
+    assert dependencies.execution_backend is ExecutionBackend.LOCAL_FALLBACK
+    assert dependencies.fallback_reason == "app_config_incomplete"
+    assert dependencies.service._live_execution_backend is ExecutionBackend.LOCAL_FALLBACK
+    assert "secret" not in dependencies.fallback_reason
+
+
+def test_dataset_key_is_not_required_after_verified_readback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path, attestation_path, dataset_id = _write_live_authority(tmp_path)
+    _poison_outbound(monkeypatch)
+
+    dependencies = serve_module._live_dependencies(
+        settings=_settings(dataset_key=False),
+        runtime_root=tmp_path / "runtime",
+        build_manifest=manifest_path,
+        readback_attestation=attestation_path,
+        dataset_binding=dataset_id,
+        app_ready=True,
+    )
+
+    assert dependencies.execution_backend is ExecutionBackend.DIFY
+    assert isinstance(dependencies.service._workflow, DifyLiveWorkflow)
