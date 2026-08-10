@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import os
 import stat
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.diagnosis.workflow import DiagnosisRunOutcome
+from debugmate.cloud.contracts import ExecutionBackend, ReceiptStatus
+from debugmate.cloud.workflow import CloudWorkflowError
+from debugmate.privacy.models import ApprovedRedactedInput, RedactedFields
 from debugmate.results.consistency import validate_result_candidates
 from debugmate.results.outcome_store import DiagnosisOutcomeStore
 from debugmate.results.publisher import TrustedResultRoot, publish_result_bundle
@@ -114,6 +118,42 @@ def _dynamic_composer(
         )
 
     return root, compose
+
+
+def test_cloud_validation_failure_remains_typed_and_publishes_nothing(
+    candidates, tmp_path: Path
+) -> None:
+    class FailedCloudWorkflow:
+        def run(self, approved):
+            raise CloudWorkflowError(
+                "diagnosis_validation", receipt_status=ReceiptStatus.FAILED
+            )
+
+    service = _service(tmp_path, candidates, workflow=FailedCloudWorkflow())
+    service._live_execution_backend = ExecutionBackend.DIFY
+    state = service.diagnose_and_compose(
+        ApprovedRedactedInput(
+            case_id="case_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            redacted=RedactedFields(error_text="safe synthetic error"),
+            preview_hash="1" * 64,
+            approval_id="synthetic",
+            approval_signature="2" * 64,
+            approved_at_utc=datetime(2026, 8, 10, tzinfo=UTC),
+        )
+    )
+
+    assert state.execution_backend == "dify"
+    assert state.failure is not None
+    assert state.failure.code == "diagnosis_validation"
+    assert state.availability.model_dump() == {
+        "report": False,
+        "card": False,
+        "audio": False,
+        "archive": False,
+    }
+    assert not (tmp_path / "evidence").exists()
+    assert not (tmp_path / "outcomes").exists()
+    assert not (tmp_path / "results").exists()
 
 
 def test_indexed_replay_imports_complete_outcome_publishes_new_verified_result_and_restores(
