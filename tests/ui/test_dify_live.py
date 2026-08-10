@@ -26,7 +26,7 @@ from debugmate.results.contracts import (
 from debugmate.results.service import ServiceStageEvent
 from debugmate.settings import DebugMateSettings
 from debugmate.ui import serve as serve_module
-from debugmate.ui.app import build_app
+from debugmate.ui.app import UiCallbacks, build_app
 from debugmate.ui.presentation import render_view_state
 
 BUILD_ID = "b" * 64
@@ -249,6 +249,24 @@ def test_backend_labels_and_dify_confirmation_copy_are_explicit() -> None:
     copy = disclosure["props"]["value"]
     assert "脱敏" in copy and "Dify" in copy and "额度" in copy
     assert "API key" not in copy and "run_id" not in copy
+
+
+def test_configured_dify_is_truthful_before_and_after_safe_callback_failure() -> None:
+    app = build_app(_UiOnlyService(), execution_backend=ExecutionBackend.DIFY)
+    status = next(
+        component
+        for component in app.get_config_file()["components"]
+        if component.get("props", {}).get("elem_id") == "diagnostic-status"
+    )
+    callbacks = UiCallbacks(
+        _UiOnlyService(), execution_backend=ExecutionBackend.DIFY
+    )
+
+    failed = callbacks.diagnose(object())
+
+    assert "Dify" in status["props"]["value"]
+    assert failed.state.execution_backend is ExecutionBackend.DIFY
+    assert "Dify" in failed.view.mode_badge
 
 
 def test_dify_running_and_validation_are_coarse_truthful_stages() -> None:
