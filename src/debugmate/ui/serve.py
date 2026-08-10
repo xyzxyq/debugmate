@@ -3,21 +3,32 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import re
 import secrets
 import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from debugmate.adapters.dify import DifyBackend
 from debugmate.cloud.contracts import ExecutionBackend
+from debugmate.cloud.receipts import DifyReceiptStore
+from debugmate.cloud.workflow import DifyLiveWorkflow
+from debugmate.contracts import schema_sha256
 from debugmate.diagnosis.local_rule import LocalRuleGenerationProvider
 from debugmate.diagnosis.providers import ProductionExtractionProvider
 from debugmate.diagnosis.workflow import DiagnosisWorkflow
+from debugmate.gateway import CloudGateway
 from debugmate.knowledge.local_rule import (
     LocalRuleRetrievalProvider,
     load_local_rule_snapshot,
 )
+from debugmate.knowledge.sync import DifyReadbackAttestation
 from debugmate.privacy.models import InputEnvelope, PreviewBundle
 from debugmate.privacy.rapidocr_backend import RapidOcrBackend
 from debugmate.privacy.text_redactor import build_preview
@@ -33,16 +44,21 @@ from debugmate.results.report import render_citations, render_report
 from debugmate.results.service import ResultApplicationService
 from debugmate.results.tts.base import TtsAdapterError, TtsRequestIdentity
 from debugmate.results.tts.sapi import SapiTtsAdapter
+from debugmate.settings import DebugMateSettings
 from debugmate.ui.app import WORKBENCH_CSS, build_app, ensure_content_endpoint
 
 
 @dataclass(frozen=True, slots=True)
 class LocalAppDependencies:
-    """Explicit Phase 07 graph shared by preview and approved extraction."""
+    """Ordinary app graph shared by preview and approved extraction."""
 
     service: ResultApplicationService
     ocr_backend: RapidOcrBackend
     redacted_root: Path
+    execution_backend: ExecutionBackend
+    approval_key: bytes
+    fallback_reason: str | None = None
+    contract_hashes: tuple[str, str, str] | None = None
 
     @property
     def preview_workspace(self) -> Path:
@@ -194,6 +210,7 @@ def _local_dependencies(
     results_root = TrustedResultRoot.for_testing(runtime_root / "results")
     redacted_root = (runtime_root / "redacted").absolute()
     redacted_root.mkdir(parents=True, exist_ok=True)
+
     def unavailable_ocr_factory():
         raise RuntimeError("controlled OCR unavailable gate")
 
@@ -230,6 +247,202 @@ def _local_dependencies(
         service=service,
         ocr_backend=ocr_backend,
         redacted_root=redacted_root,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
+        approval_key=approval_key,
+    )
+
+
+def _contract_hashes(project_root: Path) -> tuple[str, str, str]:
+    """Load current versioned contract identities without probing a provider."""
+
+    dsl_path = project_root / "platform" / "dify" / "app.dsl.yml"
+    prompt_path = project_root / "prompts" / "v1-baseline.md"
+    dsl_text = dsl_path.read_text(encoding="utf-8")
+    match = re.search(r'DSL_SEMANTIC_SHA256\s*=\s*"([0-9a-f]{64})"', dsl_text)
+    if match is None:
+        raise ValueError("Dify DSL semantic identity is missing")
+    prompt_hash = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
+    return match.group(1), prompt_hash, schema_sha256()
+
+
+def _fallback_dependencies(
+    reason: str,
+    *,
+    runtime_root: Path | None,
+    approval_key: bytes,
+    replay_local_only: bool,
+    qa_result_mode: str | None,
+    qa_ocr_unavailable: bool,
+) -> LocalAppDependencies:
+    dependencies = _local_dependencies(
+        runtime_root=runtime_root,
+        approval_key=approval_key,
+        replay_local_only=replay_local_only,
+        qa_result_mode=qa_result_mode,
+        qa_ocr_unavailable=qa_ocr_unavailable,
+    )
+    return LocalAppDependencies(
+        service=dependencies.service,
+        ocr_backend=dependencies.ocr_backend,
+        redacted_root=dependencies.redacted_root,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
+        approval_key=approval_key,
+        fallback_reason=reason,
+    )
+
+
+def _live_dependencies(
+    *,
+    settings: DebugMateSettings | None = None,
+    runtime_root: Path | None = None,
+    build_manifest: Path | None = None,
+    readback_attestation: Path | None = None,
+    dataset_binding: str | None = None,
+    app_ready: bool | None = None,
+    replay_local_only: bool = True,
+    qa_result_mode: str | None = None,
+    qa_ocr_unavailable: bool = False,
+) -> LocalAppDependencies:
+    """Construct configured Dify or an explicit local fallback with zero I/O.
+
+    The dataset management key is deliberately absent from this gate.  Runtime
+    authority comes from the locally verified readback attestation, while the
+    management key is reserved for an explicit synchronization acceptance run.
+    """
+
+    project_root = Path(__file__).resolve().parents[3]
+    if settings is None:
+        try:
+            settings = DebugMateSettings.from_env()
+        except ValidationError:
+            approval_key = secrets.token_bytes(32)
+            return _fallback_dependencies(
+                "app_config_invalid",
+                runtime_root=runtime_root,
+                approval_key=approval_key,
+                replay_local_only=replay_local_only,
+                qa_result_mode=qa_result_mode,
+                qa_ocr_unavailable=qa_ocr_unavailable,
+            )
+    runtime_root = Path(runtime_root or project_root / ".debugmate-runtime").absolute()
+    approval_key = settings.approval_key_bytes
+    ready = (
+        os.environ.get("DEBUGMATE_DIFY_DIAGNOSIS_APP_CONFIGURED") == "1"
+        if app_ready is None
+        else app_ready
+    )
+    if not settings.dify_application_configured:
+        return _fallback_dependencies(
+            "app_config_incomplete",
+            runtime_root=runtime_root,
+            approval_key=approval_key,
+            replay_local_only=replay_local_only,
+            qa_result_mode=qa_result_mode,
+            qa_ocr_unavailable=qa_ocr_unavailable,
+        )
+    if not ready:
+        return _fallback_dependencies(
+            "app_not_ready",
+            runtime_root=runtime_root,
+            approval_key=approval_key,
+            replay_local_only=replay_local_only,
+            qa_result_mode=qa_result_mode,
+            qa_ocr_unavailable=qa_ocr_unavailable,
+        )
+
+    dataset_binding = dataset_binding or os.environ.get("DIFY_DATASET_ID")
+    readback_attestation = readback_attestation or (
+        project_root / "evidence" / "dify-live" / "phase8" / "knowledge-readback.json"
+    )
+    try:
+        attestation = DifyReadbackAttestation.model_validate_json(
+            Path(readback_attestation).read_bytes(), strict=True
+        )
+    except (OSError, ValidationError):
+        reason = (
+            "knowledge_attestation_missing"
+            if not Path(readback_attestation).is_file()
+            else "knowledge_attestation_invalid"
+        )
+        return _fallback_dependencies(
+            reason,
+            runtime_root=runtime_root,
+            approval_key=approval_key,
+            replay_local_only=replay_local_only,
+            qa_result_mode=qa_result_mode,
+            qa_ocr_unavailable=qa_ocr_unavailable,
+        )
+    if not dataset_binding or not secrets.compare_digest(
+        hashlib.sha256(dataset_binding.encode("utf-8")).hexdigest(),
+        attestation.dataset_fingerprint,
+    ):
+        return _fallback_dependencies(
+            "dataset_binding_mismatch",
+            runtime_root=runtime_root,
+            approval_key=approval_key,
+            replay_local_only=replay_local_only,
+            qa_result_mode=qa_result_mode,
+            qa_ocr_unavailable=qa_ocr_unavailable,
+        )
+    build_manifest = build_manifest or (
+        project_root
+        / ".artifacts"
+        / "knowledge-build"
+        / attestation.knowledge_build_id
+        / "manifest.json"
+    )
+    try:
+        contract_hashes = _contract_hashes(project_root)
+        manifest_payload = json.loads(Path(build_manifest).read_text(encoding="utf-8"))
+        if manifest_payload.get("build_id") != attestation.knowledge_build_id:
+            raise ValueError("knowledge build differs")
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return _fallback_dependencies(
+            "local_contract_invalid",
+            runtime_root=runtime_root,
+            approval_key=approval_key,
+            replay_local_only=replay_local_only,
+            qa_result_mode=qa_result_mode,
+            qa_ocr_unavailable=qa_ocr_unavailable,
+        )
+
+    local = _local_dependencies(
+        runtime_root=runtime_root,
+        approval_key=approval_key,
+        replay_local_only=replay_local_only,
+        qa_result_mode=qa_result_mode,
+        qa_ocr_unavailable=qa_ocr_unavailable,
+    )
+    backend = DifyBackend(settings)
+    gateway = CloudGateway(
+        backend,
+        approval_key=approval_key,
+        user=settings.dify_user,
+        redacted_root=local.redacted_root,
+    )
+    workflow = DifyLiveWorkflow(
+        gateway=gateway,
+        receipt_store=DifyReceiptStore(runtime_root / "dify-receipts"),
+        approval_key=approval_key,
+        build_manifest=Path(build_manifest),
+        readback_attestation=attestation,
+    )
+    service = ResultApplicationService(
+        workflow=workflow,
+        evidence_root=runtime_root / "evidence",
+        outcome_store=DiagnosisOutcomeStore(runtime_root / "outcomes"),
+        results_root=TrustedResultRoot.for_testing(runtime_root / "results"),
+        replay_root=project_root / "fixtures" / "replay",
+        live_execution_backend=ExecutionBackend.DIFY,
+        composer=local.service._composer,
+    )
+    return LocalAppDependencies(
+        service=service,
+        ocr_backend=local.ocr_backend,
+        redacted_root=local.redacted_root,
+        execution_backend=ExecutionBackend.DIFY,
+        approval_key=approval_key,
+        contract_hashes=contract_hashes,
     )
 
 
@@ -258,15 +471,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.host != "127.0.0.1":
         parser.error("host must be literal 127.0.0.1")
-    approval_key = secrets.token_bytes(32)
     project_root = Path(__file__).resolve().parents[3]
     cache_root = (project_root / ".debugmate-runtime" / "gradio-cache").absolute()
     cache_root.mkdir(parents=True, exist_ok=True)
     os.environ["GRADIO_TEMP_DIR"] = str(cache_root)
-    dependencies = _local_dependencies(
-        approval_key=approval_key,
+    dependencies = _live_dependencies(
         qa_ocr_unavailable=args.qa_ocr_unavailable,
     )
+    approval_key = dependencies.approval_key
     app = build_app(
         dependencies.service,
         content_origin=f"http://{args.host}:{args.port}",

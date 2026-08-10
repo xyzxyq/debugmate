@@ -17,7 +17,6 @@ from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
 from debugmate.settings import DebugMateSettings
 from debugmate.ui import serve as serve_module
 
-
 BUILD_ID = "b" * 64
 
 
