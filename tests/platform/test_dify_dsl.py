@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from debugmate.dify_live_evidence import (
     LOCKED_C06_WORKFLOW_RUN_ID_SHA256,
@@ -67,6 +69,102 @@ REEXPORTED_DSL = SOURCE_DSL.replace("name: Original", "name: Rebuilt").replace(
 ).replace("source: start-1", "source: new-start").replace(
     "position: {x: 1, y: 2}", "position: {x: 90, y: 80}"
 )
+
+AUTHORITATIVE_DSL = Path("platform/dify/app.dsl.yml")
+
+
+def _node_by_title(payload: dict[str, object], title: str) -> dict[str, object]:
+    workflow = payload["workflow"]
+    assert isinstance(workflow, dict)
+    graph = workflow["graph"]
+    assert isinstance(graph, dict)
+    nodes = graph["nodes"]
+    assert isinstance(nodes, list)
+    for node in nodes:
+        if (
+            isinstance(node, dict)
+            and isinstance(node.get("data"), dict)
+            and node["data"].get("title") == title
+        ):
+            return node
+    raise AssertionError(f"missing DSL node: {title}")
+
+
+def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
+    retrieval = _node_by_title(payload, "知识检索")
+    sanitizer = _node_by_title(payload, "知识证据净化")
+    envelope = _node_by_title(payload, "同次运行信封")
+    end = _node_by_title(payload, "输出")
+
+    retrieval_data = retrieval["data"]
+    sanitizer_data = sanitizer["data"]
+    envelope_data = envelope["data"]
+    end_data = end["data"]
+    assert all(isinstance(value, dict) for value in (
+        retrieval_data,
+        sanitizer_data,
+        envelope_data,
+        end_data,
+    ))
+    assert retrieval_data["multiple_retrieval_config"]["top_k"] == 4
+    assert retrieval_data["dataset_ids"] == []
+
+    sanitizer_variables = sanitizer_data["variables"]
+    direct_selector = [retrieval["id"], "result"]
+    assert any(item.get("value_selector") == direct_selector for item in sanitizer_variables)
+    sanitizer_code = sanitizer_data["code"]
+    assert "chunk_id_fingerprint" in sanitizer_code
+    assert "len(hits) == 4" in sanitizer_code
+    assert "[:limit]" in sanitizer_code
+    assert "https://" in sanitizer_code
+
+    envelope_code = envelope_data["code"]
+    for required in (
+        "envelope_version",
+        "extraction_facts",
+        "retrieval_trace",
+        'SCHEMA_VERSION = "1.1.0"',
+        "PROMPT_VERSION",
+        "KNOWLEDGE_BUILD_ID",
+        "DSL_SEMANTIC_SHA256",
+    ):
+        assert required in envelope_code
+    envelope_variables = envelope_data["variables"]
+    assert any(
+        item.get("value_selector") == [sanitizer["id"], "retrieval_trace"]
+        for item in envelope_variables
+    )
+    assert end_data["outputs"] == [
+        {
+            "value_selector": [envelope["id"], "run_envelope"],
+            "value_type": "object",
+            "variable": "run_envelope",
+        }
+    ]
+
+
+def test_authoritative_dsl_exports_bounded_same_run_envelope() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    _assert_phase8_same_run_contract(payload)
+
+
+def test_phase8_contract_rejects_diagnosis_without_direct_retrieval_trace() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    broken = copy.deepcopy(payload)
+    end = _node_by_title(broken, "输出")
+    normalizer = _node_by_title(broken, "合同规范化")
+    end["data"]["outputs"] = [
+        {
+            "value_selector": [normalizer["id"], "diagnosis"],
+            "value_type": "object",
+            "variable": "diagnosis",
+        }
+    ]
+
+    with pytest.raises(AssertionError):
+        _assert_phase8_same_run_contract(broken)
 
 
 def test_dsl_compare_ignores_ids_layout_and_app_display_name(tmp_path: Path) -> None:

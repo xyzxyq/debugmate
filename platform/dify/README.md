@@ -1,6 +1,6 @@
 # Dify Phase 1 重建与能力闸门
 
-本目录保存可重建的 Dify 配置边界。`app.dsl.yml` 是已经版本化的真实平台导出；`app.dsl.yml.example` 只是**不可运行的结构样例**，不能冒充真实 DSL 或执行证据。真实 DSL 已保存并不自动证明 C06，仍需版本化的“重导入后复跑”记录。
+本目录保存可重建的 Dify 配置边界。`app.dsl.yml` 是由真实平台导出维护的版本化安全合同；提交前已移除远端知识库绑定值，导入后必须在控制台重新绑定已验证知识库。`app.dsl.yml.example` 只是**不可运行的结构样例**，不能冒充真实 DSL 或执行证据。DSL 已保存并不自动证明当前产品链，仍需版本化的“重导入后复跑”记录。
 
 ## 设置顺序
 
@@ -44,6 +44,26 @@
 任何能力只有在 `evidence_path` 存在且 SHA-256 可复算时才能标记 `pass`。fixture 成功不等于 C01–C07 通过。
 
 C03/C04 的 `pass` 分别由图像请求链和 direct retrieval node log 证明，不能只从 DSL 节点或 diagnosis.evidence 推断；C06 的 `pass` 则由 independent import、re-export、规范化结构相等和 reconstructed-app rerun 的 Git-tracked 精确哈希链证明。此次提升没有刷新课程 PPTX、视频、字幕或最终截图。
+
+## Phase 08 同次运行产品合同
+
+上表 C01–C07 是 2026-08-08/09 留存的**隔离能力证据**，不是 Phase 08 当前
+`approved input → upload → direct retrieval → diagnosis → local validation` 同次运行产品证据。
+尤其是历史 C04 的 direct retrieval node log 只能证明当时检索能力存在，不能替代当前
+`run_envelope.retrieval_trace`。
+
+当前 DSL 将 Knowledge Retrieval 节点的直接 `result` 先送入确定性“知识证据净化”节点：只保留最多
+4 个唯一命中、HTTPS 来源、来源/定位、短摘要、分数和指纹，再把该 trace 与限长 extraction facts、
+DiagnosisRecord 1.1.0 候选及版本身份封装为唯一 End 输出 `run_envelope`。`file_id` 不作为工作流文件输入；
+图片只接受上传后 singular `image_input`，纯文本调用必须省略该字段。
+
+本次离线任务**没有声称已经完成**新版 DSL 的 Dify live 验证。Phase 08 通过前仍必须执行并留存：
+
+1. 导入当前 DSL，并重新绑定通过 17 源 readback 的知识库；
+2. 发布应用后重新导出，确认安全语义合同与仓库版本一致；
+3. 用一份当前已批准脱敏 PNG 验证上传和 singular `image_input`；
+4. 运行一次 blocking workflow，严格校验同一 `run_envelope` 的 extraction、direct retrieval、diagnosis 和合同身份；
+5. 只保存安全指纹、allowlisted usage 和本地验证结果，不保存任何远端原始标识或 provider body。
 
 ## 版本化现场证据复验
 

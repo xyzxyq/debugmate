@@ -100,9 +100,21 @@ workflow:
         isInIteration: false
         isInLoop: false
         sourceType: code
-        targetType: end
-      id: 1786195379702-source-1786194881058-target
+        targetType: code
+      id: 1786195379702-source-1786200000002-target
       source: '1786195379702'
+      sourceHandle: source
+      target: '1786200000002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: end
+      id: 1786200000002-source-1786194881058-target
+      source: '1786200000002'
       sourceHandle: source
       target: '1786194881058'
       targetHandle: target
@@ -124,9 +136,21 @@ workflow:
         isInIteration: false
         isInLoop: false
         sourceType: knowledge-retrieval
-        targetType: llm
-      id: 1786199531130-source-1786193315229-target
+        targetType: code
+      id: 1786199531130-source-1786200000001-target
       source: '1786199531130'
+      sourceHandle: source
+      target: '1786200000001'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: 1786200000001-source-1786193315229-target
+      source: '1786200000001'
       sourceHandle: source
       target: '1786193315229'
       targetHandle: target
@@ -251,8 +275,8 @@ workflow:
         context:
           enabled: true
           variable_selector:
-          - '1786199531130'
-          - result
+          - '1786200000001'
+          - retrieved_chunks
         model:
           completion_params:
             temperature: 0
@@ -645,10 +669,10 @@ workflow:
     - data:
         outputs:
         - value_selector:
-          - '1786195379702'
-          - diagnosis
+          - '1786200000002'
+          - run_envelope
           value_type: object
-          variable: diagnosis
+          variable: run_envelope
         selected: false
         title: 输出
         type: end
@@ -872,8 +896,243 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        dataset_ids:
-        - j7Zajcg6BFF/1cRO8HOS7t5RWr1XGBwL8O5VS70aJJAav4XA9OzN3qgCIr8OFe6T
+        code: |
+          import hashlib
+          import json
+          import re
+
+
+          EXPECTED_KNOWLEDGE_BUILD_ID = "4b9be0b50bd08a13f3ebbd8ec9b80673611383001999d5b88fbfb5f3252847c1"
+          SOURCE_ID = re.compile(r"^[a-z0-9][a-z0-9._:-]{1,127}$")
+
+
+          def bounded_text(value, limit):
+              if not isinstance(value, str):
+                  return ""
+              return value.strip()[:limit]
+
+
+          def main(retrieval_result=None, case_id=""):
+              raw_hits = retrieval_result if isinstance(retrieval_result, list) else []
+              hits = []
+              seen = set()
+              for item in raw_hits:
+                  if not isinstance(item, dict):
+                      continue
+                  metadata = item.get("metadata")
+                  metadata = metadata if isinstance(metadata, dict) else {}
+                  raw_chunk_id = bounded_text(
+                      item.get("id")
+                      or item.get("segment_id")
+                      or metadata.get("segment_id")
+                      or metadata.get("chunk_id"),
+                      512,
+                  )
+                  source_id = bounded_text(metadata.get("source_id"), 128)
+                  source_url = bounded_text(metadata.get("source_url"), 2000)
+                  locator = bounded_text(metadata.get("locator"), 300)
+                  summary = bounded_text(item.get("content"), 2000)
+                  source_title = bounded_text(
+                      item.get("title")
+                      or metadata.get("document_name")
+                      or metadata.get("title"),
+                      300,
+                  )
+                  build_id = bounded_text(metadata.get("knowledge_build_id"), 64)
+                  if (
+                      not raw_chunk_id
+                      or not SOURCE_ID.fullmatch(source_id)
+                      or not source_url.startswith("https://")
+                      or not locator
+                      or not summary
+                      or not source_title
+                      or build_id != EXPECTED_KNOWLEDGE_BUILD_ID
+                  ):
+                      continue
+                  chunk_id_fingerprint = hashlib.sha256(
+                      raw_chunk_id.encode("utf-8")
+                  ).hexdigest()
+                  if chunk_id_fingerprint in seen:
+                      continue
+                  seen.add(chunk_id_fingerprint)
+                  score = item.get("score", metadata.get("score", "not_reported"))
+                  if isinstance(score, bool) or not isinstance(score, (int, float)):
+                      score = "not_reported"
+                  else:
+                      score = max(0.0, min(1.0, float(score)))
+                  hits.append(
+                      {
+                          "chunk_fingerprint": chunk_id_fingerprint,
+                          "source_id": source_id,
+                          "source_title": source_title,
+                          "source_url": source_url,
+                          "locator": locator,
+                          "content_summary": summary,
+                          "relevance_score": score,
+                      }
+                  )
+                  if len(hits) == 4:
+                      break
+              run_payload_fingerprint = hashlib.sha256(
+                  json.dumps(
+                      {"case_id": case_id, "hits": hits},
+                      ensure_ascii=False,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  ).encode("utf-8")
+              ).hexdigest()
+              retrieval_trace = {
+                  "knowledge_build_id": EXPECTED_KNOWLEDGE_BUILD_ID,
+                  "run_fingerprint": run_payload_fingerprint,
+                  "node_fingerprint": hashlib.sha256(
+                      b"debugmate-direct-retrieval-sanitizer-v1"
+                  ).hexdigest(),
+                  "hits": hits,
+              }
+              return {
+                  "retrieved_chunks": hits,
+                  "retrieval_trace": retrieval_trace,
+              }
+        code_language: python3
+        outputs:
+          retrieval_trace:
+            children: null
+            type: object
+          retrieved_chunks:
+            children: null
+            type: array[object]
+        selected: false
+        title: 知识证据净化
+        type: code
+        variables:
+        - value_selector:
+          - '1786199531130'
+          - result
+          value_type: array[object]
+          variable: retrieval_result
+        - value_selector:
+          - '1786193038905'
+          - case_id
+          value_type: string
+          variable: case_id
+      height: 51
+      id: '1786200000001'
+      position:
+        x: 1010
+        y: 690
+      positionAbsolute:
+        x: 1010
+        y: 690
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: |
+          import re
+
+
+          ENVELOPE_VERSION = "1.0.0"
+          SCHEMA_VERSION = "1.1.0"
+          PROMPT_VERSION = "diagnosis-v1"
+          KNOWLEDGE_BUILD_ID = "4b9be0b50bd08a13f3ebbd8ec9b80673611383001999d5b88fbfb5f3252847c1"
+          DSL_SEMANTIC_SHA256 = "9a195fcd01c9525f15f52ee70794485c6dc09b980ac8fff6bde5314d03eb4357"
+          FACT_ID = re.compile(r"^fact_[0-9a-f]{32}$")
+          SOURCE_KINDS = {"text", "ocr", "vlm", "user"}
+
+
+          def bounded_text(value, limit):
+              if not isinstance(value, str):
+                  return ""
+              return value.strip()[:limit]
+
+
+          def main(diagnosis=None, retrieval_trace=None, expected_case_id=""):
+              diagnosis = dict(diagnosis) if isinstance(diagnosis, dict) else {}
+              facts = []
+              for item in diagnosis.get("observed_facts") or []:
+                  if not isinstance(item, dict) or len(facts) == 64:
+                      break
+                  fact_id = bounded_text(item.get("fact_id"), 37)
+                  source_kind = bounded_text(item.get("source_kind"), 16)
+                  confidence = item.get("confidence")
+                  if (
+                      not FACT_ID.fullmatch(fact_id)
+                      or source_kind not in SOURCE_KINDS
+                      or isinstance(confidence, bool)
+                      or not isinstance(confidence, (int, float))
+                  ):
+                      continue
+                  facts.append(
+                      {
+                          "fact_id": fact_id,
+                          "field_id": bounded_text(item.get("field_id"), 128),
+                          "value": bounded_text(item.get("value"), 4000),
+                          "source_kind": source_kind,
+                          "confidence": max(0.0, min(1.0, float(confidence))),
+                          "locator": bounded_text(item.get("locator"), 300),
+                      }
+                  )
+              diagnosis["case_id"] = expected_case_id
+              diagnosis["schema_version"] = SCHEMA_VERSION
+              diagnosis["observed_facts"] = facts
+              trace = retrieval_trace if isinstance(retrieval_trace, dict) else {}
+              run_envelope = {
+                  "envelope_version": ENVELOPE_VERSION,
+                  "case_id": expected_case_id,
+                  "diagnosis": diagnosis,
+                  "extraction_facts": facts,
+                  "retrieval_trace": trace,
+                  "contract": {
+                      "schema_version": SCHEMA_VERSION,
+                      "prompt_version": PROMPT_VERSION,
+                      "knowledge_build_id": KNOWLEDGE_BUILD_ID,
+                      "dsl_semantic_sha256": DSL_SEMANTIC_SHA256,
+                  },
+              }
+              return {"run_envelope": run_envelope}
+        code_language: python3
+        outputs:
+          run_envelope:
+            children: null
+            type: object
+        selected: false
+        title: 同次运行信封
+        type: code
+        variables:
+        - value_selector:
+          - '1786195379702'
+          - diagnosis
+          value_type: object
+          variable: diagnosis
+        - value_selector:
+          - '1786200000001'
+          - retrieval_trace
+          value_type: object
+          variable: retrieval_trace
+        - value_selector:
+          - '1786193038905'
+          - case_id
+          value_type: string
+          variable: expected_case_id
+      height: 51
+      id: '1786200000002'
+      position:
+        x: 1630
+        y: 690
+      positionAbsolute:
+        x: 1630
+        y: 690
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        dataset_ids: []
         multiple_retrieval_config:
           reranking_enable: false
           reranking_mode: reranking_model
