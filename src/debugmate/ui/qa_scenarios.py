@@ -19,6 +19,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -370,6 +371,7 @@ def _spec(scenario: QaScenario, verified: VerifiedQaBaseline) -> QaScenarioSpec:
     elif scenario is QaScenario.VQ_03_RUNNING:
         state = ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=ResultStatus.RUNNING,
             availability=ArtifactAvailability(),
             current_stage=QA_STAGE_ORDER[0],
@@ -403,6 +405,7 @@ def _spec(scenario: QaScenario, verified: VerifiedQaBaseline) -> QaScenarioSpec:
     elif scenario is QaScenario.VQ_08_SOURCE_INVALID:
         state = ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=ResultStatus.FAILED,
             availability=ArtifactAvailability(),
             failure=SafeFailure(

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.datastructures import URL
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ArtifactIdentity,
@@ -66,6 +67,7 @@ def _state() -> ResultViewState:
     )
     return ResultViewState(
         mode=ResultMode.REPLAY,
+        execution_backend=ExecutionBackend.REPLAY,
         fixture_id="module-not-found",
         fixture_name="ModuleNotFoundError：缺少虚构依赖包",
         status=ResultStatus.COMPLETED,
@@ -253,6 +255,7 @@ def test_failure_component_update_renders_all_safe_detail_values_not_labels_only
     callbacks = UiCallbacks(service)
     failed = ResultViewState(
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.FAILED,
         availability=ArtifactAvailability(),
         failure=SafeFailure(

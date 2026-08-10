@@ -13,6 +13,7 @@ import threading
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -103,6 +104,7 @@ class _QaService:
             yield ServiceStageEvent(
                 ResultViewState(
                     mode=ResultMode.LIVE,
+                    execution_backend=ExecutionBackend.LOCAL_FALLBACK,
                     status=ResultStatus.FAILED,
                     availability=ArtifactAvailability(),
                     failure=SafeFailure(
@@ -119,6 +121,7 @@ class _QaService:
                 yield ServiceStageEvent(
                     ResultViewState(
                         mode=ResultMode.REPLAY,
+                        execution_backend=ExecutionBackend.REPLAY,
                         status=ResultStatus.RUNNING,
                         fixture_id="module-not-found",
                         fixture_name="ModuleNotFoundError：缺少虚构依赖包",

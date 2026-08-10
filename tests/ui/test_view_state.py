@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import DiagnosisRecord
 from debugmate.results.contracts import (
     ArtifactAvailability,
@@ -63,6 +64,7 @@ def _audio(*, fallback: bool = False) -> AudioResult:
 def _state(status: ResultStatus, **changes: object) -> ResultViewState:
     payload: dict[str, object] = {
         "mode": ResultMode.LIVE,
+        "execution_backend": ExecutionBackend.LOCAL_FALLBACK,
         "status": status,
         "availability": ArtifactAvailability(),
     }
@@ -91,6 +93,8 @@ def _state(status: ResultStatus, **changes: object) -> ResultViewState:
     elif status is ResultStatus.RUNNING:
         payload.update(current_stage=PHASE4_STAGES[0])
     payload.update(changes)
+    if payload["mode"] is ResultMode.REPLAY and "execution_backend" not in changes:
+        payload["execution_backend"] = ExecutionBackend.REPLAY
     return ResultViewState(**payload)
 
 

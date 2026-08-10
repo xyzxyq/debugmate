@@ -11,6 +11,7 @@ import httpx
 import pytest
 from PIL import Image
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import new_case_id
 from debugmate.privacy.models import InputEnvelope
 from debugmate.privacy.ocr import OcrToken
@@ -55,6 +56,11 @@ def _publish(store: LocalPreviewStore, session: str, label: str = "Traceback"):
 def _idle(mode: ResultMode = ResultMode.LIVE) -> ResultViewState:
     payload: dict[str, object] = {
         "mode": mode,
+        "execution_backend": (
+            ExecutionBackend.REPLAY
+            if mode is ResultMode.REPLAY
+            else ExecutionBackend.LOCAL_FALLBACK
+        ),
         "status": ResultStatus.IDLE,
         "availability": ArtifactAvailability(),
     }
@@ -69,6 +75,7 @@ def _idle(mode: ResultMode = ResultMode.LIVE) -> ResultViewState:
 def _failed() -> ResultViewState:
     return ResultViewState(
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.FAILED,
         availability=ArtifactAvailability(),
         failure=SafeFailure(
@@ -82,6 +89,7 @@ def _failed() -> ResultViewState:
 def _running() -> ResultViewState:
     return ResultViewState(
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.RUNNING,
         current_stage="source",
         availability=ArtifactAvailability(),
@@ -267,6 +275,7 @@ def test_phase7_contract_construction_local_only(
     replay_service._composer(
         source,
         mode=ResultMode.REPLAY,
+        execution_backend=ExecutionBackend.REPLAY,
         fixture_id=str(row["fixture_id"]),
         fixture_name=str(row["display_label"]),
     )

@@ -18,6 +18,7 @@ from gradio.state_holder import SessionState
 from PIL import Image
 
 import debugmate.ui.app as app_module
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import DiagnosisRecord
 from debugmate.privacy.image_redactor import OcrUnavailable
 from debugmate.privacy.models import ApprovedRedactedInput, InputEnvelope
@@ -71,6 +72,7 @@ def _completed_state() -> ResultViewState:
     )
     return ResultViewState(
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.COMPLETED,
         identity=identity,
         result_id="result_" + "6" * 32,
@@ -96,6 +98,7 @@ class _Service:
         yield ServiceStageEvent(
             state=ResultViewState(
                 mode=ResultMode.LIVE,
+                execution_backend=ExecutionBackend.LOCAL_FALLBACK,
                 status=ResultStatus.RUNNING,
                 availability=ArtifactAvailability(),
                 current_stage="source",
@@ -118,6 +121,7 @@ class _Service:
             yield ServiceStageEvent(
                 state=ResultViewState(
                     mode=ResultMode.REPLAY,
+                    execution_backend=ExecutionBackend.REPLAY,
                     status=ResultStatus.RUNNING,
                     fixture_id="module-not-found",
                     fixture_name="ModuleNotFoundError：缺少虚构依赖包",
@@ -130,6 +134,7 @@ class _Service:
             state=_completed_state().model_copy(
                 update={
                     "mode": ResultMode.REPLAY,
+                    "execution_backend": ExecutionBackend.REPLAY,
                     "fixture_id": "module-not-found",
                     "fixture_name": "ModuleNotFoundError：缺少虚构依赖包",
                 }
@@ -609,12 +614,14 @@ def test_server_session_state_registry_isolated_strict_bounded_and_clearable() -
     [
         ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=ResultStatus.RUNNING,
             current_stage="source",
             availability=ArtifactAvailability(),
         ),
         ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=ResultStatus.FAILED,
             availability=ArtifactAvailability(),
             failure=SafeFailure(
@@ -651,6 +658,7 @@ def test_correction_lease_transition_preserves_checked_prior_source() -> None:
     source_run_id = completed.identity.source_run_id
     failed = ResultViewState(
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.FAILED,
         availability=ArtifactAvailability(),
         failure=SafeFailure(
@@ -1151,6 +1159,7 @@ def test_retry_control_is_disabled_outside_verified_partial_terminal_state(
     elif status is ResultStatus.RUNNING:
         state = ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=status,
             availability=ArtifactAvailability(),
             current_stage="report",
@@ -1158,6 +1167,7 @@ def test_retry_control_is_disabled_outside_verified_partial_terminal_state(
     else:
         state = ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=status,
             availability=ArtifactAvailability(),
         )
@@ -1476,6 +1486,7 @@ def test_local_composer_uses_the_positional_tts_chain_contract(
         service._composer(
             source,
             mode=ResultMode.REPLAY,
+            execution_backend=ExecutionBackend.REPLAY,
             fixture_id=str(row["fixture_id"]),
             fixture_name=str(row["display_label"]),
         )

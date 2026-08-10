@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 from starlette.datastructures import URL
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import DiagnosisRecord, new_case_id
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.hashing import sha256_bytes
@@ -853,6 +854,7 @@ class UiCallbacks:
         )
         return ResultViewState(
             mode=state.mode,
+            execution_backend=state.execution_backend,
             status=ResultStatus.FAILED,
             fixture_id=state.fixture_id,
             fixture_name=state.fixture_name,
@@ -1181,6 +1183,7 @@ def ensure_content_endpoint(app: gr.Blocks) -> None:
 def _idle_view() -> ResultViewState:
     return ResultViewState(
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.IDLE,
         availability=ArtifactAvailability(),
     )
@@ -2199,6 +2202,7 @@ def build_app(
             running = callbacks._render(
                 ResultViewState(
                     mode=ResultMode.LIVE,
+                    execution_backend=ExecutionBackend.LOCAL_FALLBACK,
                     status=ResultStatus.RUNNING,
                     availability=ArtifactAvailability(),
                     current_stage="correction",
