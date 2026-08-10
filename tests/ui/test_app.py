@@ -404,7 +404,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
     assert "margin-top: 12px" not in app.css
 
     for exact_copy in (
-        "● 诊断我的报错（本地预处理）",
+        "● 诊断我的报错 · 本地降级",
         "报错文本（与截图至少填一项）",
         "粘贴完整 Traceback 或终端报错。请保留第一行和最后一行。",
         "终端截图（可选）",

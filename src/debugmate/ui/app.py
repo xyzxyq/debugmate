@@ -830,11 +830,24 @@ class UiCallbacks:
     """Thin adapter that resolves every displayed member through the service."""
 
     def __init__(
-        self, service: ResultApplicationService, *, content_origin: str = _DEFAULT_CONTENT_ORIGIN
+        self,
+        service: ResultApplicationService,
+        *,
+        content_origin: str = _DEFAULT_CONTENT_ORIGIN,
+        execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
     ) -> None:
+        if execution_backend not in {
+            ExecutionBackend.DIFY,
+            ExecutionBackend.LOCAL_FALLBACK,
+        }:
+            raise ValueError("ordinary callbacks require a live execution backend")
         self._service = service
         self._content = _UiContentStore(content_origin)
         self._sessions = _UiSessionStateStore()
+        self._execution_backend = execution_backend
+
+    def _live_idle(self) -> ResultViewState:
+        return _idle_view(self._execution_backend)
 
     def _require_loopback_request(self, request: object | None) -> None:
         """Require the queued event source to match the configured loopback server."""
@@ -1066,12 +1079,12 @@ class UiCallbacks:
             or "/" in fixture_id
             or "\\" in fixture_id
         ):
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
         try:
             self._require_loopback_request(request)
             return self._render(self._service.load_replay(fixture_id))
         except Exception:
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
     def load_replay_events(self, fixture_id: object, *, request: object | None = None):
         """Yield replay progress only from the service's strict stage stream."""
@@ -1082,7 +1095,7 @@ class UiCallbacks:
             or "/" in fixture_id
             or "\\" in fixture_id
         ):
-            yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            yield self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
             return
         try:
             self._require_loopback_request(request)
@@ -1091,7 +1104,7 @@ class UiCallbacks:
                     raise ResultServiceError("result_bundle_invalid")
                 yield self._render(event.state)
         except Exception:
-            yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            yield self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
     def diagnose(
         self, approved_payload: object, *, request: object | None = None
@@ -1100,7 +1113,7 @@ class UiCallbacks:
             self._require_loopback_request(request)
             return self._render(self._service.diagnose_and_compose(approved_payload))
         except Exception:
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
     def diagnose_events(self, approved_payload: object, *, request: object | None = None):
         """Yield strict UI payloads as the service completes actual result stages."""
@@ -1112,29 +1125,29 @@ class UiCallbacks:
                     raise ResultServiceError("result_bundle_invalid")
                 yield self._render(event.state)
         except Exception:
-            yield self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            yield self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
     def refresh(
         self, case_id: object, result_id: object, *, request: object | None = None
     ) -> CallbackPayload:
         if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
         try:
             self._require_loopback_request(request)
             return self._render(self._service.restore_result(case_id, result_id))
         except Exception:
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
     def retry(
         self, case_id: object, result_id: object, *, request: object | None = None
     ) -> CallbackPayload:
         if not self._strict_id(case_id, _CASE_ID) or not self._strict_id(result_id, _RESULT_ID):
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
         try:
             self._require_loopback_request(request)
             return self._render(self._service.retry_stage(case_id, result_id))
         except Exception:
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
     def correct(
         self,
@@ -1145,14 +1158,14 @@ class UiCallbacks:
         request: object | None = None,
     ) -> CallbackPayload:
         if not self._strict_id(previous_run_id, _RUN_ID) or not isinstance(confirmed, bool):
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
         try:
             self._require_loopback_request(request)
             return self._render(
                 self._service.correct_and_compose(previous_run_id, draft, confirmed)
             )
         except Exception:
-            return self._render(self._failure(_idle_view(), "result_bundle_invalid"))
+            return self._render(self._failure(self._live_idle(), "result_bundle_invalid"))
 
 
 def mount_content_endpoint(application, callbacks: UiCallbacks) -> None:
@@ -1180,10 +1193,12 @@ def ensure_content_endpoint(app: gr.Blocks) -> None:
         mount_content_endpoint(app.app, callbacks)
 
 
-def _idle_view() -> ResultViewState:
+def _idle_view(
+    execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
+) -> ResultViewState:
     return ResultViewState(
         mode=ResultMode.LIVE,
-        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
+        execution_backend=execution_backend,
         status=ResultStatus.IDLE,
         availability=ArtifactAvailability(),
     )
@@ -1511,8 +1526,12 @@ def build_app(
         analytics_enabled=False,
         fill_width=True,
     ) as app:
-        callbacks = UiCallbacks(service, content_origin=content_origin)
-        current_state = gr.State(_idle_view())
+        callbacks = UiCallbacks(
+            service,
+            content_origin=content_origin,
+            execution_backend=configured_backend,
+        )
+        current_state = gr.State(_idle_view(configured_backend))
         session_lease = gr.State(value=None)
         preview_token_state = gr.State(value=None)
         local_previews = preview_store or LocalPreviewStore()
@@ -1533,7 +1552,15 @@ def build_app(
                 elem_classes="product-title",
             )
             status = gr.Markdown(
-                "● 诊断我的报错（本地预处理）\n\n● 等待输入",
+                (
+                    "● 诊断我的报错 · "
+                    + (
+                        "Dify 实时诊断"
+                        if configured_backend is ExecutionBackend.DIFY
+                        else "本地降级"
+                    )
+                    + "\n\n● 等待输入"
+                ),
                 elem_id="diagnostic-status",
                 elem_classes=["status-indicator", "tone-neutral"],
             )
@@ -2168,7 +2195,9 @@ def build_app(
                 approved = approve_preview(record.preview, local_approval_key)
             except (TypeError, ValueError, ResultServiceError):
                 payload = callbacks._render(
-                    callbacks._failure(_idle_view(), "result_bundle_invalid")
+                    callbacks._failure(
+                        _idle_view(configured_backend), "result_bundle_invalid"
+                    )
                 )
                 callbacks.publish_session_state(request, payload.state)
                 yield (*apply_payload(payload), lease)
@@ -2225,7 +2254,9 @@ def build_app(
             ):
                 callbacks.clear_session_lease(lease)
                 payload = callbacks._render(
-                    callbacks._failure(_idle_view(), "result_bundle_invalid")
+                    callbacks._failure(
+                        _idle_view(configured_backend), "result_bundle_invalid"
+                    )
                 )
                 callbacks.publish_session_state(request, payload.state)
                 yield apply_payload(payload)
@@ -2233,7 +2264,7 @@ def build_app(
             running = callbacks._render(
                 ResultViewState(
                     mode=ResultMode.LIVE,
-                    execution_backend=ExecutionBackend.LOCAL_FALLBACK,
+                    execution_backend=configured_backend,
                     status=ResultStatus.RUNNING,
                     availability=ArtifactAvailability(),
                     current_stage="correction",
@@ -2242,7 +2273,9 @@ def build_app(
             if not callbacks.publish_session_state_lease(lease, running.state, previous_run_id):
                 callbacks.clear_session_lease(lease)
                 payload = callbacks._render(
-                    callbacks._failure(_idle_view(), "result_bundle_invalid")
+                    callbacks._failure(
+                        _idle_view(configured_backend), "result_bundle_invalid"
+                    )
                 )
                 yield apply_payload(payload)
                 return
@@ -2254,7 +2287,9 @@ def build_app(
             if not callbacks.publish_session_state_lease(lease, terminal.state, previous_run_id):
                 callbacks.clear_session_lease(lease)
                 terminal = callbacks._render(
-                    callbacks._failure(_idle_view(), "result_bundle_invalid")
+                    callbacks._failure(
+                        _idle_view(configured_backend), "result_bundle_invalid"
+                    )
                 )
             yield apply_payload(terminal)
 
