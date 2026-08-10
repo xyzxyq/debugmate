@@ -13,6 +13,8 @@ from debugmate.results.contracts import (
     ResultStatus,
     ResultViewState,
 )
+from debugmate.results.consistency import validate_result_candidates
+from debugmate.results.publisher import TrustedResultRoot, publish_result_bundle
 
 
 def test_result_mode_remains_orthogonal_to_execution_backend() -> None:
@@ -93,3 +95,24 @@ def test_dify_execution_survives_independent_sapi_audio_fallback() -> None:
     assert manifest.execution_backend is ExecutionBackend.DIFY
     assert manifest.audio is not None
     assert manifest.audio.backend == "sapi"
+
+
+def test_publisher_backend_is_manifest_truth_and_cache_discriminator(
+    candidates: tuple[object, ...], tmp_path,
+) -> None:
+    root = TrustedResultRoot.for_testing(tmp_path / "results")
+    local = publish_result_bundle(
+        root,
+        validate_result_candidates(*candidates),
+        mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
+    )
+    dify = publish_result_bundle(
+        root,
+        validate_result_candidates(*candidates),
+        mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.DIFY,
+    )
+    assert local.manifest.execution_backend is ExecutionBackend.LOCAL_FALLBACK
+    assert dify.manifest.execution_backend is ExecutionBackend.DIFY
+    assert local.manifest.result_id != dify.manifest.result_id
