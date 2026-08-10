@@ -1491,8 +1491,20 @@ def build_app(
     preview_builder: Callable[[InputEnvelope], PreviewBundle] | None = None,
     upload_root: Path | None = None,
     redacted_root: Path | None = None,
+    execution_backend: ExecutionBackend | None = None,
 ) -> gr.Blocks:
     """Build the compact workbench with a confined local-upload boundary."""
+
+    configured_backend = execution_backend or getattr(
+        service, "_live_execution_backend", ExecutionBackend.LOCAL_FALLBACK
+    )
+    if configured_backend not in {ExecutionBackend.DIFY, ExecutionBackend.LOCAL_FALLBACK}:
+        raise ValueError("ordinary app requires a live execution backend")
+    approval_copy = (
+        "确认后将把上方脱敏 payload 发送到已配置 Dify 工作流，并可能消耗额度。"
+        if configured_backend is ExecutionBackend.DIFY
+        else "确认后仅使用本地降级诊断；脱敏 payload 不会发送到 Dify。"
+    )
 
     with gr.Blocks(
         title="DebugMate 学习诊断助手",
@@ -1578,8 +1590,12 @@ def build_app(
                     interactive=False,
                     elem_id="local-approve",
                 )
+                gr.Markdown(approval_copy, elem_id="approval-disclosure")
                 with gr.Accordion("运行与隐私说明", open=False):
-                    gr.Markdown("Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。")
+                    gr.Markdown(
+                        "预览、OCR、脱敏和批准始终在本机完成；只有当前预览被一次性确认后，"
+                        "所选诊断后端才可开始运行。"
+                    )
                 with gr.Accordion("演示回放（独立模式）", open=False, elem_classes="example-panel"):
                     gr.Markdown("回放只读取仓库中的固定脱敏案例，不会使用或修改上方真实输入。")
                     replay = gr.Dropdown(
@@ -1829,6 +1845,11 @@ def build_app(
             replay_button,
             start_button,
             preview_button,
+            error_input,
+            screenshot_input,
+            code_input,
+            environment_input,
+            replay,
             redacted_input,
             preview_audit,
             category_confidence,
@@ -1898,6 +1919,16 @@ def build_app(
                 gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
                 gr.update(interactive=False),
                 gr.update(interactive=payload.state.status is not ResultStatus.RUNNING),
+                *(
+                    gr.update(interactive=payload.state.status is not ResultStatus.RUNNING)
+                    for _control in (
+                        error_input,
+                        screenshot_input,
+                        code_input,
+                        environment_input,
+                        replay,
+                    )
+                ),
                 gr.update(value=payload.redacted_input),
                 gr.update(),
                 gr.update(

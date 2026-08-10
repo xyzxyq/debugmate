@@ -410,7 +410,7 @@ def test_build_app_has_student_first_learning_workbench_and_no_unsafe_components
         "终端截图（可选）",
         "拖放 PNG/JPEG 截图，或点击上传",
         "仅支持 PNG/JPEG，最大 10 MiB、2000 万像素；先在本机 OCR 和遮挡。",
-        "Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。",
+            "预览、OCR、脱敏和批准始终在本机完成；只有当前预览被一次性确认后，",
     ):
         assert exact_copy in rendered
 
@@ -704,8 +704,7 @@ def test_local_live_requires_preview_then_same_session_approval() -> None:
     assert states[-1].fixture_name is None
     assert len(service.diagnose_calls) == 1
     assert states[-1].identity.source_run_id in frames[-1][1]
-    assert "fixture_id=null" in frames[-1][1]
-    assert "fixture_name=null" in frames[-1][1]
+    assert "执行后端：本地降级" in frames[-1][1]
 
 
 def _cached_preview_builder(value: InputEnvelope):
@@ -871,12 +870,13 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
     assert "1. 生成脱敏预览" in buttons
     assert "2. 确认并开始诊断" in buttons
     assert buttons["2. 确认并开始诊断"]["props"]["interactive"] is False
-    assert any(
-        component["type"] == "markdown"
-        and component["props"].get("value")
-        == "Phase 07 只在本机校验、OCR、脱敏和批准，不连接 Dify。"
+    disclosure = next(
+        component
         for component in config["components"]
+        if component["props"].get("elem_id") == "approval-disclosure"
     )
+    assert "本地降级" in disclosure["props"]["value"]
+    assert "不会发送到 Dify" in disclosure["props"]["value"]
     assert "approved_payload = gr.State" not in source
     assert "inputs=[approved_payload]" not in source
     live_callback_source = source[
@@ -885,7 +885,7 @@ def test_local_live_config_exposes_two_explicit_controls_and_no_unsafe_live_inpu
         )
     ]
     assert "load_replay" not in live_callback_source
-    assert source.count("Dify") == 1
+    assert "Dify 工作流运行中" not in source
     assert "DifyTtsAdapter" not in source
     assert "EdgeTtsAdapter" not in source
     for mojibake in ("鐢熸垚", "纭", "鍚庣", "鏂囧瓧", "寮曠敤", "瀹屾垚"):
@@ -972,7 +972,7 @@ def test_main_payload_clears_download_surfaces_until_verified_resync() -> None:
     assert frame[6]["value"] is None
     assert frame[6]["visible"] is False
     assert frame[6]["interactive"] is False
-    assert frame[34]["value"] == ""
+    assert frame[39]["value"] == ""
 
 
 def test_download_surfaces_resync_from_server_session_state_and_fail_closed() -> None:
@@ -1063,7 +1063,7 @@ def test_correction_chain_preserves_only_strict_run_and_draft_while_downloads_re
     assert frame[6]["value"] is None
     assert frame[6]["visible"] is False
     assert frame[6]["interactive"] is False
-    assert frame[34]["value"] == ""
+    assert frame[39]["value"] == ""
     assert app._debugmate_content_callbacks.session_audit_snapshot() == (
         {
             "session_sha256_prefix": hashlib.sha256(b"correction-chain").hexdigest()[:12],
@@ -1208,8 +1208,8 @@ def test_live_callback_sends_accessible_read_only_tables_and_one_metadata_row() 
 
     assert "run_" not in frame[0]
     assert frame[1].count("run_") == 1
-    fact_value = frame[28]["value"]
-    citation_value = frame[29]["value"]
+    fact_value = frame[33]["value"]
+    citation_value = frame[34]["value"]
     assert "| 事实 ID | 观察或结论 | 证据 ID | 来源 | 支持关系 |" in fact_value
     assert "ModuleNotFoundError" in fact_value
     assert "evidence_" in fact_value
@@ -1378,8 +1378,8 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
 
     partial_frame = list(callback("module-not-found", None))[-1]
     assert all(update["interactive"] is True for update in partial_frame[-12:-8])
-    assert partial_frame[31]["visible"] is True
-    assert partial_frame[31]["interactive"] is True
+    assert partial_frame[36]["visible"] is True
+    assert partial_frame[36]["interactive"] is True
 
     failed_app = build_app(_Service())
     failed_callback = next(
@@ -1389,8 +1389,8 @@ def test_result_tabs_follow_partial_and_failed_view_permissions_atomically() -> 
     )
     failed_frame = list(failed_callback("../not-allowlisted", None))[-1]
     assert all(update["interactive"] is False for update in failed_frame[-12:-8])
-    assert failed_frame[31]["visible"] is False
-    assert failed_frame[31]["interactive"] is False
+    assert failed_frame[36]["visible"] is False
+    assert failed_frame[36]["interactive"] is False
 
 
 def test_replay_generator_process_api_keeps_all_media_on_verified_loopback_urls() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import DiagnosisRecord
 from debugmate.results.contracts import ResultMode, ResultStatus, ResultViewState
 
@@ -19,6 +20,9 @@ PHASE4_STAGES: tuple[str, ...] = (
 )
 
 _STAGE_LABELS = {
+    "upload": "上传脱敏截图",
+    "dify_workflow": "Dify 工作流运行中",
+    "validation": "本地严格校验",
     "source": "验证来源",
     "presentation": "整理诊断",
     "report": "生成报告",
@@ -324,16 +328,23 @@ def render_verified_diagnosis(diagnosis: DiagnosisRecord) -> VerifiedDiagnosisPr
 
 
 def _mode_badge(state: ResultViewState) -> str:
-    if state.mode is ResultMode.REPLAY:
-        return f"↺ 离线回放 · {state.fixture_name}"
-    return "● 诊断我的报错（本地预处理）"
+    if state.execution_backend is ExecutionBackend.REPLAY:
+        return f"↺ 固定回放 · {state.fixture_name}"
+    if state.execution_backend is ExecutionBackend.DIFY:
+        return "● 诊断我的报错 · Dify 实时诊断"
+    return "● 诊断我的报错 · 本地降级"
 
 
 def _result_metadata(state: ResultViewState) -> str:
     source = "" if state.identity is None else f"；来源运行：{state.identity.source_run_id}"
+    backend = {
+        ExecutionBackend.DIFY: "Dify 实时诊断",
+        ExecutionBackend.LOCAL_FALLBACK: "本地降级",
+        ExecutionBackend.REPLAY: "固定回放",
+    }[state.execution_backend]
     if state.mode is ResultMode.REPLAY:
-        return f"离线回放：{state.fixture_name}{source}"
-    return "" if not source else f"本地诊断{source}；fixture_id=null；fixture_name=null"
+        return f"执行后端：{backend}；案例：{state.fixture_name}{source}"
+    return f"执行后端：{backend}{source}"
 
 
 def _audio_metadata(state: ResultViewState) -> tuple[str | None, str | None]:
@@ -559,7 +570,7 @@ def render_view_state(state: ResultViewState) -> ComponentViewModel:
         failure_details=_failure_details(state, available),
         failure_code=state.failure.code,
         safe_failure_copy=_SAFE_FAILURE_COPY_BY_CODE.get(state.failure.code, _SAFE_FAILURE_COPY),
-        stage_label=None,
+        stage_label=_SAFE_STAGE_LABELS.get(state.failure.failed_stage, "安全处理"),
         running_copy=None,
         empty_heading=None,
         empty_body=None,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import socket
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -12,8 +13,9 @@ import pytest
 from pydantic import SecretStr
 
 from debugmate.cloud.contracts import ExecutionBackend
-from debugmate.cloud.workflow import DifyLiveWorkflow
+from debugmate.cloud.workflow import CloudWorkflowError, DifyLiveWorkflow
 from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
+from debugmate.privacy.models import ApprovedRedactedInput, RedactedFields
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ResultMode,
@@ -21,6 +23,7 @@ from debugmate.results.contracts import (
     ResultViewState,
     SafeFailure,
 )
+from debugmate.results.service import ServiceStageEvent
 from debugmate.settings import DebugMateSettings
 from debugmate.ui import serve as serve_module
 from debugmate.ui.app import build_app
@@ -134,8 +137,79 @@ def test_dataset_key_is_not_required_after_verified_readback(
     assert isinstance(dependencies.service._workflow, DifyLiveWorkflow)
 
 
+def test_started_dify_failure_never_invokes_local_composer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path, attestation_path, dataset_id = _write_live_authority(tmp_path)
+    dependencies = serve_module._live_dependencies(
+        settings=_settings(dataset_key=False),
+        runtime_root=tmp_path / "runtime",
+        build_manifest=manifest_path,
+        readback_attestation=attestation_path,
+        dataset_binding=dataset_id,
+        app_ready=True,
+    )
+    compose_calls: list[str] = []
+
+    def fail_cloud(_self: object, _approved: object) -> object:
+        raise CloudWorkflowError("authentication")
+
+    def forbidden_composer(*_args: object, **_kwargs: object) -> object:
+        compose_calls.append("local")
+        raise AssertionError("cloud failure reached local composer")
+
+    forbidden_composer.supports_stage_events = True  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(DifyLiveWorkflow, "run", fail_cloud)
+    dependencies.service._composer = forbidden_composer
+    approved = ApprovedRedactedInput(
+        case_id="case_" + "a" * 32,
+        redacted=RedactedFields(error_text="safe synthetic error"),
+        preview_hash="1" * 64,
+        approval_id="synthetic",
+        approval_signature="2" * 64,
+        approved_at_utc=datetime(2026, 8, 10, tzinfo=UTC),
+    )
+
+    states = [event.state for event in dependencies.service.diagnose_and_compose_events(approved)]
+
+    assert [state.current_stage for state in states[:-1]] == ["dify_workflow"]
+    assert states[-1].status is ResultStatus.FAILED
+    assert states[-1].execution_backend is ExecutionBackend.DIFY
+    assert states[-1].availability.any() is False
+    assert compose_calls == []
+
+
 class _UiOnlyService:
     _live_execution_backend = ExecutionBackend.DIFY
+
+    def diagnose_and_compose_events(self, _approved: object):
+        yield ServiceStageEvent(
+            state=_view(
+                ExecutionBackend.DIFY,
+                status=ResultStatus.RUNNING,
+                stage="dify_workflow",
+            )
+        )
+        yield ServiceStageEvent(
+            state=ResultViewState(
+                mode=ResultMode.LIVE,
+                execution_backend=ExecutionBackend.DIFY,
+                status=ResultStatus.FAILED,
+                availability=ArtifactAvailability(),
+                failure=SafeFailure(
+                    code="diagnosis_validation",
+                    failed_stage="workflow",
+                    retry_scope="input",
+                ),
+            )
+        )
+
+
+class _Request:
+    def __init__(self, session_hash: str) -> None:
+        self.session_hash = session_hash
+        self.url = "http://127.0.0.1:7860/queue/join"
 
 
 def _view(
@@ -214,3 +288,38 @@ def test_invalid_dify_diagnosis_has_backend_failure_and_no_artifacts() -> None:
     assert "重新" in (view.safe_failure_copy or "") or "重试" in (
         view.safe_failure_copy or ""
     )
+
+
+def test_blocking_dify_frame_disables_inputs_replay_and_duplicate_actions() -> None:
+    app = build_app(_UiOnlyService(), execution_backend=ExecutionBackend.DIFY)
+    prepare = next(
+        block_fn.fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "prepare_local_preview"
+    )
+    callback = next(
+        block_fn
+        for block_fn in app.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "approve_and_diagnose_stream"
+    )
+    request = _Request("phase8-blocking-controls")
+    token = prepare(request)[0]
+    frame = next(callback.fn(token, request))
+    updates = {
+        getattr(component, "elem_id", None): update
+        for component, update in zip(callback.outputs, frame, strict=True)
+    }
+
+    for elem_id in (
+        "error-input",
+        "screenshot-input",
+        "code-input",
+        "environment-input",
+        "local-preview",
+        "local-approve",
+        "replay-action",
+    ):
+        assert updates[elem_id]["interactive"] is False
+    rendered = repr(app.get_config_file())
+    assert "取消 Dify" not in rendered
+    assert "关闭页面即可取消" not in rendered

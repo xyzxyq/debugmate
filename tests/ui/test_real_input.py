@@ -283,7 +283,7 @@ def test_phase7_contract_construction_local_only(
     assert poison_calls == []
 
 
-def test_phase7_serve_source_has_no_cloud_or_edge_adapter_imports() -> None:
+def test_phase8_serve_source_allows_only_the_approved_cloud_adapter() -> None:
     source = inspect.getsource(serve_module)
 
     for forbidden in (
@@ -291,10 +291,10 @@ def test_phase7_serve_source_has_no_cloud_or_edge_adapter_imports() -> None:
         "results.tts.edge",
         "DifyTtsAdapter",
         "EdgeTtsAdapter",
-        "DebugMateSettings",
-        "httpx",
     ):
         assert forbidden not in source
+    assert "DifyLiveWorkflow" in source
+    assert "DebugMateSettings" in source
 
 
 def test_local_dependencies_construct_one_shared_production_ocr(
@@ -476,7 +476,7 @@ def test_phase7_contract_orthogonal_state() -> None:
             privacy=privacy_type(privacy_name),
             result=_idle(ResultMode.REPLAY),
         )
-        assert replay.primary_status.startswith("↺ 离线回放")
+        assert replay.primary_status.startswith("↺ 固定回放")
         assert replay.confirm_enabled is False
         assert replay.preview_authoritative is False
         assert "回放" in replay.aria_live

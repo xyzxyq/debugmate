@@ -392,7 +392,19 @@ class ResultApplicationService:
             if self._workflow is None:
                 return self._failure("workflow_not_configured")
             try:
+                if (
+                    stage_callback is not None
+                    and self._live_execution_backend is ExecutionBackend.DIFY
+                ):
+                    if checked.redacted.redacted_screenshot_path is not None:
+                        stage_callback("upload")
+                    stage_callback("dify_workflow")
                 outcome = self._workflow.run(checked)
+                if (
+                    stage_callback is not None
+                    and outcome.execution_backend is ExecutionBackend.DIFY
+                ):
+                    stage_callback("validation")
                 validate_diagnosis_outcome(outcome)
                 if outcome.status is not WorkflowStatus.COMPLETED:
                     return self._failure("workflow_not_completed")
@@ -440,6 +452,14 @@ class ResultApplicationService:
             yield ServiceStageEvent(state=self._failure("result_composition_failed"))
             return
 
+        live_stages = _RESULT_STAGES
+        if self._live_execution_backend is ExecutionBackend.DIFY:
+            live_stages = (
+                *(("upload",) if checked.redacted.redacted_screenshot_path is not None else ()),
+                "dify_workflow",
+                "validation",
+                *_RESULT_STAGES,
+            )
         yield from self._stage_events(
             lambda stage_callback: self._diagnose_and_compose(
                 checked, stage_callback=stage_callback
@@ -449,6 +469,7 @@ class ResultApplicationService:
             fixture_id=None,
             fixture_name=None,
             worker_name="debugmate-result-compose",
+            stage_sequence=live_stages,
         )
 
     def _stage_events(
@@ -460,6 +481,7 @@ class ResultApplicationService:
         fixture_id: str | None,
         fixture_name: str | None,
         worker_name: str,
+        stage_sequence: tuple[str, ...] = _RESULT_STAGES,
     ):
         """Expose only an actual, ordered seven-stage composition to the UI."""
 
@@ -478,7 +500,9 @@ class ResultApplicationService:
         emitted: list[str] = []
 
         def stage_callback(stage: str) -> None:
-            expected = _RESULT_STAGES[len(emitted)] if len(emitted) < len(_RESULT_STAGES) else None
+            expected = (
+                stage_sequence[len(emitted)] if len(emitted) < len(stage_sequence) else None
+            )
             if stage != expected:
                 raise ResultServiceError("result_composition_failed")
             emitted.append(stage)
@@ -497,7 +521,7 @@ class ResultApplicationService:
                 )
             if (
                 result.status in {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
-                and tuple(emitted) != _RESULT_STAGES
+                and tuple(emitted) != stage_sequence
             ):
                 result = self._failure(
                     "result_composition_failed",
@@ -517,7 +541,7 @@ class ResultApplicationService:
                 yield ServiceStageEvent(state=value)
                 return
             stage = str(value)
-            index = _RESULT_STAGES.index(stage)
+            index = stage_sequence.index(stage)
             yield ServiceStageEvent(
                 state=ResultViewState(
                     mode=mode,
@@ -527,7 +551,7 @@ class ResultApplicationService:
                     fixture_name=fixture_name,
                     availability=ArtifactAvailability(),
                     current_stage=stage,
-                    completed_stages=_RESULT_STAGES[:index],
+                    completed_stages=stage_sequence[:index],
                 )
             )
 

@@ -227,7 +227,7 @@ def test_replay_is_orthogonal_and_never_uses_live_success_wording(status: Result
         fixture_name="ModuleNotFoundError：缺少虚构依赖包",
     )
     view = render_view_state(state)
-    assert view.mode_badge == "↺ 离线回放 · ModuleNotFoundError：缺少虚构依赖包"
+    assert view.mode_badge == "↺ 固定回放 · ModuleNotFoundError：缺少虚构依赖包"
     assert "回放" in view.result_metadata
     assert "云端运行成功" not in repr(view)
 
@@ -368,7 +368,7 @@ def test_privacy_result_mode_combinations_are_exhaustive_and_deduplicate_aria(
         privacy=privacy,
         result=replay_result,
     )
-    assert replay.primary_status == "↺ 离线回放 · ModuleNotFoundError：缺少虚构依赖包"
+    assert replay.primary_status == "↺ 固定回放 · ModuleNotFoundError：缺少虚构依赖包"
     assert replay.secondary_status == "本地固定案例"
     assert replay.confirm_enabled is False
     assert replay.preview_authoritative is False
