@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from debugmate.cloud.contracts import ExecutionBackend, ExecutionBackendValue
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 
 Sha256 = str
@@ -256,10 +257,11 @@ class AudioResult(StrictFrozenModel):
 
 
 class ResultManifest(StrictFrozenModel):
-    manifest_version: Literal["1.0.0"]
+    manifest_version: Literal["1.1.0"]
     result_id: str = Field(pattern=r"^result_[0-9a-f]{32}$")
     identity: ArtifactIdentity
     mode: ResultMode
+    execution_backend: ExecutionBackendValue
     status: ResultStatus
     fixture_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
     fixture_name: str | None = Field(default=None, min_length=1, max_length=128)
@@ -274,7 +276,9 @@ class ResultManifest(StrictFrozenModel):
     def terminal_publication_state(self) -> ResultManifest:
         if self.status not in {ResultStatus.COMPLETED, ResultStatus.PARTIAL, ResultStatus.FAILED}:
             raise ValueError("result manifest must describe a terminal publication")
-        _validate_mode(self.mode, self.fixture_id, self.fixture_name)
+        _validate_mode(
+            self.mode, self.execution_backend, self.fixture_id, self.fixture_name
+        )
         if self.status is ResultStatus.COMPLETED and (
             not self.availability.all() or self.failure is not None
         ):
@@ -338,6 +342,7 @@ class ResultManifest(StrictFrozenModel):
 
 class ResultViewState(StrictFrozenModel):
     mode: ResultMode
+    execution_backend: ExecutionBackendValue
     status: ResultStatus
     fixture_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
     fixture_name: str | None = Field(default=None, min_length=1, max_length=128)
@@ -355,7 +360,9 @@ class ResultViewState(StrictFrozenModel):
 
     @model_validator(mode="after")
     def honest_view_state(self) -> ResultViewState:
-        _validate_mode(self.mode, self.fixture_id, self.fixture_name)
+        _validate_mode(
+            self.mode, self.execution_backend, self.fixture_id, self.fixture_name
+        )
         terminal = {ResultStatus.COMPLETED, ResultStatus.PARTIAL}
         if self.status in terminal and (self.identity is None or self.result_id is None):
             raise ValueError("terminal view requires a verified result identity")
@@ -410,7 +417,19 @@ class ResultViewState(StrictFrozenModel):
         return self
 
 
-def _validate_mode(mode: ResultMode, fixture_id: str | None, fixture_name: str | None) -> None:
+def _validate_mode(
+    mode: ResultMode,
+    execution_backend: ExecutionBackend,
+    fixture_id: str | None,
+    fixture_name: str | None,
+) -> None:
+    if mode is ResultMode.LIVE and execution_backend not in {
+        ExecutionBackend.DIFY,
+        ExecutionBackend.LOCAL_FALLBACK,
+    }:
+        raise ValueError("live mode requires a live execution backend")
+    if mode is ResultMode.REPLAY and execution_backend is not ExecutionBackend.REPLAY:
+        raise ValueError("replay mode requires the replay execution backend")
     if mode is ResultMode.REPLAY and not (fixture_id and fixture_name):
         raise ValueError("replay mode requires fixture identity")
     if mode is ResultMode.LIVE and (fixture_id is not None or fixture_name is not None):

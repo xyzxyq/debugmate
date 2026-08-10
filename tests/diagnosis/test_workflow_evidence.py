@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow
 
 from debugmate.cli import main
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import EvidenceAnchor
 from debugmate.diagnosis.correction import CorrectionOverlay
 from debugmate.diagnosis.extraction import (
@@ -33,6 +35,16 @@ def _outcome(case_key: str, tmp_path: Path):
     workflow, *_ = _workflow(row, tmp_path)
     answers = {FieldId(key): value for key, value in row.get("answers", {}).items()}
     return workflow.run(_approved(row["case_id"]), followup_answers=answers or None)
+
+
+def test_outcome_requires_execution_backend_separate_from_generator(tmp_path: Path) -> None:
+    outcome = _outcome("module_not_found", tmp_path)
+    assert outcome.execution_backend is ExecutionBackend.LOCAL_FALLBACK
+    assert outcome.backend == "fixture"
+    payload = outcome.model_dump(mode="json")
+    payload.pop("execution_backend")
+    with pytest.raises(ValidationError, match="execution_backend"):
+        DiagnosisRunOutcome.model_validate(payload, strict=True)
 
 
 def _rehash_outcome(outcome, facts):

@@ -9,6 +9,7 @@ from typing import Protocol
 
 from pydantic import Field
 
+from debugmate.cloud.contracts import ExecutionBackend, ExecutionBackendValue
 from debugmate.contracts import DiagnosisRecord, EvidenceAnchor, ObservedFact
 from debugmate.diagnosis.correction import CorrectionOverlay, apply_correction
 from debugmate.diagnosis.extraction import (
@@ -65,6 +66,7 @@ class WorkflowStatus(StrEnum):
 
 class DiagnosisRunOutcome(StrictFrozenModel):
     status: WorkflowStatus
+    execution_backend: ExecutionBackendValue
     backend: str = Field(min_length=1)
     case_id: str
     revision: int = Field(strict=True, ge=0)
@@ -258,12 +260,14 @@ class DiagnosisWorkflow:
         extraction_provider: ExtractionProvider,
         retrieval_provider: RetrievalProvider,
         generator: GenerationProvider,
+        execution_backend: ExecutionBackend,
         approval_key: bytes | None,
         redacted_root: Path,
     ) -> None:
         self._extraction_provider = extraction_provider
         self._retrieval_provider = retrieval_provider
         self._generator = generator
+        self._execution_backend = execution_backend
         self._approval_key = approval_key
         self._redacted_root = Path(redacted_root)
 
@@ -436,6 +440,7 @@ class DiagnosisWorkflow:
         )
         return DiagnosisRunOutcome(
             status=status,
+            execution_backend=self._execution_backend,
             backend=self._generator.backend_name,
             case_id=facts.case_id,
             revision=facts.revision,

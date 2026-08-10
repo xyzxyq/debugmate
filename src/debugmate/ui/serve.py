@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.diagnosis.local_rule import LocalRuleGenerationProvider
 from debugmate.diagnosis.providers import ProductionExtractionProvider
 from debugmate.diagnosis.workflow import DiagnosisWorkflow
@@ -198,6 +199,7 @@ def _local_dependencies(
         ),
         retrieval_provider=LocalRuleRetrievalProvider(snapshot),
         generator=LocalRuleGenerationProvider(snapshot),
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         approval_key=approval_key,
         redacted_root=redacted_root,
     )

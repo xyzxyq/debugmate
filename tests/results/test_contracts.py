@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.results.contracts import (
     ArtifactAvailability,
     ArtifactIdentity,
@@ -273,10 +274,11 @@ def test_font_preparation_rejects_linked_root_and_linked_ancestor(tmp_path: Path
 def test_manifest_rejects_illegal_terminal_availability(status, availability, failure) -> None:
     with pytest.raises(ValidationError):
         ResultManifest(
-            manifest_version="1.0.0",
+            manifest_version="1.1.0",
             result_id="result_" + "6" * 32,
             identity=_identity(),
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=status,
             availability=availability,
             artifacts=(),
@@ -288,6 +290,7 @@ def test_replay_requires_fixture_identity_independent_of_status() -> None:
     with pytest.raises(ValidationError):
         ResultViewState(
             mode=ResultMode.REPLAY,
+            execution_backend=ExecutionBackend.REPLAY,
             status=ResultStatus.IDLE,
             availability=ArtifactAvailability(),
         )
@@ -318,10 +321,11 @@ def test_manifest_rejects_duplicate_or_hash_cycle_members() -> None:
     duplicate = _artifact("report", "report.md")
     with pytest.raises(ValidationError):
         ResultManifest(
-            manifest_version="1.0.0",
+            manifest_version="1.1.0",
             result_id="result_" + "6" * 32,
             identity=_identity(),
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=ResultStatus.PARTIAL,
             availability=ArtifactAvailability(report=True),
             artifacts=(duplicate, duplicate),
@@ -380,6 +384,7 @@ def _successful_audio(identity: ArtifactIdentity | None = None, *, sha256: str =
 def test_idle_view_rejects_progress_and_result_state(changes: dict[str, object]) -> None:
     payload: dict[str, object] = {
         "mode": ResultMode.LIVE,
+        "execution_backend": ExecutionBackend.LOCAL_FALLBACK,
         "status": ResultStatus.IDLE,
         "availability": ArtifactAvailability(),
     }
@@ -403,6 +408,7 @@ def test_idle_view_rejects_progress_and_result_state(changes: dict[str, object])
 def test_running_view_rejects_terminal_state(changes: dict[str, object]) -> None:
     payload: dict[str, object] = {
         "mode": ResultMode.LIVE,
+        "execution_backend": ExecutionBackend.LOCAL_FALLBACK,
         "status": ResultStatus.RUNNING,
         "availability": ArtifactAvailability(),
         "current_stage": "source",
@@ -421,6 +427,7 @@ def test_terminal_view_rejects_stale_current_stage(status: ResultStatus) -> None
     identity = _identity()
     payload: dict[str, object] = {
         "mode": ResultMode.LIVE,
+        "execution_backend": ExecutionBackend.LOCAL_FALLBACK,
         "status": status,
         "availability": ArtifactAvailability(),
         "current_stage": "audio",
@@ -466,10 +473,11 @@ def test_terminal_view_rejects_stale_current_stage(status: ResultStatus) -> None
 def _completed_manifest(**changes: object) -> ResultManifest:
     identity = _identity()
     payload = {
-        "manifest_version": "1.0.0",
+        "manifest_version": "1.1.0",
         "result_id": "result_" + "6" * 32,
         "identity": identity,
         "mode": ResultMode.LIVE,
+        "execution_backend": ExecutionBackend.LOCAL_FALLBACK,
         "status": ResultStatus.COMPLETED,
         "availability": ArtifactAvailability(
             report=True, card=True, recap_text=True, audio=True
@@ -512,10 +520,11 @@ def test_partial_manifest_allows_only_explicit_card_or_audio_failure_subset() ->
         safe_error_code="tts_backend_failed",
     )
     partial = ResultManifest(
-        manifest_version="1.0.0",
+        manifest_version="1.1.0",
         result_id="result_" + "6" * 32,
         identity=identity,
         mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         status=ResultStatus.PARTIAL,
         availability=ArtifactAvailability(report=True, card=True, recap_text=True),
         artifacts=(
@@ -594,6 +603,7 @@ def test_terminal_view_state_carries_only_verified_result_and_audio_metadata() -
     )
     view = ResultViewState(
         mode=ResultMode.REPLAY,
+        execution_backend=ExecutionBackend.REPLAY,
         fixture_id="module-not-found",
         fixture_name="ModuleNotFoundError：缺少虚构依赖包",
         status=ResultStatus.COMPLETED,
@@ -608,6 +618,7 @@ def test_terminal_view_state_carries_only_verified_result_and_audio_metadata() -
     with pytest.raises(ValidationError):
         ResultViewState(
             mode=ResultMode.LIVE,
+            execution_backend=ExecutionBackend.LOCAL_FALLBACK,
             status=ResultStatus.COMPLETED,
             identity=identity,
             availability=ArtifactAvailability(report=True, card=True, recap_text=True, audio=True),

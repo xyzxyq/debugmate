@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.contracts import DiagnosisRecord, EvidenceAnchor
 from debugmate.diagnosis.correction import CorrectionOverlay
 from debugmate.diagnosis.extraction import (
@@ -183,7 +184,13 @@ class GeneratorSpy:
         )()
 
 
-def _workflow(row: dict[str, object], root: Path, *, key: bytes | None = KEY):
+def _workflow(
+    row: dict[str, object],
+    root: Path,
+    *,
+    key: bytes | None = KEY,
+    execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
+):
     extraction = ExtractionSpy(_record(str(row["case_id"]), row["facts"]))
     retrieval = RetrievalSpy()
     generator = GeneratorSpy(fail=row.get("expected_status") == "generation_failed")
@@ -191,6 +198,7 @@ def _workflow(row: dict[str, object], root: Path, *, key: bytes | None = KEY):
         extraction_provider=extraction,
         retrieval_provider=retrieval,
         generator=generator,
+        execution_backend=execution_backend,
         approval_key=key,
         redacted_root=root,
     )
@@ -329,6 +337,7 @@ def test_valid_screenshot_is_root_confined_and_rehashed_before_ocr(tmp_path: Pat
         extraction_provider=extractor,
         retrieval_provider=retrieval,
         generator=generator,
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         approval_key=KEY,
         redacted_root=tmp_path,
     )
@@ -349,6 +358,7 @@ def test_environment_only_facts_change_workflow_run_identity(tmp_path: Path) -> 
         extraction_provider=extractor,
         retrieval_provider=RetrievalSpy(),
         generator=GeneratorSpy(),
+        execution_backend=ExecutionBackend.LOCAL_FALLBACK,
         approval_key=KEY,
         redacted_root=tmp_path,
     )

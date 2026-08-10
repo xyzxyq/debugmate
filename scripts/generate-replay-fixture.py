@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from tests.diagnosis.test_workflow_e2e import _approved, _rows, _workflow  # noqa: E402
 
+from debugmate.cloud.contracts import ExecutionBackend  # noqa: E402
 from debugmate.diagnosis.extraction import FieldId  # noqa: E402
 from debugmate.diagnosis.workflow import validate_diagnosis_outcome  # noqa: E402
 from debugmate.evidence import (  # noqa: E402
@@ -30,7 +31,9 @@ def generate(root: Path) -> Path:
     row = next(item for item in _rows() if item["case_key"] == "module_not_found")
     with tempfile.TemporaryDirectory(prefix="debugmate-replay-") as temporary:
         work = Path(temporary)
-        workflow, *_ = _workflow(row, work)
+        workflow, *_ = _workflow(
+            row, work, execution_backend=ExecutionBackend.REPLAY
+        )
         answers = {FieldId(key): value for key, value in row.get("answers", {}).items()}
         outcome = workflow.run(
             _approved(str(row["case_id"])), followup_answers=answers or None
