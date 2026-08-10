@@ -199,9 +199,14 @@ def test_png_partial_result_e2e(candidates, tmp_path: Path) -> None:
         audio,
     )
 
-    def compose(_source, *, mode, fixture_id, fixture_name):
+    def compose(_source, *, mode, execution_backend, fixture_id, fixture_name):
         return publish_result_bundle(
-            root, candidate, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+            root,
+            candidate,
+            mode=mode,
+            execution_backend=execution_backend,
+            fixture_id=fixture_id,
+            fixture_name=fixture_name,
         )
 
     service = _service(tmp_path, composer=compose)
@@ -240,9 +245,14 @@ def test_tts_partial_result_e2e(candidates, tmp_path: Path) -> None:
         source, presentation, report, citations, card, recap, unavailable
     )
 
-    def compose(_source, *, mode, fixture_id, fixture_name):
+    def compose(_source, *, mode, execution_backend, fixture_id, fixture_name):
         return publish_result_bundle(
-            root, candidate, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+            root,
+            candidate,
+            mode=mode,
+            execution_backend=execution_backend,
+            fixture_id=fixture_id,
+            fixture_name=fixture_name,
         )
 
     service = _service(tmp_path, composer=compose)
