@@ -14,8 +14,17 @@ from pydantic import SecretStr
 from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.cloud.workflow import DifyLiveWorkflow
 from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
+from debugmate.results.contracts import (
+    ArtifactAvailability,
+    ResultMode,
+    ResultStatus,
+    ResultViewState,
+    SafeFailure,
+)
 from debugmate.settings import DebugMateSettings
 from debugmate.ui import serve as serve_module
+from debugmate.ui.app import build_app
+from debugmate.ui.presentation import render_view_state
 
 BUILD_ID = "b" * 64
 
@@ -123,3 +132,85 @@ def test_dataset_key_is_not_required_after_verified_readback(
 
     assert dependencies.execution_backend is ExecutionBackend.DIFY
     assert isinstance(dependencies.service._workflow, DifyLiveWorkflow)
+
+
+class _UiOnlyService:
+    _live_execution_backend = ExecutionBackend.DIFY
+
+
+def _view(
+    backend: ExecutionBackend,
+    *,
+    status: ResultStatus = ResultStatus.IDLE,
+    stage: str | None = None,
+) -> ResultViewState:
+    return ResultViewState(
+        mode=ResultMode.REPLAY if backend is ExecutionBackend.REPLAY else ResultMode.LIVE,
+        execution_backend=backend,
+        status=status,
+        fixture_id="module-not-found" if backend is ExecutionBackend.REPLAY else None,
+        fixture_name=(
+            "ModuleNotFoundError：缺少虚构依赖包"
+            if backend is ExecutionBackend.REPLAY
+            else None
+        ),
+        availability=ArtifactAvailability(),
+        current_stage=stage,
+    )
+
+
+def test_backend_labels_and_dify_confirmation_copy_are_explicit() -> None:
+    assert "Dify 实时诊断" in render_view_state(_view(ExecutionBackend.DIFY)).mode_badge
+    assert "本地降级" in render_view_state(
+        _view(ExecutionBackend.LOCAL_FALLBACK)
+    ).mode_badge
+    assert "固定回放" in render_view_state(_view(ExecutionBackend.REPLAY)).mode_badge
+
+    app = build_app(_UiOnlyService(), execution_backend=ExecutionBackend.DIFY)
+    disclosure = next(
+        component
+        for component in app.get_config_file()["components"]
+        if component.get("props", {}).get("elem_id") == "approval-disclosure"
+    )
+    copy = disclosure["props"]["value"]
+    assert "脱敏" in copy and "Dify" in copy and "额度" in copy
+    assert "API key" not in copy and "run_id" not in copy
+
+
+def test_dify_running_and_validation_are_coarse_truthful_stages() -> None:
+    expected = {
+        "upload": "上传脱敏截图",
+        "dify_workflow": "Dify 工作流运行中",
+        "validation": "本地严格校验",
+    }
+    for stage, label in expected.items():
+        view = render_view_state(
+            _view(ExecutionBackend.DIFY, status=ResultStatus.RUNNING, stage=stage)
+        )
+        assert view.stage_label == label
+        assert "%" not in (view.running_copy or "")
+        assert "节点" not in (view.running_copy or "")
+
+
+def test_invalid_dify_diagnosis_has_backend_failure_and_no_artifacts() -> None:
+    state = ResultViewState(
+        mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.DIFY,
+        status=ResultStatus.FAILED,
+        availability=ArtifactAvailability(),
+        failure=SafeFailure(
+            code="diagnosis_validation",
+            failed_stage="workflow",
+            retry_scope="input",
+        ),
+    )
+    view = render_view_state(state)
+
+    assert "Dify 实时诊断" in view.mode_badge
+    assert view.available_artifacts == ()
+    assert view.download_label is None
+    assert view.failure_code == "diagnosis_validation"
+    assert view.stage_label == "诊断工作流"
+    assert "重新" in (view.safe_failure_copy or "") or "重试" in (
+        view.safe_failure_copy or ""
+    )
