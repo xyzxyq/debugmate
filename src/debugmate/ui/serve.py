@@ -93,7 +93,15 @@ def _local_composer(
     card_root = runtime_root / "cards"
     compose_calls = 0
 
-    def compose(source, *, mode, fixture_id, fixture_name, stage_callback=None):
+    def compose(
+        source,
+        *,
+        mode,
+        execution_backend,
+        fixture_id,
+        fixture_name,
+        stage_callback=None,
+    ):
         nonlocal compose_calls
         compose_calls += 1
         active_qa_mode = qa_result_mode if compose_calls == 1 else None
@@ -155,6 +163,7 @@ def _local_composer(
                 results_root,
                 candidates,
                 mode=mode,
+                execution_backend=execution_backend,
                 fixture_id=fixture_id,
                 fixture_name=fixture_name,
             )

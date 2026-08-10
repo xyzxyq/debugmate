@@ -13,6 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.results.audio import _acquire_directory_lease, _DirectoryLease, _TargetInvalid
 from debugmate.results.consistency import (
@@ -36,7 +37,7 @@ CHECKSUMS_NAME = "checksums.sha256"
 PUBLICATION_NAME = "publication.json"
 FULL_ARCHIVE_NAME = "debugmate-result.zip"
 PARTIAL_ARCHIVE_NAME = "debugmate-result-partial.zip"
-MANIFEST_VERSION = "1.0.0"
+MANIFEST_VERSION = "1.1.0"
 PUBLICATION_VERSION = "1.0.0"
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
@@ -411,6 +412,7 @@ def _result_id(
     candidate: _CandidateSnapshot,
     *,
     mode: ResultMode,
+    execution_backend: ExecutionBackend,
     fixture_id: str | None,
     fixture_name: str | None,
 ) -> str:
@@ -418,6 +420,7 @@ def _result_id(
         "manifest_version": MANIFEST_VERSION,
         "identity": candidate.identity.model_dump(mode="json"),
         "mode": mode.value,
+        "execution_backend": execution_backend.value,
         "fixture_id": fixture_id,
         "fixture_name": fixture_name,
         "status": candidate.status.value,
@@ -455,6 +458,7 @@ def _manifest(
     *,
     result_id: str,
     mode: ResultMode,
+    execution_backend: ExecutionBackend,
     fixture_id: str | None,
     fixture_name: str | None,
 ) -> ResultManifest:
@@ -472,6 +476,7 @@ def _manifest(
         result_id=result_id,
         identity=candidate.identity,
         mode=mode,
+        execution_backend=execution_backend,
         status=candidate.status,
         fixture_id=fixture_id,
         fixture_name=fixture_name,
@@ -557,6 +562,7 @@ class ResultBundlePublisher:
         candidate: ValidatedResultCandidates,
         *,
         mode: ResultMode,
+        execution_backend: ExecutionBackend,
         fixture_id: str | None,
         fixture_name: str | None,
     ) -> PublishedResultBundle:
@@ -572,6 +578,7 @@ class ResultBundlePublisher:
                 snapshot,
                 lease,
                 mode=mode,
+                execution_backend=execution_backend,
                 fixture_id=fixture_id,
                 fixture_name=fixture_name,
             )
@@ -584,6 +591,7 @@ class ResultBundlePublisher:
         lease: _PublisherCandidateLease,
         *,
         mode: ResultMode,
+        execution_backend: ExecutionBackend,
         fixture_id: str | None,
         fixture_name: str | None,
     ) -> PublishedResultBundle:
@@ -594,12 +602,22 @@ class ResultBundlePublisher:
             if snapshot.identity != self.result_identity:
                 raise ResultPublishError("candidate_invalid")
             result_id = _result_id(
-                snapshot, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+                snapshot,
+                mode=mode,
+                execution_backend=execution_backend,
+                fixture_id=fixture_id,
+                fixture_name=fixture_name,
             )
             transaction = _begin_transaction(self.results_root, self.case_id, result_id)
             if transaction.temporary is None:
                 return _reuse_existing(
-                    transaction.final, snapshot, result_id, mode, fixture_id, fixture_name
+                    transaction.final,
+                    snapshot,
+                    result_id,
+                    mode,
+                    execution_backend,
+                    fixture_id,
+                    fixture_name,
                 )
             temporary = transaction.temporary
             # The transaction has obtained exclusive directory leases.  Only
@@ -611,6 +629,7 @@ class ResultBundlePublisher:
                 payloads,
                 result_id=result_id,
                 mode=mode,
+                execution_backend=execution_backend,
                 fixture_id=fixture_id,
                 fixture_name=fixture_name,
             )
@@ -661,6 +680,7 @@ def _reuse_existing(
     candidate: _CandidateSnapshot,
     result_id: str,
     mode: ResultMode,
+    execution_backend: ExecutionBackend,
     fixture_id: str | None,
     fixture_name: str | None,
 ) -> PublishedResultBundle:
@@ -673,6 +693,7 @@ def _reuse_existing(
             manifest.result_id != result_id
             or manifest.identity != candidate.identity
             or manifest.mode is not mode
+            or manifest.execution_backend is not execution_backend
             or manifest.fixture_id != fixture_id
             or manifest.fixture_name != fixture_name
             or manifest.status is not candidate.status
@@ -709,6 +730,7 @@ def publish_result_bundle(
     candidate: ValidatedResultCandidates,
     *,
     mode: ResultMode = ResultMode.LIVE,
+    execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
     fixture_id: str | None = None,
     fixture_name: str | None = None,
 ) -> PublishedResultBundle:
@@ -731,6 +753,7 @@ def publish_result_bundle(
             snapshot,
             lease,
             mode=mode,
+            execution_backend=execution_backend,
             fixture_id=fixture_id,
             fixture_name=fixture_name,
         )

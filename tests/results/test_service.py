@@ -22,12 +22,13 @@ def _service(tmp_path: Path, candidates=None, *, composer=None, workflow=None):
         assert candidates is not None
         candidate = validate_result_candidates(*candidates)
 
-        def compose(source, *, mode, fixture_id, fixture_name):
+        def compose(source, *, mode, execution_backend, fixture_id, fixture_name):
             assert source.case_id == candidate.identity.case_id
             return publish_result_bundle(
                 root,
                 candidate,
                 mode=mode,
+                execution_backend=execution_backend,
                 fixture_id=fixture_id,
                 fixture_name=fixture_name,
             )
@@ -70,7 +71,7 @@ def _dynamic_composer(
 
     calls = 0
 
-    def compose(source, *, mode, fixture_id, fixture_name):
+    def compose(source, *, mode, execution_backend, fixture_id, fixture_name):
         nonlocal calls
         calls += 1
         presentation = build_presentation(source, context)
@@ -107,6 +108,7 @@ def _dynamic_composer(
             root,
             candidate,
             mode=mode,
+            execution_backend=execution_backend,
             fixture_id=fixture_id,
             fixture_name=fixture_name,
         )
@@ -323,11 +325,17 @@ def test_live_service_events_follow_the_real_seven_stage_order(
     workflow, _extraction, _retrieval, _generator = _workflow(_rows()[0], tmp_path)
     _root, base_composer = _dynamic_composer(tmp_path, monkeypatch)
 
-    def staged_composer(source, *, mode, fixture_id, fixture_name, stage_callback):
+    def staged_composer(
+        source, *, mode, execution_backend, fixture_id, fixture_name, stage_callback
+    ):
         for stage in ("presentation", "report", "card", "audio", "consistency", "publish"):
             stage_callback(stage)
         return base_composer(
-            source, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+            source,
+            mode=mode,
+            execution_backend=execution_backend,
+            fixture_id=fixture_id,
+            fixture_name=fixture_name,
         )
 
     staged_composer.supports_stage_events = True
@@ -354,11 +362,17 @@ def test_replay_service_events_follow_the_real_seven_stage_order(
 ) -> None:
     _root, base_composer = _dynamic_composer(tmp_path, monkeypatch)
 
-    def staged_composer(source, *, mode, fixture_id, fixture_name, stage_callback):
+    def staged_composer(
+        source, *, mode, execution_backend, fixture_id, fixture_name, stage_callback
+    ):
         for stage in ("presentation", "report", "card", "audio", "consistency", "publish"):
             stage_callback(stage)
         return base_composer(
-            source, mode=mode, fixture_id=fixture_id, fixture_name=fixture_name
+            source,
+            mode=mode,
+            execution_backend=execution_backend,
+            fixture_id=fixture_id,
+            fixture_name=fixture_name,
         )
 
     staged_composer.supports_stage_events = True

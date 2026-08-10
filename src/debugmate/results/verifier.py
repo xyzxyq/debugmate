@@ -763,6 +763,7 @@ def _result_id_from_manifest(manifest: ResultManifest, values: dict[str, bytes])
         "manifest_version": MANIFEST_VERSION,
         "identity": manifest.identity.model_dump(mode="json"),
         "mode": manifest.mode.value,
+        "execution_backend": manifest.execution_backend.value,
         "fixture_id": manifest.fixture_id,
         "fixture_name": manifest.fixture_name,
         "status": manifest.status.value,

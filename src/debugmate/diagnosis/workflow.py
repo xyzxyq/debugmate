@@ -487,5 +487,8 @@ class DiagnosisWorkflow:
             source_revision=previous.revision,
             source_facts_sha256=previous.facts_sha256,
         )
+        outcome = outcome.model_copy(
+            update={"execution_backend": previous.execution_backend}
+        )
         validate_diagnosis_outcome(outcome)
         return outcome

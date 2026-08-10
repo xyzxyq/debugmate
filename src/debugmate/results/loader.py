@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from debugmate.cloud.contracts import ExecutionBackendValue
 from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.workflow import (
     DiagnosisRunOutcome,
@@ -62,6 +63,7 @@ class LoadedDiagnosisSource(StrictFrozenModel):
     case_id: str = Field(pattern=r"^case_[0-9a-f]{32}$")
     source_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     diagnosis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    execution_backend: ExecutionBackendValue
     outcome: DiagnosisRunOutcome
     diagnosis: DiagnosisRecord
     source_manifest: SourceManifestSummary
@@ -307,6 +309,7 @@ def load_verified_outcome(
         case_id=strict.case_id,
         source_run_id=strict.run_id,
         diagnosis_sha256=diagnosis_sha256,
+        execution_backend=strict.execution_backend,
         outcome=strict,
         diagnosis=diagnosis,
         source_manifest=summary,

@@ -12,6 +12,7 @@ from queue import Queue
 
 from pydantic import Field
 
+from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.diagnosis.correction import CorrectionOverlay
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.diagnosis.workflow import (
@@ -127,17 +128,24 @@ class ResultApplicationService:
         outcome_store: DiagnosisOutcomeStore,
         results_root: TrustedResultRoot,
         replay_root: Path,
+        live_execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
         composer: Callable[..., PublishedResultBundle] | None = None,
     ) -> None:
         if not isinstance(outcome_store, DiagnosisOutcomeStore):
             raise TypeError("ResultApplicationService requires DiagnosisOutcomeStore")
         if not isinstance(results_root, TrustedResultRoot):
             raise TypeError("ResultApplicationService requires TrustedResultRoot")
+        if live_execution_backend not in {
+            ExecutionBackend.DIFY,
+            ExecutionBackend.LOCAL_FALLBACK,
+        }:
+            raise TypeError("live execution backend must be dify or local_fallback")
         self._workflow = workflow
         self._evidence_root = Path(evidence_root)
         self._outcome_store = outcome_store
         self._results_root = results_root
         self._replay_root = Path(replay_root)
+        self._live_execution_backend = live_execution_backend
         self._composer = composer
         self._lock = threading.RLock()
         self._case_locks: dict[str, threading.RLock] = {}
@@ -148,11 +156,12 @@ class ResultApplicationService:
         with self._lock:
             return self._case_locks.setdefault(case_id, threading.RLock())
 
-    @staticmethod
     def _failure(
+        self,
         code: str,
         *,
         mode: ResultMode = ResultMode.LIVE,
+        execution_backend: ExecutionBackend | None = None,
         fixture_id: str | None = None,
         fixture_name: str | None = None,
     ) -> ResultViewState:
@@ -162,6 +171,15 @@ class ResultApplicationService:
         safe_code = code if code in _SAFE_FAILURE_CODES else "result_composition_failed"
         return ResultViewState(
             mode=mode,
+            execution_backend=(
+                execution_backend
+                if execution_backend is not None
+                else (
+                    ExecutionBackend.REPLAY
+                    if mode is ResultMode.REPLAY
+                    else self._live_execution_backend
+                )
+            ),
             status=ResultStatus.FAILED,
             fixture_id=fixture_id,
             fixture_name=fixture_name,
@@ -175,6 +193,7 @@ class ResultApplicationService:
     def _state_from_manifest(manifest: ResultManifest) -> ResultViewState:
         return ResultViewState(
             mode=manifest.mode,
+            execution_backend=manifest.execution_backend,
             status=manifest.status,
             fixture_id=manifest.fixture_id,
             fixture_name=manifest.fixture_name,
@@ -306,6 +325,7 @@ class ResultApplicationService:
         source: LoadedDiagnosisSource,
         *,
         mode: ResultMode,
+        execution_backend: ExecutionBackend,
         fixture_id: str | None,
         fixture_name: str | None,
         stage_callback: Callable[[str], None] | None = None,
@@ -315,6 +335,7 @@ class ResultApplicationService:
                 raise ResultServiceError("result_composition_failed")
             arguments = {
                 "mode": mode,
+                "execution_backend": execution_backend,
                 "fixture_id": fixture_id,
                 "fixture_name": fixture_name,
             }
@@ -329,6 +350,7 @@ class ResultApplicationService:
             if (
                 verified.manifest != published.manifest
                 or verified.manifest.mode is not mode
+                or verified.manifest.execution_backend is not execution_backend
                 or verified.manifest.fixture_id != fixture_id
                 or verified.manifest.fixture_name != fixture_name
                 or verified.manifest.identity.source_run_id != source.source_run_id
@@ -370,6 +392,7 @@ class ResultApplicationService:
                 state = self._compose(
                     source,
                     mode=ResultMode.LIVE,
+                    execution_backend=outcome.execution_backend,
                     fixture_id=None,
                     fixture_name=None,
                     stage_callback=stage_callback,
@@ -405,6 +428,7 @@ class ResultApplicationService:
                 checked, stage_callback=stage_callback
             ),
             mode=ResultMode.LIVE,
+            execution_backend=self._live_execution_backend,
             fixture_id=None,
             fixture_name=None,
             worker_name="debugmate-result-compose",
@@ -415,6 +439,7 @@ class ResultApplicationService:
         operation: Callable[[Callable[[str], None]], ResultViewState],
         *,
         mode: ResultMode,
+        execution_backend: ExecutionBackend,
         fixture_id: str | None,
         fixture_name: str | None,
         worker_name: str,
@@ -426,6 +451,7 @@ class ResultApplicationService:
                 state=self._failure(
                     "result_composition_failed",
                     mode=mode,
+                    execution_backend=execution_backend,
                     fixture_id=fixture_id,
                     fixture_name=fixture_name,
                 )
@@ -448,6 +474,7 @@ class ResultApplicationService:
                 result = self._failure(
                     "result_composition_failed",
                     mode=mode,
+                    execution_backend=execution_backend,
                     fixture_id=fixture_id,
                     fixture_name=fixture_name,
                 )
@@ -458,6 +485,7 @@ class ResultApplicationService:
                 result = self._failure(
                     "result_composition_failed",
                     mode=mode,
+                    execution_backend=execution_backend,
                     fixture_id=fixture_id,
                     fixture_name=fixture_name,
                 )
@@ -476,6 +504,7 @@ class ResultApplicationService:
             yield ServiceStageEvent(
                 state=ResultViewState(
                     mode=mode,
+                    execution_backend=execution_backend,
                     status=ResultStatus.RUNNING,
                     fixture_id=fixture_id,
                     fixture_name=fixture_name,
@@ -503,6 +532,7 @@ class ResultApplicationService:
                 return self._compose(
                     source,
                     mode=ResultMode.REPLAY,
+                    execution_backend=ExecutionBackend.REPLAY,
                     fixture_id=verified_fixture_id,
                     fixture_name=verified_fixture_name,
                     stage_callback=stage_callback,
@@ -539,6 +569,7 @@ class ResultApplicationService:
                 verified_fixture_id, stage_callback=stage_callback
             ),
             mode=ResultMode.REPLAY,
+            execution_backend=ExecutionBackend.REPLAY,
             fixture_id=verified_fixture_id,
             fixture_name=verified_fixture_name,
             worker_name="debugmate-replay-compose",
@@ -729,6 +760,7 @@ class ResultApplicationService:
             return self._compose(
                 revised,
                 mode=parent.mode,
+                execution_backend=parent.execution_backend,
                 fixture_id=parent.fixture_id,
                 fixture_name=parent.fixture_name,
             )
@@ -750,6 +782,7 @@ class ResultApplicationService:
             return self._compose(
                 source,
                 mode=manifest.mode,
+                execution_backend=manifest.execution_backend,
                 fixture_id=manifest.fixture_id,
                 fixture_name=manifest.fixture_name,
             )
