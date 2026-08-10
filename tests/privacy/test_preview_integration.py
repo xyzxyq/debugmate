@@ -303,13 +303,15 @@ def test_output_cannot_overwrite_source_screenshot(tmp_path: Path) -> None:
 def test_approved_preview_uploads_only_the_redacted_screenshot(tmp_path: Path) -> None:
     class RecordingBackend:
         def __init__(self) -> None:
-            self.uploads: list[Path] = []
+            self.uploads: list[tuple[bytes, str, str]] = []
             self.workflow_inputs: list[dict[str, object]] = []
 
-        def upload_file(self, path: Path, user: str) -> FileUploadResult:
+        def upload_bytes(
+            self, content: bytes, *, filename: str, mime_type: str, user: str
+        ) -> FileUploadResult:
             del user
-            self.uploads.append(path)
-            return FileUploadResult(file_id="redacted-file", filename=path.name, backend="fake")
+            self.uploads.append((content, filename, mime_type))
+            return FileUploadResult(file_id="redacted-file", filename=filename, backend="fake")
 
         def run_workflow(self, inputs: dict[str, object], user: str) -> object:
             del user
@@ -331,9 +333,12 @@ def test_approved_preview_uploads_only_the_redacted_screenshot(tmp_path: Path) -
 
     expected = workspace / str(preview.case_id) / "redacted.png"
     assert result == {"ok": True}
-    assert backend.uploads == [expected]
-    assert source not in backend.uploads
-    assert backend.workflow_inputs[0]["screenshot_file_id"] == "redacted-file"
+    assert backend.uploads == [(expected.read_bytes(), "redacted.png", "image/png")]
+    assert backend.workflow_inputs[0]["image_input"] == {
+        "type": "image",
+        "transfer_method": "local_file",
+        "upload_file_id": "redacted-file",
+    }
     with Image.open(expected) as image:
         assert image.convert("RGB").getpixel((50, 20)) == (0, 0, 0)
 

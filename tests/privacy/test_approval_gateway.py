@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import pytest
+from PIL import Image
 
 from debugmate.adapters.base import FileUploadResult
 from debugmate.contracts import new_case_id
@@ -22,9 +24,17 @@ class FakeBackend:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, str]] = []
 
-    def upload_file(self, path: Path, user: str) -> FileUploadResult:
-        self.calls.append(("upload", path, user))
-        return FileUploadResult(file_id="file-redacted", filename=path.name, backend="fake")
+    def upload_bytes(
+        self, content: bytes, *, filename: str, mime_type: str, user: str
+    ) -> FileUploadResult:
+        self.calls.append(
+            (
+                "upload",
+                {"content": content, "filename": filename, "mime_type": mime_type},
+                user,
+            )
+        )
+        return FileUploadResult(file_id="file-redacted", filename=filename, backend="fake")
 
     def run_workflow(self, inputs: dict[str, object], user: str) -> object:
         self.calls.append(("run", inputs, user))
@@ -140,7 +150,10 @@ def test_gateway_sends_only_allowlisted_redacted_fields() -> None:
 def test_gateway_uploads_verified_redacted_screenshot_first(tmp_path: Path) -> None:
     image = tmp_path / "case" / "redacted.png"
     image.parent.mkdir()
-    image.write_bytes(b"\x89PNG\r\n\x1a\nredacted-fixture")
+    output = BytesIO()
+    Image.new("RGB", (4, 4), "white").save(output, format="PNG")
+    image_bytes = output.getvalue()
+    image.write_bytes(image_bytes)
     source_preview = preview()
     redacted = source_preview.redacted.model_copy(
         update={
@@ -158,11 +171,19 @@ def test_gateway_uploads_verified_redacted_screenshot_first(tmp_path: Path) -> N
         backend, approval_key=KEY, user="course-demo", redacted_root=tmp_path
     ).run(approved)
 
-    assert backend.calls[0] == ("upload", image, "course-demo")
+    assert backend.calls[0] == (
+        "upload",
+        {"content": image_bytes, "filename": "redacted.png", "mime_type": "image/png"},
+        "course-demo",
+    )
     assert backend.calls[1][0] == "run"
     payload = backend.calls[1][1]
     assert isinstance(payload, dict)
-    assert payload["screenshot_file_id"] == "file-redacted"
+    assert payload["image_input"] == {
+        "type": "image",
+        "transfer_method": "local_file",
+        "upload_file_id": "file-redacted",
+    }
     assert "redacted_screenshot_path" not in payload
 
 

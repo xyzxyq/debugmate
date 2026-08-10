@@ -6,7 +6,7 @@ import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from debugmate.cloud.contracts import DifyRunEnvelope, DifyUsage
 from debugmate.contracts import CapabilityStatus
@@ -67,6 +67,20 @@ class CandidateBackend(Protocol):
     """Candidate-only transport port used by local diagnosis generation."""
 
     def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult: ...
+
+
+@runtime_checkable
+class ApprovedImageBackend(CandidateBackend, Protocol):
+    """Cloud boundary that accepts only an application-owned byte snapshot."""
+
+    def upload_bytes(
+        self,
+        content: bytes,
+        *,
+        filename: str,
+        mime_type: Literal["image/png", "image/jpeg"],
+        user: str,
+    ) -> FileUploadResult: ...
 
 
 @runtime_checkable

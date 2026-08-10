@@ -11,6 +11,7 @@ from debugmate.contracts import new_case_id
 from debugmate.gateway import CloudGateway
 from debugmate.hashing import sha256_file
 from debugmate.privacy.approval import ApprovalInvalid, approve_preview
+from debugmate.privacy.image_models import MAX_SCREENSHOT_BYTES
 from debugmate.privacy.models import InputEnvelope, PreviewBundle
 from debugmate.privacy.text_redactor import redact_input
 
@@ -145,6 +146,20 @@ def test_post_approval_replacement_fails_before_any_backend_call(tmp_path: Path)
 
 def test_extension_and_decoded_mime_mismatch_fails_before_network(tmp_path: Path) -> None:
     approved = _approved_image(tmp_path, "case/redacted.jpg", _image_bytes("PNG"))
+    backend = SnapshotBackend()
+
+    with pytest.raises(ApprovalInvalid):
+        CloudGateway(backend, approval_key=KEY, redacted_root=tmp_path).run(approved)
+
+    assert backend.calls == []
+
+
+def test_oversized_approved_image_fails_before_network(tmp_path: Path) -> None:
+    approved = _approved_image(
+        tmp_path,
+        "case/redacted.png",
+        b"x" * (MAX_SCREENSHOT_BYTES + 1),
+    )
     backend = SnapshotBackend()
 
     with pytest.raises(ApprovalInvalid):

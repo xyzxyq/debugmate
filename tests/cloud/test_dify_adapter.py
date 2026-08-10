@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import httpx
@@ -199,3 +200,86 @@ def test_status_errors_are_typed_and_contain_no_provider_material(
     assert secret not in rendered
     assert provider_body not in rendered
     assert "dify.test" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("filename", "mime_type", "content"),
+    [
+        ("redacted.png", "image/png", b"approved-png-snapshot"),
+        ("redacted.jpg", "image/jpeg", b"approved-jpeg-snapshot"),
+    ],
+)
+def test_upload_sends_exact_snapshot_and_validates_returned_contract(
+    filename: str, mime_type: str, content: bytes
+) -> None:
+    observed: list[tuple[bytes, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read()
+        observed.append((body, request.headers["content-type"]))
+        assert content in body
+        assert filename.encode() in body
+        assert mime_type.encode() in body
+        assert b'stable-dify-user' in body
+        return httpx.Response(
+            201,
+            json={
+                "id": "transient-upload-id",
+                "name": filename,
+                "size": len(content),
+                "mime_type": mime_type,
+            },
+            request=request,
+        )
+
+    backend = DifyBackend(
+        _settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        test_base_url="https://dify.test/v1",
+    )
+    result = backend.upload_bytes(
+        content,
+        filename=filename,
+        mime_type=mime_type,  # type: ignore[arg-type]
+        user="stable-dify-user",
+    )
+
+    assert len(observed) == 1
+    assert result.file_id == "transient-upload-id"
+    assert result.file_id_fingerprint == hashlib.sha256(
+        b"transient-upload-id"
+    ).hexdigest()
+    assert result.filename == filename
+    assert result.mime_type == mime_type
+    assert result.size == len(content)
+
+
+@pytest.mark.parametrize("changed_field", ["name", "size", "mime_type"])
+def test_upload_rejects_mismatched_provider_metadata(changed_field: str) -> None:
+    response = {
+        "id": "transient-upload-id",
+        "name": "redacted.png",
+        "size": 8,
+        "mime_type": "image/png",
+    }
+    response[changed_field] = {
+        "name": "different.png",
+        "size": 9,
+        "mime_type": "image/jpeg",
+    }[changed_field]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201, json=response, request=request)
+
+    backend = DifyBackend(
+        _settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        test_base_url="https://dify.test/v1",
+    )
+    with pytest.raises(dify.DifyUploadError):
+        backend.upload_bytes(
+            b"snapshot",
+            filename="redacted.png",
+            mime_type="image/png",
+            user="stable-dify-user",
+        )

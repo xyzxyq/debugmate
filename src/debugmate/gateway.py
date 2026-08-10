@@ -3,15 +3,94 @@
 from __future__ import annotations
 
 import hmac
+import stat
+from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
-from debugmate.adapters.base import CandidateRunResult, DiagnosisBackend
+from PIL import Image, UnidentifiedImageError
+
+from debugmate.adapters.base import ApprovedImageBackend, CandidateRunResult
 from debugmate.diagnosis.correction import CorrectionOverlay, apply_correction
 from debugmate.diagnosis.extraction import CaseFacts
 from debugmate.diagnosis.workflow import DiagnosisRunOutcome, DiagnosisWorkflow
-from debugmate.hashing import UnsafeArtifactPath, resolve_artifact_path, sha256_file
+from debugmate.hashing import UnsafeArtifactPath, resolve_artifact_path, sha256_bytes
 from debugmate.privacy.approval import ApprovalInvalid, verify_approval
+from debugmate.privacy.image_models import MAX_SCREENSHOT_BYTES, MAX_SCREENSHOT_PIXELS
 from debugmate.privacy.models import ApprovedRedactedInput
+
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise ApprovalInvalid("approved redacted screenshot is unavailable") from None
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & _REPARSE_POINT
+    )
+
+
+def _resolve_regular_screenshot(root: Path, relative: Path) -> Path:
+    """Reject every link/reparse component before resolving under the trusted root."""
+
+    root_resolved = root.resolve()
+    candidate = root_resolved
+    for part in relative.parts:
+        candidate /= part
+        if _is_link_or_reparse(candidate):
+            raise ApprovalInvalid("approved screenshot path is unsafe")
+    try:
+        resolved = resolve_artifact_path(root_resolved, relative)
+        metadata = resolved.lstat()
+    except (OSError, UnsafeArtifactPath):
+        raise ApprovalInvalid("approved screenshot path is unsafe") from None
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ApprovalInvalid("approved redacted screenshot is unavailable")
+    return resolved
+
+
+def _read_approved_image(
+    path: Path, expected_sha256: str
+) -> tuple[bytes, Literal["image/png", "image/jpeg"]]:
+    """Read once, then bind hashing, decoding and MIME to the same immutable bytes."""
+
+    try:
+        before = path.lstat()
+        with path.open("rb") as source:
+            content = source.read(MAX_SCREENSHOT_BYTES + 1)
+        after = path.lstat()
+    except OSError:
+        raise ApprovalInvalid("approved redacted screenshot is unavailable") from None
+    if _is_link_or_reparse(path) or (before.st_dev, before.st_ino) != (
+        after.st_dev,
+        after.st_ino,
+    ):
+        raise ApprovalInvalid("approved screenshot path is unsafe")
+    if len(content) > MAX_SCREENSHOT_BYTES:
+        raise ApprovalInvalid("approved screenshot exceeds the size limit")
+    actual_sha256 = sha256_bytes(content)
+    if not hmac.compare_digest(actual_sha256, expected_sha256):
+        raise ApprovalInvalid("approved redacted screenshot has changed")
+
+    try:
+        with Image.open(BytesIO(content)) as image:
+            image.verify()
+        with Image.open(BytesIO(content)) as image:
+            image_format = image.format
+            width, height = image.size
+    except (OSError, UnidentifiedImageError, ValueError):
+        raise ApprovalInvalid("approved screenshot is invalid") from None
+    if width <= 0 or height <= 0 or width * height > MAX_SCREENSHOT_PIXELS:
+        raise ApprovalInvalid("approved screenshot dimensions are invalid")
+
+    suffix = path.suffix.casefold()
+    if image_format == "PNG" and suffix == ".png":
+        return content, "image/png"
+    if image_format == "JPEG" and suffix in {".jpg", ".jpeg"}:
+        return content, "image/jpeg"
+    raise ApprovalInvalid("approved screenshot extension and MIME do not match")
 
 
 class CloudGateway:
@@ -19,7 +98,7 @@ class CloudGateway:
 
     def __init__(
         self,
-        backend: DiagnosisBackend,
+        backend: ApprovedImageBackend,
         *,
         approval_key: bytes,
         user: str = "debugmate-local",
@@ -47,19 +126,23 @@ class CloudGateway:
                 raise ApprovalInvalid("approved screenshot hash is missing")
             if self._redacted_root is None:
                 raise ApprovalInvalid("approved screenshot root is unavailable")
-            try:
-                path = resolve_artifact_path(
-                    self._redacted_root, Path(redacted.redacted_screenshot_path)
-                )
-            except UnsafeArtifactPath:
-                raise ApprovalInvalid("approved screenshot path is unsafe") from None
-            if not path.is_file():
-                raise ApprovalInvalid("approved redacted screenshot is unavailable")
-            actual_hash = sha256_file(path)
-            if not hmac.compare_digest(actual_hash, redacted.redacted_screenshot_sha256):
-                raise ApprovalInvalid("approved redacted screenshot has changed")
-            uploaded = self._backend.upload_file(path, self._user)
-            inputs["screenshot_file_id"] = uploaded.file_id
+            path = _resolve_regular_screenshot(
+                self._redacted_root, Path(redacted.redacted_screenshot_path)
+            )
+            content, mime_type = _read_approved_image(
+                path, redacted.redacted_screenshot_sha256
+            )
+            uploaded = self._backend.upload_bytes(
+                content,
+                filename=path.name,
+                mime_type=mime_type,
+                user=self._user,
+            )
+            inputs["image_input"] = {
+                "type": "image",
+                "transfer_method": "local_file",
+                "upload_file_id": uploaded.file_id,
+            }
 
         return self._backend.run_workflow(inputs, self._user)
 
