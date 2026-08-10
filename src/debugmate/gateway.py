@@ -109,10 +109,15 @@ class CloudGateway:
         self._user = user
         self._redacted_root = None if redacted_root is None else Path(redacted_root)
 
-    def run(self, approved: ApprovedRedactedInput) -> CandidateRunResult:
+    def verify(self, approved: ApprovedRedactedInput) -> None:
+        """Validate approval without performing any outbound operation."""
+
         if not isinstance(approved, ApprovedRedactedInput):
             raise TypeError("CloudGateway accepts only ApprovedRedactedInput")
         verify_approval(approved, self._approval_key)
+
+    def run(self, approved: ApprovedRedactedInput) -> CandidateRunResult:
+        self.verify(approved)
 
         redacted = approved.redacted
         inputs: dict[str, object] = {
@@ -144,6 +149,20 @@ class CloudGateway:
                 "upload_file_id": uploaded.file_id,
             }
 
+        return self._backend.run_workflow(inputs, self._user)
+
+    def repair(self, inputs: dict[str, object]) -> CandidateRunResult:
+        """Dispatch one allowlisted contract-repair request.
+
+        This port deliberately accepts no approval material, trace, or provider
+        metadata.  The live workflow builds the bounded payload after consuming
+        the primary approval.
+        """
+
+        if set(inputs) != {"request_kind", "schema_version", "issues", "candidate"}:
+            raise TypeError("repair input does not match the safe contract")
+        if inputs.get("request_kind") != "contract_repair":
+            raise TypeError("repair input does not match the safe contract")
         return self._backend.run_workflow(inputs, self._user)
 
 

@@ -123,17 +123,7 @@ def _attestation() -> DifyReadbackAttestation:
         dataset_fingerprint="4" * 64,
         document_count=17,
         document_fingerprints=[f"{index + 1:064x}" for index in range(17)],
-        config=DifySyncConfig(
-            indexing_technique="high_quality",
-            process_rule_mode="custom",
-            chunk_separator="\\n\\n",
-            max_tokens=500,
-            chunk_overlap=50,
-            retrieval_method="semantic_search",
-            top_k=4,
-            score_threshold_enabled=True,
-            score_threshold=0.5,
-        ),
+        config=DifySyncConfig(),
         response_hashes=["5" * 64],
     )
 
@@ -279,11 +269,12 @@ def test_stale_build_fails_terminally_and_same_approval_cannot_dispatch_again(
     )
     gateway = GatewaySpy(stale, store)
     workflow = _workflow(tmp_path, gateway)
+    approved = _approved()
 
     with pytest.raises(CloudWorkflowError, match="knowledge_readback"):
-        workflow.run(_approved())
+        workflow.run(approved)
     with pytest.raises(CloudWorkflowError, match="duplicate"):
-        workflow.run(_approved())
+        workflow.run(approved)
 
     assert gateway.calls.count("workflow") == 1
     receipt = store.read(next((tmp_path / "receipts").glob("*.json")).stem)
@@ -303,11 +294,12 @@ def test_ambiguous_workflow_timeout_is_uncertain_and_never_replayed(tmp_path: Pa
 
     gateway = AmbiguousGateway(_envelope(), store)
     workflow = _workflow(tmp_path, gateway)
+    approved = _approved()
 
     with pytest.raises(CloudWorkflowError, match="ambiguous_timeout"):
-        workflow.run(_approved())
+        workflow.run(approved)
     with pytest.raises(CloudWorkflowError, match="duplicate"):
-        workflow.run(_approved())
+        workflow.run(approved)
 
     assert gateway.calls.count("workflow") == 1
     receipt = store.read(next((tmp_path / "receipts").glob("*.json")).stem)
