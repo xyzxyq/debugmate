@@ -21,6 +21,7 @@ from debugmate.evidence import publish_diagnosis_evidence
 from debugmate.results.audio import TrustedCandidateRoot, TtsFallbackChain
 from debugmate.results.card import CardRenderFailure, render_card
 from debugmate.results.consistency import validate_result_candidates
+from debugmate.results.contracts import ResultMode
 from debugmate.results.font import prepare_generation_context
 from debugmate.results.loader import load_verified_outcome
 from debugmate.results.media import probe_mp3, trusted_media_tools
@@ -112,7 +113,12 @@ def _tag_free_tone_mp3(target: Path) -> bytes:
     return target.read_bytes()
 
 
-def _real_completed_bundle(completed_source_bundle, tmp_path: Path):
+def _real_completed_bundle(
+    completed_source_bundle,
+    tmp_path: Path,
+    *,
+    execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
+):
     """Compose one full bundle with an offline fake adapter and real media."""
 
     outcome, source_path = completed_source_bundle
@@ -142,7 +148,12 @@ def _real_completed_bundle(completed_source_bundle, tmp_path: Path):
         source, presentation, report, citations, card, recap, audio
     )
     root = TrustedResultRoot.for_testing(tmp_path / "results")
-    bundle = publish_result_bundle(root, candidate)
+    bundle = publish_result_bundle(
+        root,
+        candidate,
+        mode=ResultMode.LIVE,
+        execution_backend=execution_backend,
+    )
     return outcome, source_path, root, bundle
 
 
@@ -201,7 +212,9 @@ def test_strict_dify_outcome_reuses_complete_mp3_and_zip_chain(
     source_path = publish_diagnosis_evidence(dify_outcome, evidence_root)
 
     _outcome, _source, root, bundle = _real_completed_bundle(
-        (dify_outcome, source_path), tmp_path
+        (dify_outcome, source_path),
+        tmp_path,
+        execution_backend=ExecutionBackend.DIFY,
     )
     verified = verify_result_bundle(bundle.path)
     service = _restore_service(
@@ -230,6 +243,78 @@ def test_strict_dify_outcome_reuses_complete_mp3_and_zip_chain(
         archived_manifest = json.loads(archive.read("result-manifest.json"))
         assert archived_manifest == verified.manifest.model_dump(mode="json")
         assert {"report.md", "card.png", "recap.mp3"} <= set(archive.namelist())
+
+
+def test_strict_dify_outcome_keeps_truthful_tts_partial_semantics(
+    completed_source_bundle, tmp_path: Path
+) -> None:
+    """Dify diagnosis success stays Dify when the independent audio chain fails."""
+
+    outcome, _source_path = completed_source_bundle
+    dify_outcome = outcome.model_copy(
+        update={"execution_backend": ExecutionBackend.DIFY}
+    )
+    evidence_root = tmp_path / "dify-partial-evidence"
+    source_path = publish_diagnosis_evidence(dify_outcome, evidence_root)
+    font = _font_copy(tmp_path)
+    context = prepare_generation_context(
+        project_root=tmp_path,
+        project_font_candidates=(f"fonts/{font.name}",),
+        windows_font_candidates=(),
+    )
+    source = load_verified_outcome(dify_outcome, evidence_root=evidence_root)
+    presentation = build_presentation(source, context)
+    report = render_report(presentation)
+    citations = render_citations(presentation)
+    recap = compose_recap(presentation)
+    card = render_card(presentation, context, target=tmp_path / "partial-card.png")
+    audio = TtsFallbackChain(
+        (_FailAdapter("dify"), _FailAdapter("edge_tts"), _FailAdapter("sapi"))
+    ).synthesize(
+        recap,
+        _request(recap),
+        TrustedCandidateRoot.for_testing(tmp_path / "dify-partial-private"),
+    )
+    candidate = validate_result_candidates(
+        source, presentation, report, citations, card, recap, audio
+    )
+    root = TrustedResultRoot.for_testing(tmp_path / "dify-partial-results")
+    bundle = publish_result_bundle(
+        root,
+        candidate,
+        mode=ResultMode.LIVE,
+        execution_backend=ExecutionBackend.DIFY,
+    )
+    verified = verify_result_bundle(bundle.path)
+    service = _restore_service(
+        outcome=dify_outcome,
+        source_path=source_path,
+        root=root,
+        tmp_path=tmp_path,
+    )
+    archive_bytes = service.resolve_download(
+        verified.manifest.identity.case_id,
+        verified.manifest.result_id,
+        "bundle",
+    ).read_bytes()
+    archive_path = tmp_path / "dify-partial.zip"
+    archive_path.write_bytes(archive_bytes)
+
+    assert verified.manifest.execution_backend is ExecutionBackend.DIFY
+    assert verified.manifest.status.value == "partial"
+    assert verified.manifest.audio is not None
+    assert verified.manifest.audio.sha256 is None
+    assert verified.manifest.audio.failure is not None
+    assert verified.manifest.audio.failure.code == "tts_failed"
+    assert verified.manifest.failure is not None
+    assert verified.manifest.failure.code == "tts_failed"
+    assert (verified.path / "report.md").is_file()
+    assert (verified.path / "card.png").is_file()
+    assert not (verified.path / "recap.mp3").exists()
+    with zipfile.ZipFile(archive_path) as archive:
+        archived_manifest = json.loads(archive.read("result-manifest.json"))
+        assert archived_manifest == verified.manifest.model_dump(mode="json")
+        assert "recap.mp3" not in archive.namelist()
 
 
 def test_png_partial_result_e2e(candidates, tmp_path: Path) -> None:
