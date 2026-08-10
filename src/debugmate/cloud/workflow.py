@@ -43,7 +43,7 @@ from debugmate.diagnosis.workflow import (
     derive_run_identities,
     validate_diagnosis_outcome,
 )
-from debugmate.gateway import CloudGateway
+from debugmate.gateway import CloudDispatchResult, CloudGateway
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation
@@ -270,7 +270,21 @@ class DifyLiveWorkflow:
 
         attempts: list[DifyAttempt] = []
         try:
-            primary = self._gateway.run(approved)
+            if isinstance(self._gateway, CloudGateway):
+                dispatch = self._gateway.run_live(approved)
+                if not isinstance(dispatch, CloudDispatchResult):
+                    raise TypeError("cloud dispatch result is invalid")
+                primary = dispatch.candidate
+                if dispatch.upload_fingerprint is not None:
+                    attempts.append(
+                        DifyAttempt(
+                            kind=DifyAttemptKind.UPLOAD,
+                            attempt_fingerprint=dispatch.upload_fingerprint,
+                            status=AttemptStatus.SUCCEEDED,
+                        )
+                    )
+            else:
+                primary = self._gateway.run(approved)
             attempts.append(
                 _attempt(DifyAttemptKind.WORKFLOW, primary.run_id, AttemptStatus.SUCCEEDED)
             )
@@ -290,10 +304,15 @@ class DifyLiveWorkflow:
             ) from None
         except DifyError as error:
             code = CloudFailureCode(error.code)
+            failed_kind = (
+                DifyAttemptKind.UPLOAD
+                if code is CloudFailureCode.UPLOAD
+                else DifyAttemptKind.WORKFLOW
+            )
             attempts.append(
                 _attempt(
-                    DifyAttemptKind.WORKFLOW,
-                    receipt.receipt_id + ":workflow",
+                    failed_kind,
+                    receipt.receipt_id + f":{failed_kind.value}",
                     AttemptStatus.FAILED,
                 )
             )

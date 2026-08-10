@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import stat
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
@@ -20,6 +21,14 @@ from debugmate.privacy.image_models import MAX_SCREENSHOT_BYTES, MAX_SCREENSHOT_
 from debugmate.privacy.models import ApprovedRedactedInput
 
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
+
+
+@dataclass(frozen=True, slots=True)
+class CloudDispatchResult:
+    """Safe local metadata for one upload-plus-workflow dispatch."""
+
+    candidate: CandidateRunResult
+    upload_fingerprint: str | None = None
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -116,7 +125,9 @@ class CloudGateway:
             raise TypeError("CloudGateway accepts only ApprovedRedactedInput")
         verify_approval(approved, self._approval_key)
 
-    def run(self, approved: ApprovedRedactedInput) -> CandidateRunResult:
+    def run_live(self, approved: ApprovedRedactedInput) -> CloudDispatchResult:
+        """Run one approved dispatch and retain only a safe upload fingerprint."""
+
         self.verify(approved)
 
         redacted = approved.redacted
@@ -126,6 +137,7 @@ class CloudGateway:
             "environment": redacted.environment,
             "case_id": approved.case_id,
         }
+        upload_fingerprint: str | None = None
         if redacted.redacted_screenshot_path is not None:
             if redacted.redacted_screenshot_sha256 is None:
                 raise ApprovalInvalid("approved screenshot hash is missing")
@@ -143,13 +155,24 @@ class CloudGateway:
                 mime_type=mime_type,
                 user=self._user,
             )
+            upload_fingerprint = uploaded.file_id_fingerprint
+            if upload_fingerprint is None:
+                upload_fingerprint = sha256_bytes(uploaded.file_id.encode("utf-8"))
             inputs["image_input"] = {
                 "type": "image",
                 "transfer_method": "local_file",
                 "upload_file_id": uploaded.file_id,
             }
 
-        return self._backend.run_workflow(inputs, self._user)
+        return CloudDispatchResult(
+            candidate=self._backend.run_workflow(inputs, self._user),
+            upload_fingerprint=upload_fingerprint,
+        )
+
+    def run(self, approved: ApprovedRedactedInput) -> CandidateRunResult:
+        """Compatibility seam returning only the candidate result."""
+
+        return self.run_live(approved).candidate
 
     def repair(self, inputs: dict[str, object]) -> CandidateRunResult:
         """Dispatch one allowlisted contract-repair request.
