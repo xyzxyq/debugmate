@@ -15,13 +15,13 @@ from debugmate.cloud.workflow import CloudWorkflowError, DifyLiveWorkflow
 from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.evidence_binding import bind_retrieval_evidence
 from debugmate.diagnosis.extraction import (
+    ExtractionRecord,
     FieldId,
     SourceKind,
     TextLocator,
     build_case_facts,
     extraction_id_for,
     make_candidate,
-    ExtractionRecord,
 )
 from debugmate.diagnosis.workflow import validate_diagnosis_outcome
 from debugmate.hashing import sha256_bytes

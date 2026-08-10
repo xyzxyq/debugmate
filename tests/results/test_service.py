@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from debugmate.diagnosis.extraction import FieldId
-from debugmate.diagnosis.workflow import DiagnosisRunOutcome
 from debugmate.cloud.contracts import ExecutionBackend, ReceiptStatus
 from debugmate.cloud.workflow import CloudWorkflowError
+from debugmate.diagnosis.extraction import FieldId
+from debugmate.diagnosis.workflow import DiagnosisRunOutcome
 from debugmate.privacy.models import ApprovedRedactedInput, RedactedFields
 from debugmate.results.consistency import validate_result_candidates
 from debugmate.results.outcome_store import DiagnosisOutcomeStore
@@ -148,8 +148,8 @@ def test_cloud_validation_failure_remains_typed_and_publishes_nothing(
     assert state.availability.model_dump() == {
         "report": False,
         "card": False,
+        "recap_text": False,
         "audio": False,
-        "archive": False,
     }
     assert not (tmp_path / "evidence").exists()
     assert not (tmp_path / "outcomes").exists()

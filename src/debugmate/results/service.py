@@ -13,6 +13,7 @@ from queue import Queue
 from pydantic import Field
 
 from debugmate.cloud.contracts import ExecutionBackend
+from debugmate.cloud.workflow import CloudWorkflowError
 from debugmate.diagnosis.correction import CorrectionOverlay
 from debugmate.diagnosis.extraction import FieldId
 from debugmate.diagnosis.workflow import (
@@ -64,6 +65,17 @@ _SAFE_FAILURE_CODES = {
     "workflow_not_completed": ("workflow", "input"),
     "result_composition_failed": ("result", "result"),
     "correction_invalid": ("correction", "correction"),
+    "configuration": ("configuration", "input"),
+    "authentication": ("authentication", "input"),
+    "quota": ("quota", "input"),
+    "pre_dispatch_transport": ("transport", "input"),
+    "ambiguous_timeout": ("workflow", "input"),
+    "upload": ("upload", "input"),
+    "workflow_envelope": ("workflow", "input"),
+    "diagnosis_validation": ("validation", "input"),
+    "repair_exhaustion": ("validation", "input"),
+    "knowledge_readback": ("knowledge", "input"),
+    "local_result_composition": ("result", "result"),
 }
 _RESULT_STAGES = (
     "source",
@@ -401,6 +413,11 @@ class ResultApplicationService:
                 return self._failure(error.code)
             except ResultLoadError as error:
                 return self._failure(error.code)
+            except CloudWorkflowError as error:
+                return self._failure(
+                    error.code,
+                    execution_backend=ExecutionBackend.DIFY,
+                )
             except Exception:
                 return self._failure("result_composition_failed")
             self._live_cache[key] = state
