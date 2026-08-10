@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from debugmate.cloud.contracts import DifyRunEnvelope, DifyUsage
 from debugmate.contracts import CapabilityStatus
 
 MAX_CANDIDATE_PAYLOAD_BYTES = 256 * 1024
@@ -18,6 +19,9 @@ class FileUploadResult:
     file_id: str
     filename: str
     backend: str
+    file_id_fingerprint: str | None = None
+    mime_type: str | None = None
+    size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +29,8 @@ class CandidateRunResult:
     run_id: str
     backend: str
     candidate_payload: object
+    run_envelope: DifyRunEnvelope | None = None
+    usage: DifyUsage = DifyUsage()
 
     def __post_init__(self) -> None:
         if not self.run_id.strip() or not self.backend.strip():

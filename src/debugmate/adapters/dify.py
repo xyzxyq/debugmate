@@ -1,11 +1,14 @@
-"""Narrow, secret-safe HTTP adapter for the Dify application API."""
+"""Bounded, secret-safe HTTP adapter for the Dify application API."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+import hashlib
+import json
+from collections.abc import Iterator
+from typing import Any, Literal
 
 import httpx
+from pydantic import ValidationError
 
 from debugmate.adapters.base import (
     AudioSynthesisResult,
@@ -13,135 +16,288 @@ from debugmate.adapters.base import (
     CapabilityProbeResult,
     FileUploadResult,
 )
+from debugmate.cloud.contracts import DifyRunEnvelope, DifyUsage
 from debugmate.contracts import CapabilityStatus
 from debugmate.settings import DebugMateSettings
 
+MAX_WORKFLOW_RESPONSE_BYTES = 512 * 1024
+APPLICATION_TIMEOUT = httpx.Timeout(connect=10.0, write=30.0, read=95.0, pool=5.0)
+
 
 class DifyError(RuntimeError):
-    """Base class whose messages never include response bodies or headers."""
+    """Base error with a stable code and provider-independent safe message."""
+
+    code = "configuration"
+
+    def __init__(self, message: str = "Dify request failed safely") -> None:
+        super().__init__(message)
 
 
 class DifyNotConfigured(DifyError):
-    pass
+    code = "configuration"
 
 
 class DifyAuthError(DifyError):
-    pass
+    code = "authentication"
 
 
 class DifyQuotaError(DifyError):
-    pass
+    code = "quota"
 
 
 class DifyTransportError(DifyError):
-    pass
+    code = "pre_dispatch_transport"
+
+
+class DifyAmbiguousTransportError(DifyTransportError):
+    code = "ambiguous_timeout"
 
 
 class DifyContractError(DifyError):
-    pass
+    code = "workflow_envelope"
+
+
+class DifyUploadError(DifyContractError):
+    code = "upload"
+
+
+def _fingerprint_remote_id(value: str, prefix: str) -> str:
+    return f"{prefix}_{hashlib.sha256(value.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _bounded_bytes(response: httpx.Response, limit: int) -> bytes:
+    length = response.headers.get("content-length")
+    if length is not None:
+        try:
+            if int(length) > limit:
+                raise DifyContractError("Dify response exceeded the safe size limit")
+        except ValueError:
+            raise DifyContractError("Dify response length was invalid") from None
+
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        if len(body) + len(chunk) > limit:
+            raise DifyContractError("Dify response exceeded the safe size limit")
+        body.extend(chunk)
+    return bytes(body)
+
+
+def _safe_usage(payload: object) -> DifyUsage:
+    if not isinstance(payload, dict):
+        return DifyUsage()
+    allowlisted = {
+        key: payload[key]
+        for key in ("total_tokens", "total_steps", "elapsed_time", "total_price")
+        if key in payload
+        and isinstance(payload[key], int | float)
+        and not isinstance(payload[key], bool)
+    }
+    try:
+        return DifyUsage.model_validate(allowlisted, strict=True)
+    except ValidationError:
+        return DifyUsage()
 
 
 class DifyBackend:
-    def __init__(self, settings: DebugMateSettings, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        settings: DebugMateSettings,
+        client: httpx.Client | None = None,
+        *,
+        test_base_url: str | None = None,
+    ) -> None:
+        if test_base_url is not None and client is None:
+            raise ValueError("a test origin requires an injected HTTP client")
         self._settings = settings
-        self._client = client or httpx.Client(timeout=httpx.Timeout(30.0))
+        self._base_url = (test_base_url or settings.dify_base_url).rstrip("/")
+        self._owns_client = client is None
+        self._client = client or httpx.Client(
+            timeout=APPLICATION_TIMEOUT,
+            follow_redirects=False,
+        )
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
 
     def _headers(self) -> dict[str, str]:
-        if self._settings.dify_api_key is None:
-            raise DifyNotConfigured("Dify API key is not configured")
-        return {
-            "Authorization": f"Bearer {self._settings.dify_api_key.get_secret_value()}",
-        }
+        if not self._settings.dify_application_configured:
+            raise DifyNotConfigured("Dify application configuration is incomplete")
+        assert self._settings.dify_api_key is not None
+        return {"Authorization": f"Bearer {self._settings.dify_api_key.get_secret_value()}"}
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        url = f"{self._settings.dify_base_url.rstrip('/')}/{path.lstrip('/')}"
+    def _stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        endpoint: Literal["upload", "workflow", "audio"],
+        **kwargs: Any,
+    ) -> Iterator[httpx.Response]:
+        url = f"{self._base_url}/{path.lstrip('/')}"
         for attempt in range(2):
             try:
-                response = self._client.request(
+                with self._client.stream(
                     method,
                     url,
                     headers=self._headers(),
+                    follow_redirects=False,
                     **kwargs,
-                )
-                break
-            except (httpx.ConnectError, httpx.TimeoutException):
+                ) as response:
+                    yield response
+                return
+            except (httpx.ConnectError, httpx.ConnectTimeout):
                 if attempt == 1:
-                    raise DifyTransportError("Dify transport failed after one retry") from None
-        else:  # pragma: no cover - loop always breaks or raises
-            raise DifyTransportError("Dify transport failed")
+                    raise DifyTransportError("Dify connection failed before dispatch") from None
+            except (
+                httpx.ReadTimeout,
+                httpx.ReadError,
+                httpx.WriteTimeout,
+                httpx.WriteError,
+                httpx.RemoteProtocolError,
+            ):
+                if endpoint == "workflow":
+                    raise DifyAmbiguousTransportError(
+                        "Dify workflow outcome is uncertain after dispatch"
+                    ) from None
+                if endpoint == "upload":
+                    raise DifyUploadError("Dify upload transport failed safely") from None
+                raise DifyTransportError("Dify transport failed safely") from None
 
-        if response.status_code in {401, 403}:
+    @staticmethod
+    def _check_status(response: httpx.Response, endpoint: str) -> None:
+        status = response.status_code
+        if status in {401, 403}:
             raise DifyAuthError("Dify authentication was rejected")
-        if response.status_code == 429:
+        if status == 429:
             raise DifyQuotaError("Dify quota or rate limit was reached")
-        if response.status_code in {400, 404}:
-            raise DifyContractError(f"Dify rejected the request with status {response.status_code}")
-        if response.status_code >= 500:
-            raise DifyTransportError(f"Dify service returned status {response.status_code}")
-        if response.status_code >= 300:
-            raise DifyContractError(f"Unexpected Dify status {response.status_code}")
-        return response
+        if status in {413, 415}:
+            raise DifyUploadError("Dify rejected the upload contract")
+        if 300 <= status < 400:
+            raise DifyContractError("Dify redirects are not accepted")
+        if status >= 500:
+            error = DifyTransportError("Dify service returned a safe remote status")
+            error.code = "remote_status"
+            raise error
+        if status >= 300:
+            error_type = DifyUploadError if endpoint == "upload" else DifyContractError
+            raise error_type("Dify rejected the request contract")
 
-    def upload_file(self, path: Path, user: str) -> FileUploadResult:
-        if not path.is_file():
-            raise FileNotFoundError(path)
-        with path.open("rb") as handle:
-            response = self._request(
-                "POST",
-                "/files/upload",
-                data={"user": user},
-                files={"file": (path.name, handle, "application/octet-stream")},
-            )
+    def _json_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        endpoint: Literal["upload", "workflow"],
+        **kwargs: Any,
+    ) -> dict[str, object]:
+        response: httpx.Response | None = None
+        for response in self._stream(method, path, endpoint=endpoint, **kwargs):
+            self._check_status(response, endpoint)
+            body = _bounded_bytes(response, MAX_WORKFLOW_RESPONSE_BYTES)
+        assert response is not None
         try:
-            payload = response.json()
-            file_id = str(payload["id"])
-            filename = str(payload.get("name") or path.name)
-        except (ValueError, KeyError, TypeError):
-            raise DifyContractError("Dify upload response did not match the contract") from None
-        return FileUploadResult(file_id=file_id, filename=filename, backend="dify")
+            payload = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            error_type = DifyUploadError if endpoint == "upload" else DifyContractError
+            raise error_type("Dify response was not valid bounded JSON") from None
+        if not isinstance(payload, dict):
+            error_type = DifyUploadError if endpoint == "upload" else DifyContractError
+            raise error_type("Dify response did not match the object contract")
+        return payload
+
+    def upload_bytes(
+        self,
+        content: bytes,
+        *,
+        filename: str,
+        mime_type: Literal["image/png", "image/jpeg"],
+        user: str,
+    ) -> FileUploadResult:
+        payload = self._json_request(
+            "POST",
+            "/files/upload",
+            endpoint="upload",
+            data={"user": user},
+            files={"file": (filename, content, mime_type)},
+        )
+        try:
+            remote_id = payload["id"]
+            remote_name = payload["name"]
+            remote_size = payload["size"]
+            remote_mime = payload["mime_type"]
+            if (
+                not isinstance(remote_id, str)
+                or not remote_id.strip()
+                or remote_name != filename
+                or remote_size != len(content)
+                or remote_mime != mime_type
+            ):
+                raise TypeError
+        except (KeyError, TypeError):
+            raise DifyUploadError("Dify upload response did not match the contract") from None
+        return FileUploadResult(
+            file_id=remote_id,
+            filename=filename,
+            backend="dify",
+            file_id_fingerprint=hashlib.sha256(remote_id.encode("utf-8")).hexdigest(),
+            mime_type=mime_type,
+            size=len(content),
+        )
 
     def run_workflow(self, inputs: dict[str, object], user: str) -> CandidateRunResult:
-        response = self._request(
+        payload = self._json_request(
             "POST",
             "/workflows/run",
+            endpoint="workflow",
             json={"inputs": inputs, "response_mode": "blocking", "user": user},
         )
         try:
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise TypeError
-            data = payload.get("data", {})
+            data = payload["data"]
             if not isinstance(data, dict):
                 raise TypeError
-            outputs = data.get("outputs", {})
+            outputs = data["outputs"]
             if not isinstance(outputs, dict):
                 raise TypeError
-            candidate_payload = outputs["diagnosis"]
-            run_id = (
+            remote_id = (
                 payload.get("workflow_run_id")
                 or data.get("workflow_run_id")
                 or payload.get("task_id")
-                or data["id"]
+                or data.get("id")
             )
-            if not isinstance(run_id, str) or not run_id.strip():
+            if not isinstance(remote_id, str) or not remote_id.strip():
                 raise TypeError
+
+            envelope: DifyRunEnvelope | None = None
+            if "run_envelope" in outputs:
+                raw_envelope = outputs["run_envelope"]
+                if isinstance(raw_envelope, str):
+                    envelope = DifyRunEnvelope.model_validate_json(raw_envelope, strict=True)
+                else:
+                    envelope = DifyRunEnvelope.model_validate(raw_envelope, strict=True)
+                candidate_payload: object = envelope.diagnosis.model_dump(mode="json")
+            else:
+                candidate_payload = outputs["diagnosis"]
             return CandidateRunResult(
-                run_id=run_id,
+                run_id=_fingerprint_remote_id(remote_id, "run"),
                 backend="dify",
                 candidate_payload=candidate_payload,
+                run_envelope=envelope,
+                usage=_safe_usage(data.get("usage")),
             )
-        except (ValueError, KeyError, TypeError):
+        except (KeyError, TypeError, ValidationError, ValueError):
             raise DifyContractError(
-                "Dify workflow response did not match candidate envelope"
+                "Dify workflow response did not match the bounded envelope"
             ) from None
 
     def synthesize_audio(self, text: str, user: str) -> AudioSynthesisResult:
-        response = self._request(
-            "POST",
-            "/text-to-audio",
-            json={"text": text, "user": user},
-        )
-        audio = response.content
+        response: httpx.Response | None = None
+        for response in self._stream(
+            "POST", "/text-to-audio", endpoint="audio", json={"text": text, "user": user}
+        ):
+            self._check_status(response, "audio")
+            audio = _bounded_bytes(response, MAX_WORKFLOW_RESPONSE_BYTES)
+        assert response is not None
         is_id3 = audio.startswith(b"ID3")
         is_frame = len(audio) >= 2 and audio[0] == 0xFF and audio[1] & 0xE0 == 0xE0
         if not (is_id3 or is_frame):

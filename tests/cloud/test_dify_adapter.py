@@ -43,11 +43,6 @@ def test_constructor_does_not_dispatch_and_incomplete_config_fails_locally() -> 
     DifyBackend(_settings(), client=client, test_base_url="https://dify.test/v1")
     assert calls == 0
 
-
-def test_adapter_exposes_typed_upload_and_ambiguous_transport_errors() -> None:
-    assert issubclass(dify.DifyUploadError, dify.DifyError)
-    assert issubclass(dify.DifyAmbiguousTransportError, dify.DifyTransportError)
-
     backend = DifyBackend(
         DebugMateSettings(), client=client, test_base_url="https://dify.test/v1"
     )
@@ -55,6 +50,11 @@ def test_adapter_exposes_typed_upload_and_ambiguous_transport_errors() -> None:
         backend.run_workflow({}, user="debugmate-stable")
     assert caught.value.code == "configuration"
     assert calls == 0
+
+
+def test_adapter_exposes_typed_upload_and_ambiguous_transport_errors() -> None:
+    assert issubclass(dify.DifyUploadError, dify.DifyError)
+    assert issubclass(dify.DifyAmbiguousTransportError, dify.DifyTransportError)
 
 
 def test_default_client_has_exact_timeouts_and_never_follows_redirects() -> None:

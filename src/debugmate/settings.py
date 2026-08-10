@@ -6,6 +6,7 @@ import os
 import secrets
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -22,6 +23,26 @@ class DebugMateSettings(BaseModel):
     dify_dataset_api_key: SecretStr | None = None
     dify_user: str = "debugmate-local"
     approval_key: SecretStr = Field(default_factory=_random_approval_key)
+
+    @field_validator("dify_base_url")
+    @classmethod
+    def require_canonical_dify_application_url(cls, value: str) -> str:
+        """Restrict bearer-bearing application requests to the Dify Cloud API."""
+
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "api.dify.ai"
+            or parsed.port not in {None, 443}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path != "/v1"
+            or value not in {"https://api.dify.ai/v1", "https://api.dify.ai:443/v1"}
+        ):
+            raise ValueError("Dify base URL must be the approved HTTPS application endpoint")
+        return value.rstrip("/")
 
     @field_validator("approval_key")
     @classmethod
@@ -50,7 +71,13 @@ class DebugMateSettings(BaseModel):
 
     @property
     def cloud_configured(self) -> bool:
-        return self.dify_api_key is not None
+        return self.dify_application_configured
+
+    @property
+    def dify_application_configured(self) -> bool:
+        """Return configuration readiness without probing Dify or consuming quota."""
+
+        return self.dify_api_key is not None and bool(self.dify_user.strip())
 
     def safe_summary(self) -> dict[str, str | bool]:
         return {
