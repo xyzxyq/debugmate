@@ -7,7 +7,6 @@ whose result bundle has not been reopened through the product verifier.
 
 from __future__ import annotations
 
-import json
 import re
 import stat
 from pathlib import Path
@@ -25,7 +24,8 @@ from debugmate.evaluation.contracts import (
     EvaluationAvailability,
     Phase8SourceEvidence,
 )
-from debugmate.hashing import sha256_file
+from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
+from debugmate.knowledge.retrieval import RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.contracts import StrictFrozenModel
@@ -102,6 +102,38 @@ class Phase8LiveRun(StrictFrozenModel):
             for value in self.artifact_sha256.values()
         ):
             raise ValueError("Phase 08 live run output hashes are not exact")
+        return self
+
+
+class StagedBuildSource(StrictFrozenModel):
+    source_id: str = Field(min_length=1, max_length=256)
+    url: str = Field(min_length=1, max_length=2_048)
+    retrieved_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+class StagedBuildNote(StrictFrozenModel):
+    source_id: str = Field(min_length=1, max_length=256)
+    locators: tuple[str, ...] = Field(min_length=1, max_length=128)
+
+
+class StagedKnowledgeBuildEvidence(StrictFrozenModel):
+    """Minimal strict build projection sufficient to validate a staged retrieval trace."""
+
+    schema_version: Literal["phase9-knowledge-build-binding-1.0"]
+    build_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sources: tuple[StagedBuildSource, ...] = Field(min_length=1, max_length=64)
+    notes: tuple[StagedBuildNote, ...] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def exact_unique_sources(self) -> StagedKnowledgeBuildEvidence:
+        source_ids = [source.source_id for source in self.sources]
+        note_ids = [note.source_id for note in self.notes]
+        if (
+            len(source_ids) != len(set(source_ids))
+            or len(note_ids) != len(set(note_ids))
+            or set(source_ids) != set(note_ids)
+        ):
+            raise ValueError("staged build source/note identities are not exact")
         return self
 
 
@@ -338,28 +370,98 @@ def _source_file_is_current(case: CaseEvaluation, repository_root: Path) -> bool
         return False
 
 
-def _validate_staged_outcome(case: CaseEvaluation, repository_root: Path) -> str | None:
-    """Reopen optional staged workflow evidence without treating it as display text."""
-
-    outcome_path = repository_root / _EVALUATION_ROOT / case.case_id / "outcome.json"
-    if not outcome_path.is_file() or outcome_path.is_symlink():
-        return None
+def _staged_regular_file(path: Path, root: Path) -> bool:
     try:
-        outcome = DiagnosisRunOutcome.model_validate_json(outcome_path.read_text(encoding="utf-8"))
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+        metadata = path.stat(follow_symlinks=False)
+        return (
+            not path.is_symlink()
+            and stat.S_ISREG(metadata.st_mode)
+            and not bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def _validate_staged_outcome(
+    case: CaseEvaluation, repository_root: Path, result_bundle_path: Path
+) -> str | None:
+    """Require and bind the staged outcome, retrieval, build, and verified result."""
+
+    staging_root = repository_root / _EVALUATION_ROOT / case.case_id
+    paths = {
+        "outcome": staging_root / "outcome.json",
+        "retrieval": staging_root / "retrieval.json",
+        "build": staging_root / "knowledge-build.json",
+    }
+    missing_codes = {
+        "outcome": "diagnosis_outcome_missing",
+        "retrieval": "retrieval_evidence_missing",
+        "build": "knowledge_build_evidence_missing",
+    }
+    for name in ("outcome", "retrieval", "build"):
+        path = paths[name]
+        if path.is_symlink():
+            return "diagnosis_evidence_unsafe_path"
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            return missing_codes[name]
+        except OSError:
+            return "diagnosis_evidence_unsafe_path"
+        if bool(getattr(metadata, "st_file_attributes", 0) & 0x400):
+            return "diagnosis_evidence_unsafe_path"
+        if not path.is_file():
+            return missing_codes[name]
+        if not _staged_regular_file(path, staging_root):
+            return "diagnosis_evidence_unsafe_path"
+    try:
+        outcome = DiagnosisRunOutcome.model_validate_json(
+            paths["outcome"].read_bytes(), strict=True
+        )
         validate_diagnosis_outcome(outcome)
-        retrieval_path = outcome_path.with_name("retrieval.json")
-        build_path = outcome_path.with_name("knowledge-build.json")
-        if retrieval_path.is_file() and build_path.is_file():
-            retrieval = json.loads(retrieval_path.read_text(encoding="utf-8"))
-            build = json.loads(build_path.read_text(encoding="utf-8"))
-            bind_retrieval_evidence(
-                retrieval,
-                case_id=outcome.case_id,
-                expected_build_id=outcome.knowledge_build_id,
-                build_manifest=build,
-            )
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        retrieval = RetrievalTrace.model_validate_json(paths["retrieval"].read_bytes(), strict=True)
+        build = StagedKnowledgeBuildEvidence.model_validate_json(
+            paths["build"].read_bytes(), strict=True
+        )
+    except (OSError, TypeError, ValueError):
         return "diagnosis_evidence_invalid"
+
+    try:
+        anchors = bind_retrieval_evidence(
+            retrieval,
+            case_id=outcome.case_id,
+            expected_build_id=outcome.knowledge_build_id,
+            build_manifest=build.model_dump(mode="json"),
+        )
+    except (TypeError, ValueError):
+        return "retrieval_build_mismatch"
+
+    anchor_projection = [
+        anchor.model_dump(mode="json", exclude={"evidence_id"}) for anchor in anchors
+    ]
+    outcome_projection = [
+        anchor.model_dump(mode="json", exclude={"evidence_id"})
+        for anchor in outcome.diagnosis.evidence
+    ]
+    if anchor_projection != outcome_projection:
+        return "retrieval_outcome_anchor_mismatch"
+    try:
+        result = verify_result_bundle(result_bundle_path).manifest
+    except (OSError, ResultVerificationError, ValueError):
+        return "result_bundle_invalid"
+    diagnosis_sha256 = sha256_bytes(
+        canonical_json_bytes(outcome.diagnosis.model_dump(mode="json"))
+    )
+    if (
+        outcome.case_id != result.identity.case_id
+        or outcome.run_id != result.identity.source_run_id
+        or diagnosis_sha256 != result.identity.diagnosis_sha256
+        or outcome.execution_backend.value != case.execution_backend.value
+        or outcome.status.value != case.actual_status.value
+    ):
+        return "diagnosis_result_identity_mismatch"
     return None
 
 
@@ -435,12 +537,6 @@ def collect_phase9_cases(
                 )
             )
             continue
-        outcome_reason = _validate_staged_outcome(case, root)
-        if outcome_reason is not None:
-            collected.append(
-                _base_row(case, phase10_eligible=False, exclusion_reasons=(outcome_reason,))
-            )
-            continue
         result_valid, result_reason, result_path = _result_bundle_is_valid(case, root)
         if not result_valid:
             collected.append(
@@ -448,6 +544,18 @@ def collect_phase9_cases(
                     case,
                     phase10_eligible=False,
                     exclusion_reasons=(result_reason,),
+                    result_bundle_path=result_path,
+                )
+            )
+            continue
+        assert result_path is not None
+        outcome_reason = _validate_staged_outcome(case, root, root / result_path)
+        if outcome_reason is not None:
+            collected.append(
+                _base_row(
+                    case,
+                    phase10_eligible=False,
+                    exclusion_reasons=(outcome_reason,),
                     result_bundle_path=result_path,
                 )
             )
