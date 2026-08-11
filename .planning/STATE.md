@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-08-09T22:04:04.326Z"
+status: Phase 08 live acceptance awaiting user configuration
+last_updated: "2026-08-11T18:00:00+08:00"
 progress:
   total_phases: 10
   completed_phases: 7
-  total_plans: 36
-  completed_plans: 29
+  total_plans: 39
+  completed_plans: 37
   percent: 70
 ---
 
@@ -16,17 +16,17 @@ progress:
 
 ## Current Position
 
-Phase: 08
-Plan: Not started
-DebugMate V0.1 已完成 Phase 1–7。真实四字段输入、本地脱敏预览、一次性审批、生产 RapidOCR、隐私/竞态门禁与当前 Edge 证据均已通过独立验收；路线图状态为 `in_progress`：7/10 phases complete，当前进入 Phase 8。
+Phase: 08 (dify-unified-live-chain) — 08-01 至 08-06 COMPLETE，08-07 BLOCKED
+Plan: 6 of 7；Phase 09 已提前完成 09-01 与 09-02，09-03 依赖 08-07
+DebugMate V0.1 已完成 Phase 1–7。Phase 8 的离线合同、知识同步、Dify 适配、后端 provenance、实时编排、受控修复和 UI/service 接线已完成；唯一未执行项是 08-07 的真实 Dify Knowledge readback、当前应用同次 run、Edge 与 TTS 最终证据晋升。
 
-GSD 文件记账现已与路线图一致：现场共有 29 份阶段 PLAN 和 29 份对应 SUMMARY，即 29/29 已执行计划；阶段完成度为 7/10（70%）。
+GSD 文件记账：现场共有 39 份阶段 PLAN 和 37 份对应 SUMMARY；未完成的两份是 `08-07` 与依赖它的 `09-03`。阶段完成度仍为 7/10（70%），不得在真实云端验收前把 Phase 8 或 Phase 9 标为 complete。
 
-当前位置：Phase 4 的 12/12 计划、代码审查修复、独立验证和实体设备 Local SAPI 中文人耳听验均已完成；5/5 路线图目标与 9/9 Phase 4 requirements 已满足，状态为 `complete`。
+Phase 9 的离线 Wave 1–2 已完成：四案例严格合同、V1–V4 同案例绑定、当前证据收集器、Phase 10 来源清单和冻结媒体门禁均已版本化；正式 ledger 原子晋升留给 09-03。
 
 ## Current Verification Baseline
 
-以下记录区分既有本地基线与本次真实 Dify 证据复验：
+以下记录区分既有能力证据、当前离线实现与尚未执行的最终真实云验收：
 
 - 普通 UI 合同：`tests/ui/test_app.py` — 34 passed。
 - 显式 Microsoft Edge 套件：39 passed、7 environment-gated skipped、0 failed。
@@ -37,10 +37,13 @@ GSD 文件记账现已与路线图一致：现场共有 29 份阶段 PLAN 和 29
 - C07 已于 2026-08-09 重新通过正式 Dify live TTS gate；版本化 MP3 经 FFprobe 验证为单声道 MP3，并与 `tts-evidence.json` 的 SHA-256 一致。
 - 2026-08-09 独立 live capture 证明 C03/C04 为 `pass`：C03 绑定 target-free request manifest、真实 PNG 上传与 exact VLM extraction；C04 绑定 console run 的 direct Knowledge Retrieval node output、chunk/source URL/locator/score。
 - 当前可复算能力矩阵为 C01–C07 全部 `pass`。C06 绑定 distinct source/independent app 指纹、byte-exact re-export、相同规范化结构 SHA-256、空 differences，以及 authoritative reconstructed-app rerun 的安全 allowlist；总记录与三个内层产物均通过 Git tracked/not ignored 和精确哈希门禁。
+- Phase 8 08-01～08-06 默认离线回归最新为 1107 passed、58 deselected、0 failed；计划级聚焦门禁与 Ruff 全绿。
+- Phase 8 标准代码审查 iteration 2 为 clean；4 个 Warning 已全部原子修复。安全审计关闭 25/25 条登记威胁，OPEN 0；Nyquist 审计确认 14/14 executed tasks 均有直接自动化覆盖。
+- Phase 9 09-01/09-02 共 47 个 evaluation 聚焦测试通过；所有 Phase 10 媒体路径仍由冻结门禁保护，尚未刷新。
 
 ## Remaining UAT Debt
 
-当前无未解决的 Phase 4 UAT 债务。用户已于 2026-08-08 在实体播放设备上完成 Local SAPI 中文复盘听验并明确回复“听验通过”。
+Phase 4 的实体设备 Local SAPI 中文听验已由用户确认通过。当前唯一需要用户操作的验收前置条件是：配置 `DIFY_DATASET_API_KEY`、`DIFY_DATASET_ID` 与 `DEBUGMATE_DIFY_DIAGNOSIS_APP_CONFIGURED=1`，并完全重启 Codex 使新用户环境变量进入当前进程。
 
 ## Course Deliverables Boundary
 
@@ -51,13 +54,14 @@ GSD 文件记账现已与路线图一致：现场共有 29 份阶段 PLAN 和 29
 - `deliverables/DebugMate-V0.1-subtitles.srt` — 历史版本，待最后统一刷新。
 - `evidence/course-v0.1/` 与其他截图 — 现有证据目录；最终截图待最后统一刷新。
 
-本 quick task 不修改 PPTX、视频、字幕、最终截图或任何其他交付物。
+Phase 8 与 Phase 9 当前工作不修改 PPTX、视频、字幕或最终截图；这些文件只在 Phase 10 最后统一刷新。
 
 ## Next Order
 
-1. Phase 8：将已批准输入接入 Dify workflow 和现有三模态结果/ZIP 服务。
-2. Phase 9：重跑当前代表案例和 V1-V4 同案例提示词证据。
-3. Phase 10：最后统一更新 PPTX、视频、字幕和最终截图，并完成 freshness/claim/hash QA。
+1. 用户完成三个 Dify 环境变量配置并重启 Codex。
+2. 执行 08-07：真实 17-source readback、当前 DSL/app 同次 run、严格 DiagnosisRecord、Edge/TTS/ZIP 与证据原子晋升；随后完成 Phase 8 最终验证。
+3. 执行 09-03：用 08-07 当前证据生成四案例正式 ledger，并完成 Phase 9 审查、验证与收尾。
+4. Phase 10 最后统一更新 PPTX、视频、字幕和最终截图，完成 freshness/claim/hash 与人工翻页/听验 QA。
 
 ## Quick Tasks Completed
 
