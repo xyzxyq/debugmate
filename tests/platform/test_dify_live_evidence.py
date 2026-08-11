@@ -367,6 +367,16 @@ def test_inventory_exporter_is_external_and_literal_path_safe() -> None:
     assert text.rstrip().endswith("exit 0")
 
 
+def test_capture_script_defaults_to_current_repository_interpreter() -> None:
+    text = Path("scripts/capture_dify_c03_c04_c06.ps1").read_text(encoding="utf-8")
+
+    assert "[string]$PythonPath," in text
+    assert 'Join-Path $repositoryRoot ".venv\\Scripts\\python.exe"' in text
+    assert "Get-Item -LiteralPath $PythonPath" in text
+    assert "[System.IO.File]::Exists($pythonItem.FullName)" in text
+    assert ".worktrees" not in text
+
+
 def test_published_capability_matrix_matches_independent_live_records() -> None:
     repository = Path.cwd().resolve()
     matrix = json.loads(
