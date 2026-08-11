@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.evaluation.test_prompt_comparison import comparison_payload
 
 from debugmate.evaluation.collector import collect_phase9_cases
 from debugmate.evaluation.contracts import CaseRegistry, PromptComparison
@@ -15,8 +16,6 @@ from debugmate.evaluation.reports import (
     render_workflow_source,
 )
 from debugmate.privacy.output_scan import UnsafeExport, assert_export_safe
-from tests.evaluation.test_prompt_comparison import comparison_payload
-
 
 CASES_PATH = Path("evaluation/phase9/cases.json")
 SCOPE_SCRIPT = Path("scripts/verify-phase9-scope.ps1")
