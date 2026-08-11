@@ -11,7 +11,11 @@ from debugmate.adapters.base import CandidateRunResult
 from debugmate.adapters.dify import DifyAmbiguousTransportError
 from debugmate.cloud.contracts import DifyRunEnvelope, ReceiptStatus
 from debugmate.cloud.receipts import DifyReceiptStore
-from debugmate.cloud.workflow import CloudWorkflowError, DifyLiveWorkflow
+from debugmate.cloud.workflow import (
+    RETRIEVAL_SANITIZER_FINGERPRINT,
+    CloudWorkflowError,
+    DifyLiveWorkflow,
+)
 from debugmate.contracts import DiagnosisRecord
 from debugmate.diagnosis.evidence_binding import bind_retrieval_evidence
 from debugmate.diagnosis.extraction import (
@@ -24,7 +28,7 @@ from debugmate.diagnosis.extraction import (
     make_candidate,
 )
 from debugmate.diagnosis.workflow import validate_diagnosis_outcome
-from debugmate.hashing import sha256_bytes
+from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
 from debugmate.privacy.approval import approve_preview
@@ -172,6 +176,20 @@ def _envelope() -> DifyRunEnvelope:
         root_cause_candidates=[],
     )
     diagnosis = DiagnosisRecord.model_validate(payload)
+    hits = [
+        {
+            "chunk_fingerprint": "7" * 64,
+            "source_id": "python-exceptions",
+            "source_title": "Python Exceptions",
+            "source_url": "https://example.com/python-exceptions",
+            "locator": "ModuleNotFoundError",
+            "content_summary": "The requested module could not be located.",
+            "relevance_score": 0.95,
+        }
+    ]
+    run_fingerprint = sha256_bytes(
+        canonical_json_bytes({"case_id": CASE_ID, "hits": hits})
+    )
     return DifyRunEnvelope(
         envelope_version="1.0.0",
         case_id=CASE_ID,
@@ -179,19 +197,9 @@ def _envelope() -> DifyRunEnvelope:
         extraction_facts=diagnosis.observed_facts,
         retrieval_trace={
             "knowledge_build_id": BUILD_ID,
-            "run_fingerprint": "8" * 64,
-            "node_fingerprint": "9" * 64,
-            "hits": [
-                {
-                    "chunk_fingerprint": "7" * 64,
-                    "source_id": "python-exceptions",
-                    "source_title": "Python Exceptions",
-                    "source_url": "https://example.com/python-exceptions",
-                    "locator": "ModuleNotFoundError",
-                    "content_summary": "The requested module could not be located.",
-                    "relevance_score": 0.95,
-                }
-            ],
+            "run_fingerprint": run_fingerprint,
+            "node_fingerprint": RETRIEVAL_SANITIZER_FINGERPRINT,
+            "hits": hits,
         },
         contract={
             "schema_version": "1.1.0",
@@ -236,6 +244,7 @@ def _workflow(tmp_path: Path, gateway) -> DifyLiveWorkflow:
         approval_key=KEY,
         build_manifest=_manifest(),
         readback_attestation=_attestation(),
+        expected_dsl_semantic_sha256="a" * 64,
         clock=lambda: NOW,
     )
 
@@ -277,6 +286,40 @@ def test_stale_build_fails_terminally_and_same_approval_cannot_dispatch_again(
         workflow.run(approved)
 
     assert gateway.calls.count("workflow") == 1
+    receipt = store.read(next((tmp_path / "receipts").glob("*.json")).stem)
+    assert receipt.status is ReceiptStatus.FAILED
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["dsl_semantic_sha256", "run_fingerprint", "node_fingerprint"],
+)
+def test_remote_provenance_fingerprint_mutation_fails_terminally(
+    tmp_path: Path, mutation: str
+) -> None:
+    store = DifyReceiptStore((tmp_path / "receipts").resolve())
+    envelope = _envelope()
+    if mutation == "dsl_semantic_sha256":
+        envelope = envelope.model_copy(
+            update={
+                "contract": envelope.contract.model_copy(
+                    update={"dsl_semantic_sha256": "f" * 64}
+                )
+            }
+        )
+    else:
+        envelope = envelope.model_copy(
+            update={
+                "retrieval_trace": envelope.retrieval_trace.model_copy(
+                    update={mutation: "f" * 64}
+                )
+            }
+        )
+    workflow = _workflow(tmp_path, GatewaySpy(envelope, store))
+
+    with pytest.raises(CloudWorkflowError, match="workflow_envelope"):
+        workflow.run(_approved())
+
     receipt = store.read(next((tmp_path / "receipts").glob("*.json")).stem)
     assert receipt.status is ReceiptStatus.FAILED
 

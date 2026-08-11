@@ -426,6 +426,7 @@ def _live_dependencies(
         approval_key=approval_key,
         build_manifest=Path(build_manifest),
         readback_attestation=attestation,
+        expected_dsl_semantic_sha256=contract_hashes[0],
     )
     service = ResultApplicationService(
         workflow=workflow,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -50,6 +51,10 @@ from debugmate.knowledge.sync import DifyReadbackAttestation
 from debugmate.privacy.approval import verify_approval
 from debugmate.privacy.models import ApprovedRedactedInput
 
+RETRIEVAL_SANITIZER_FINGERPRINT = sha256_bytes(
+    b"debugmate-direct-retrieval-sanitizer-v1"
+)
+
 
 class LiveGateway(Protocol):
     def verify(self, approved: ApprovedRedactedInput) -> None: ...
@@ -66,6 +71,10 @@ class CloudWorkflowError(RuntimeError):
         self.code = code
         self.receipt_status = receipt_status
         super().__init__(code)
+
+
+class _WorkflowEnvelopeInvalid(ValueError):
+    """Provider provenance or envelope contract is not locally authoritative."""
 
 
 class _RepairBackend:
@@ -153,6 +162,7 @@ class DifyLiveWorkflow:
         approval_key: bytes,
         build_manifest: Path | dict[str, object],
         readback_attestation: DifyReadbackAttestation,
+        expected_dsl_semantic_sha256: str,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(receipt_store, DifyReceiptStore):
@@ -164,6 +174,11 @@ class DifyLiveWorkflow:
         self._attestation = DifyReadbackAttestation.model_validate(
             readback_attestation.model_dump(), strict=True
         )
+        if not isinstance(expected_dsl_semantic_sha256, str) or len(
+            expected_dsl_semantic_sha256
+        ) != 64:
+            raise ValueError("expected DSL semantic identity is invalid")
+        self._expected_dsl_semantic_sha256 = expected_dsl_semantic_sha256
         self._clock = clock or (lambda: datetime.now(UTC))
         if self._manifest.get("build_id") != self._attestation.knowledge_build_id:
             raise ValueError("knowledge readback does not match sealed manifest")
@@ -204,6 +219,11 @@ class DifyLiveWorkflow:
             or envelope.contract.prompt_version != "diagnosis-v1"
         ):
             raise ValueError("workflow contract version differs")
+        if not hmac.compare_digest(
+            envelope.contract.dsl_semantic_sha256,
+            self._expected_dsl_semantic_sha256,
+        ):
+            raise _WorkflowEnvelopeInvalid("workflow DSL semantic identity differs")
         extraction = _extraction_from_facts(envelope.case_id, envelope.extraction_facts)
         facts = build_case_facts(extraction)
         fact_core = {
@@ -217,6 +237,24 @@ class DifyLiveWorkflow:
             raise ValueError("provider facts do not map to strict local facts")
 
         cloud_trace = envelope.retrieval_trace
+        expected_run_fingerprint = sha256_bytes(
+            canonical_json_bytes(
+                {
+                    "case_id": envelope.case_id,
+                    "hits": [
+                        hit.model_dump(mode="json") for hit in cloud_trace.hits
+                    ],
+                }
+            )
+        )
+        if not hmac.compare_digest(
+            cloud_trace.run_fingerprint, expected_run_fingerprint
+        ):
+            raise _WorkflowEnvelopeInvalid("retrieval run fingerprint differs")
+        if not hmac.compare_digest(
+            cloud_trace.node_fingerprint, RETRIEVAL_SANITIZER_FINGERPRINT
+        ):
+            raise _WorkflowEnvelopeInvalid("retrieval sanitizer identity differs")
         direct_trace = RetrievalTrace(
             case_id=envelope.case_id,
             query_sha256=sha256_bytes(canonical_json_bytes(fact_core)),
@@ -409,6 +447,13 @@ class DifyLiveWorkflow:
                 receipt,
                 status=ReceiptStatus.FAILED,
                 code=CloudFailureCode.KNOWLEDGE_READBACK,
+                attempts=tuple(attempts),
+            ) from None
+        except _WorkflowEnvelopeInvalid:
+            raise self._finish_failure(
+                receipt,
+                status=ReceiptStatus.FAILED,
+                code=CloudFailureCode.WORKFLOW_ENVELOPE,
                 attempts=tuple(attempts),
             ) from None
         except Exception:
