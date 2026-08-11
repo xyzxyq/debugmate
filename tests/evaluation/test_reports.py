@@ -82,9 +82,10 @@ def test_projection_rejects_unsafe_values_without_echoing_them() -> None:
     assert secret not in repr(caught.value)
 
 
-def _run_scope(repository_root: Path, *, invocation: str = "") -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
+def _run_scope(
+    repository_root: Path, *, invocation: str = "", baseline_commit: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    command = [
             "powershell",
             "-NoProfile",
             "-ExecutionPolicy",
@@ -95,7 +96,11 @@ def _run_scope(repository_root: Path, *, invocation: str = "") -> subprocess.Com
             str(repository_root),
             "-InvocationText",
             invocation,
-        ],
+        ]
+    if baseline_commit is not None:
+        command.extend(["-BaselineCommit", baseline_commit])
+    return subprocess.run(
+        command,
         capture_output=True,
         check=False,
         encoding="utf-8",
@@ -113,6 +118,16 @@ def _git(repository_root: Path, *args: str) -> None:
     )
 
 
+def _git_output(repository_root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repository_root), *args],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+    ).stdout.strip()
+
+
 def test_scope_gate_rejects_frozen_media_drift_new_targets_and_course_builders(
     tmp_path: Path,
 ) -> None:
@@ -125,11 +140,12 @@ def test_scope_gate_rejects_frozen_media_drift_new_targets_and_course_builders(
     _git(repository_root, "config", "user.name", "Phase 09 test")
     _git(repository_root, "add", "deliverables/DebugMate-V0.1.pptx")
     _git(repository_root, "commit", "-m", "baseline")
+    baseline_commit = _git_output(repository_root, "rev-parse", "HEAD")
 
-    assert _run_scope(repository_root).returncode == 0
+    assert _run_scope(repository_root, baseline_commit=baseline_commit).returncode == 0
 
     frozen.write_bytes(b"drifted-pptx")
-    changed = _run_scope(repository_root)
+    changed = _run_scope(repository_root, baseline_commit=baseline_commit)
     assert changed.returncode == 1
     assert "frozen_target_changed" in changed.stderr
 
@@ -137,10 +153,22 @@ def test_scope_gate_rejects_frozen_media_drift_new_targets_and_course_builders(
     screenshot = repository_root / "evidence" / "course-v0.1" / "screenshots" / "new.png"
     screenshot.parent.mkdir(parents=True)
     screenshot.write_bytes(b"new-screenshot")
-    new_target = _run_scope(repository_root)
+    new_target = _run_scope(repository_root, baseline_commit=baseline_commit)
     assert new_target.returncode == 1
     assert "frozen_target_new" in new_target.stderr
 
-    builder = _run_scope(repository_root, invocation="python scripts/build-course-ppt.py")
+    screenshot.unlink()
+    frozen.write_bytes(b"committed-drift")
+    _git(repository_root, "add", "deliverables/DebugMate-V0.1.pptx")
+    _git(repository_root, "commit", "-m", "attempt committed bypass")
+    committed = _run_scope(repository_root, baseline_commit=baseline_commit)
+    assert committed.returncode == 1
+    assert "frozen_target_committed_drift" in committed.stderr
+
+    builder = _run_scope(
+        repository_root,
+        invocation="python scripts/build-course-ppt.py",
+        baseline_commit=baseline_commit,
+    )
     assert builder.returncode == 1
     assert "course_builder_forbidden" in builder.stderr

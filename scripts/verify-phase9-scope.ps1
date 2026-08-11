@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot,
-    [string]$InvocationText = ''
+    [string]$InvocationText = '',
+    [string]$BaselineCommit = 'c8c5d82b8cc5773b387de668ccc866faa8e9bebb'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +34,22 @@ function Get-StatusPath {
 }
 
 function Assert-FrozenTargets {
-    param([Parameter(Mandatory)][string]$Root)
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Baseline
+    )
+    if ($Baseline -cnotmatch '^[0-9a-f]{40}$') { throw 'frozen_baseline_invalid' }
+    [void](Invoke-GitChecked -Root $Root -Arguments @('cat-file', '-e', "$Baseline`^{commit}"))
+    [void](Invoke-GitChecked -Root $Root -Arguments @('merge-base', '--is-ancestor', $Baseline, 'HEAD'))
+    foreach ($relative in Invoke-GitChecked -Root $Root -Arguments @(
+        'diff', '--name-only', "$Baseline..HEAD", '--',
+        'deliverables', 'evidence/course-v0.1'
+    )) {
+        $normalized = $relative.Replace('\', '/')
+        if (Test-FrozenTarget -RelativePath $normalized) {
+            throw "frozen_target_committed_drift:$normalized"
+        }
+    }
     foreach ($line in Invoke-GitChecked -Root $Root -Arguments @('status', '--porcelain=v1', '--untracked-files=all')) {
         $relative = Get-StatusPath -Line $line
         if (-not $relative -or -not (Test-FrozenTarget -RelativePath $relative)) { continue }
@@ -75,7 +91,7 @@ try {
     if ($InvocationText -match '(?i)(?:build-course-ppt|build-course-video)\.py') {
         throw 'course_builder_forbidden'
     }
-    Assert-FrozenTargets -Root $root
+    Assert-FrozenTargets -Root $root -Baseline $BaselineCommit
     Assert-Phase9ProjectionSafety -Root $root
     Write-Host 'phase9_scope_gate_passed'
     exit 0
