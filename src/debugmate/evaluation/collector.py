@@ -8,6 +8,8 @@ whose result bundle has not been reopened through the product verifier.
 from __future__ import annotations
 
 import json
+import re
+import stat
 from pathlib import Path
 from typing import Literal
 
@@ -23,8 +25,8 @@ from debugmate.evaluation.contracts import (
     EvaluationAvailability,
     Phase8SourceEvidence,
 )
-from debugmate.evidence import verify_bundle
 from debugmate.hashing import sha256_file
+from debugmate.knowledge.sync import DifyReadbackAttestation
 from debugmate.privacy.output_scan import assert_export_safe
 from debugmate.results.contracts import StrictFrozenModel
 from debugmate.results.verifier import ResultVerificationError, verify_result_bundle
@@ -32,6 +34,75 @@ from debugmate.results.verifier import ResultVerificationError, verify_result_bu
 _PHASE8_SUMMARY = ".planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md"
 _PHASE8_MANIFEST = "evidence/dify-live/phase8/manifest.json"
 _EVALUATION_ROOT = Path("evidence/evaluation/phase9")
+_PHASE8_REQUIRED_ARTIFACTS = frozenset(
+    {
+        "knowledge-readback.json",
+        "live-run.json",
+        "report.md",
+        "card.png",
+        "recap.mp3",
+        "result.zip",
+    }
+)
+
+
+class Phase8ArtifactHash(StrictFrozenModel):
+    path: str = Field(pattern=r"^[a-z0-9][a-z0-9.-]{1,63}$")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class Phase8JUnitSummary(StrictFrozenModel):
+    tests: int = Field(ge=1, le=10_000)
+    failures: Literal[0]
+    errors: Literal[0]
+    skipped: Literal[0]
+
+
+class Phase8FormalManifest(StrictFrozenModel):
+    schema_version: Literal["phase8-formal-acceptance-1.0"]
+    qa_run_id: str = Field(pattern=r"^p8qa_[0-9a-f]{32}$")
+    evidence_time_utc: str = Field(
+        pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+    )
+    source_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    worktree_scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    backend: Literal["dify"]
+    cloud_junit: Phase8JUnitSummary
+    edge_junit: Phase8JUnitSummary
+    artifacts: tuple[Phase8ArtifactHash, ...] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode="after")
+    def exact_inner_artifacts(self) -> Phase8FormalManifest:
+        paths = [artifact.path for artifact in self.artifacts]
+        if len(paths) != len(set(paths)) or set(paths) != _PHASE8_REQUIRED_ARTIFACTS:
+            raise ValueError("Phase 08 formal artifact inventory is not exact")
+        return self
+
+
+class Phase8LiveRun(StrictFrozenModel):
+    schema_version: Literal["phase8-live-run-1.0"]
+    qa_run_id: str = Field(pattern=r"^p8qa_[0-9a-f]{32}$")
+    backend: Literal["dify"]
+    case_id: str = Field(pattern=r"^case_[0-9a-f]{32}$")
+    status: Literal["completed"]
+    prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    knowledge_build_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    facts_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retrieval_trace_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    diagnosis_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    result_id: str = Field(pattern=r"^result_[0-9a-f]{32}$")
+    artifact_sha256: dict[str, str]
+
+    @model_validator(mode="after")
+    def exact_output_hashes(self) -> Phase8LiveRun:
+        expected = {"report.md", "card.png", "recap.mp3", "result.zip"}
+        if set(self.artifact_sha256) != expected or any(
+            re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in self.artifact_sha256.values()
+        ):
+            raise ValueError("Phase 08 live run output hashes are not exact")
+        return self
 
 
 class Phase8SourceValidation(StrictFrozenModel):
@@ -89,6 +160,63 @@ class Phase10SourceLedger(StrictFrozenModel):
         return self
 
 
+def _phase8_regular_file(root: Path, name: str) -> Path:
+    candidate = root / name
+    resolved = candidate.resolve(strict=True)
+    resolved.relative_to(root.resolve())
+    metadata = candidate.stat(follow_symlinks=False)
+    if (
+        candidate.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+    ):
+        raise ValueError("Phase 08 formal artifact is not a regular file")
+    return candidate
+
+
+def _phase8_checksums(path: Path) -> dict[str, str]:
+    records: dict[str, str] = {}
+    for line in path.read_text(encoding="ascii").splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  ([a-z0-9][a-z0-9.-]{1,63})", line)
+        if match is None or match.group(2) in records:
+            raise ValueError("Phase 08 checksums are invalid")
+        records[match.group(2)] = match.group(1)
+    return records
+
+
+def _validate_phase8_formal_manifest(path: Path) -> Phase8FormalManifest:
+    root = path.parent.resolve()
+    manifest_path = _phase8_regular_file(root, "manifest.json")
+    manifest = Phase8FormalManifest.model_validate_json(manifest_path.read_bytes(), strict=True)
+    artifact_hashes = {artifact.path: artifact.sha256 for artifact in manifest.artifacts}
+    for name, expected_hash in artifact_hashes.items():
+        if sha256_file(_phase8_regular_file(root, name)) != expected_hash:
+            raise ValueError("Phase 08 formal artifact hash mismatch")
+
+    checksums_path = _phase8_regular_file(root, "checksums.sha256")
+    checksums = _phase8_checksums(checksums_path)
+    expected_names = {"manifest.json", *_PHASE8_REQUIRED_ARTIFACTS}
+    if set(checksums) != expected_names or any(
+        sha256_file(_phase8_regular_file(root, name)) != digest
+        for name, digest in checksums.items()
+    ):
+        raise ValueError("Phase 08 formal checksums mismatch")
+
+    live = Phase8LiveRun.model_validate_json(
+        _phase8_regular_file(root, "live-run.json").read_bytes(), strict=True
+    )
+    readback = DifyReadbackAttestation.model_validate_json(
+        _phase8_regular_file(root, "knowledge-readback.json").read_bytes(), strict=True
+    )
+    if (
+        live.qa_run_id != manifest.qa_run_id
+        or live.knowledge_build_id != readback.knowledge_build_id
+        or any(live.artifact_sha256[name] != artifact_hashes[name] for name in live.artifact_sha256)
+    ):
+        raise ValueError("Phase 08 formal identity binding mismatch")
+    return manifest
+
+
 def validate_phase8_live_source(
     source: Phase8SourceEvidence, *, repository_root: Path = PROJECT_ROOT
 ) -> Phase8SourceValidation:
@@ -102,10 +230,11 @@ def validate_phase8_live_source(
     if not source.is_current_valid(root):
         return Phase8SourceValidation(valid=False, reason="phase8_formal_hash_mismatch")
 
-    verification = verify_bundle(manifest.parent)
-    if not verification.ok or verification.manifest is None:
+    try:
+        formal = _validate_phase8_formal_manifest(manifest)
+    except (OSError, UnicodeError, ValueError):
         return Phase8SourceValidation(valid=False, reason="phase8_manifest_invalid")
-    if verification.manifest.backend != "dify":
+    if formal.backend != "dify":
         return Phase8SourceValidation(valid=False, reason="phase8_backend_mismatch")
     return Phase8SourceValidation(valid=True, reason="current_phase8_source_verified")
 
