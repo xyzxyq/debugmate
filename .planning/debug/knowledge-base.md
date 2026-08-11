@@ -19,3 +19,11 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Fix:** Serialize a typed metadata-only projection that excludes `audio_bytes`, with an offline regression test using MP3-like non-UTF-8 bytes.
 - **Files changed:** `tests/results/test_tts_live.py`
 ---
+
+## pytest-duplicate-test-module — Duplicate standalone test basename aborted pytest collection
+- **Date:** 2026-08-11
+- **Error patterns:** pytest, import file mismatch, test_contracts, collection aborts, duplicate test module
+- **Root cause:** Phase 09 added `tests/evaluation/test_contracts.py` beside existing `tests/test_contracts.py`; because neither directory is a Python package, pytest's default prepend import mode loaded both as top-level `test_contracts`.
+- **Fix:** Renamed the Phase 09 module to `test_evaluation_contracts.py` and added a static guard requiring unique basenames for test modules outside package directories.
+- **Files changed:** `tests/evaluation/test_evaluation_contracts.py`, `tests/test_pytest_collection.py`
+---
