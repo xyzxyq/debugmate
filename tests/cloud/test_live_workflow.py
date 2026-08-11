@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from debugmate.adapters.base import CandidateRunResult
 from debugmate.adapters.dify import DifyAmbiguousTransportError
@@ -28,10 +30,11 @@ from debugmate.diagnosis.extraction import (
     make_candidate,
 )
 from debugmate.diagnosis.workflow import validate_diagnosis_outcome
-from debugmate.hashing import canonical_json_bytes, sha256_bytes
+from debugmate.gateway import CloudGateway
+from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
-from debugmate.privacy.approval import approve_preview
+from debugmate.privacy.approval import ApprovalInvalid, approve_preview
 from debugmate.privacy.models import (
     PreviewBundle,
     RedactedFields,
@@ -347,6 +350,68 @@ def test_ambiguous_workflow_timeout_is_uncertain_and_never_replayed(tmp_path: Pa
     assert gateway.calls.count("workflow") == 1
     receipt = store.read(next((tmp_path / "receipts").glob("*.json")).stem)
     assert receipt.status is ReceiptStatus.UNCERTAIN
+
+
+def test_invalid_approved_screenshot_fails_before_receipt_begin(tmp_path: Path) -> None:
+    image_path = tmp_path / "redacted" / "screen.png"
+    image_path.parent.mkdir()
+    buffer = BytesIO()
+    Image.new("RGB", (8, 6), "white").save(buffer, format="PNG")
+    image_path.write_bytes(buffer.getvalue())
+    preview = _approved()
+    redacted = preview.redacted.model_copy(
+        update={
+            "redacted_screenshot_path": "redacted/screen.png",
+            "redacted_screenshot_sha256": sha256_file(image_path),
+        }
+    )
+    approved = approve_preview(
+        PreviewBundle(
+            case_id=CASE_ID,
+            redacted=redacted,
+            candidates=[],
+            audit=RedactionAudit(candidate_count=0, counts_by_kind={}),
+            screenshot_audit=ScreenshotPreviewAudit(
+                provided=True,
+                ocr_status=ScreenshotOcrStatus.COMPLETED,
+                finding_count=0,
+                counts_by_kind={},
+            ),
+            source_hash="1" * 64,
+            preview_hash="2" * 64,
+            rule_version="test",
+            created_at_utc=NOW,
+        ),
+        KEY,
+        approved_at_utc=NOW,
+    )
+    image_path.write_bytes(b"not-an-image-anymore")
+
+    class NoNetworkBackend:
+        def upload_bytes(self, *_args, **_kwargs):
+            raise AssertionError("invalid local bytes reached upload")
+
+        def run_workflow(self, *_args, **_kwargs):
+            raise AssertionError("invalid local bytes reached workflow")
+
+    store = DifyReceiptStore((tmp_path / "receipts").resolve())
+    gateway = CloudGateway(
+        NoNetworkBackend(), approval_key=KEY, redacted_root=tmp_path
+    )
+    workflow = DifyLiveWorkflow(
+        gateway=gateway,
+        receipt_store=store,
+        approval_key=KEY,
+        build_manifest=_manifest(),
+        readback_attestation=_attestation(),
+        expected_dsl_semantic_sha256="a" * 64,
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ApprovalInvalid):
+        workflow.run(approved)
+
+    assert list((tmp_path / "receipts").glob("*.json")) == []
 
 
 def test_one_safe_repair_preserves_primary_provenance(tmp_path: Path) -> None:

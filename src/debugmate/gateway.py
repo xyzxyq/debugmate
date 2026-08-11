@@ -31,6 +31,26 @@ class CloudDispatchResult:
     upload_fingerprint: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedImageUpload:
+    """Validated immutable screenshot bytes awaiting network upload."""
+
+    content: bytes
+    filename: str
+    mime_type: Literal["image/png", "image/jpeg"]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCloudDispatch:
+    """Approval-bound local snapshot containing no unresolved filesystem input."""
+
+    case_id: str
+    error_text: str
+    code: str
+    environment: str
+    image: PreparedImageUpload | None = None
+
+
 def _is_link_or_reparse(path: Path) -> bool:
     try:
         metadata = path.lstat()
@@ -125,19 +145,12 @@ class CloudGateway:
             raise TypeError("CloudGateway accepts only ApprovedRedactedInput")
         verify_approval(approved, self._approval_key)
 
-    def run_live(self, approved: ApprovedRedactedInput) -> CloudDispatchResult:
-        """Run one approved dispatch and retain only a safe upload fingerprint."""
+    def prepare_dispatch(self, approved: ApprovedRedactedInput) -> PreparedCloudDispatch:
+        """Validate approval and snapshot all local bytes before receipt creation."""
 
         self.verify(approved)
-
         redacted = approved.redacted
-        inputs: dict[str, object] = {
-            "error_text": redacted.error_text,
-            "code": redacted.code,
-            "environment": redacted.environment,
-            "case_id": approved.case_id,
-        }
-        upload_fingerprint: str | None = None
+        image: PreparedImageUpload | None = None
         if redacted.redacted_screenshot_path is not None:
             if redacted.redacted_screenshot_sha256 is None:
                 raise ApprovalInvalid("approved screenshot hash is missing")
@@ -149,10 +162,36 @@ class CloudGateway:
             content, mime_type = _read_approved_image(
                 path, redacted.redacted_screenshot_sha256
             )
-            uploaded = self._backend.upload_bytes(
-                content,
+            image = PreparedImageUpload(
+                content=content,
                 filename=path.name,
                 mime_type=mime_type,
+            )
+        return PreparedCloudDispatch(
+            case_id=approved.case_id,
+            error_text=redacted.error_text,
+            code=redacted.code,
+            environment=redacted.environment,
+            image=image,
+        )
+
+    def dispatch_prepared(self, prepared: PreparedCloudDispatch) -> CloudDispatchResult:
+        """Perform network I/O using only a completed immutable local snapshot."""
+
+        if not isinstance(prepared, PreparedCloudDispatch):
+            raise TypeError("CloudGateway requires PreparedCloudDispatch")
+        inputs: dict[str, object] = {
+            "error_text": prepared.error_text,
+            "code": prepared.code,
+            "environment": prepared.environment,
+            "case_id": prepared.case_id,
+        }
+        upload_fingerprint: str | None = None
+        if prepared.image is not None:
+            uploaded = self._backend.upload_bytes(
+                prepared.image.content,
+                filename=prepared.image.filename,
+                mime_type=prepared.image.mime_type,
                 user=self._user,
             )
             upload_fingerprint = uploaded.file_id_fingerprint
@@ -168,6 +207,11 @@ class CloudGateway:
             candidate=self._backend.run_workflow(inputs, self._user),
             upload_fingerprint=upload_fingerprint,
         )
+
+    def run_live(self, approved: ApprovedRedactedInput) -> CloudDispatchResult:
+        """Prepare locally, then run one approved cloud dispatch."""
+
+        return self.dispatch_prepared(self.prepare_dispatch(approved))
 
     def run(self, approved: ApprovedRedactedInput) -> CandidateRunResult:
         """Compatibility seam returning only the candidate result."""

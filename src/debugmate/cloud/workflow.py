@@ -44,7 +44,7 @@ from debugmate.diagnosis.workflow import (
     derive_run_identities,
     validate_diagnosis_outcome,
 )
-from debugmate.gateway import CloudDispatchResult, CloudGateway
+from debugmate.gateway import CloudDispatchResult, CloudGateway, PreparedCloudDispatch
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation
@@ -295,6 +295,9 @@ class DifyLiveWorkflow:
         now = self._clock()
         verify_approval(approved, self._approval_key, now=now)
         self._gateway.verify(approved)
+        prepared_dispatch: PreparedCloudDispatch | None = None
+        if isinstance(self._gateway, CloudGateway):
+            prepared_dispatch = self._gateway.prepare_dispatch(approved)
         started = new_started_receipt(
             case_id=approved.case_id,
             approval_identity_fingerprint=_approval_fingerprint(approved),
@@ -309,7 +312,9 @@ class DifyLiveWorkflow:
         attempts: list[DifyAttempt] = []
         try:
             if isinstance(self._gateway, CloudGateway):
-                dispatch = self._gateway.run_live(approved)
+                if prepared_dispatch is None:
+                    raise TypeError("cloud dispatch snapshot is missing")
+                dispatch = self._gateway.dispatch_prepared(prepared_dispatch)
                 if not isinstance(dispatch, CloudDispatchResult):
                     raise TypeError("cloud dispatch result is invalid")
                 primary = dispatch.candidate
