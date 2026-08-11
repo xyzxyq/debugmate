@@ -136,7 +136,13 @@ class CollectedCaseSource(StrictFrozenModel):
 
     @model_validator(mode="after")
     def safe_and_truthful(self) -> CollectedCaseSource:
-        assert_export_safe(self.model_dump(mode="json"))
+        assert_export_safe(self.model_dump(mode="json", exclude={"result_bundle_path"}))
+        if self.result_bundle_path is not None and re.fullmatch(
+            r"evidence/evaluation/phase9/P9-C0[1-4]-(?:live-private|insufficient|long-replay|fallback-failure)/"
+            r"case_[0-9a-f]{32}/result_[0-9a-f]{32}",
+            self.result_bundle_path,
+        ) is None:
+            raise ValueError("result bundle path is not a native staged identity")
         if self.phase10_eligible and self.exclusion_reasons:
             raise ValueError("eligible rows cannot retain exclusion reasons")
         if not self.phase10_eligible and not self.exclusion_reasons:
@@ -239,10 +245,48 @@ def validate_phase8_live_source(
     return Phase8SourceValidation(valid=True, reason="current_phase8_source_verified")
 
 
-def _result_bundle_path(case: CaseEvaluation, repository_root: Path) -> Path:
-    """Return the one deterministic staging location without accepting caller paths."""
+def _bounded_result_bundle_path(
+    case: CaseEvaluation, repository_root: Path
+) -> tuple[Path | None, str]:
+    """Discover exactly one native product-case/result identity below the locked P9 root."""
 
-    return repository_root / _EVALUATION_ROOT / case.case_id / "result"
+    staging = repository_root / _EVALUATION_ROOT / case.case_id
+    if not staging.is_dir() or staging.is_symlink():
+        return None, "result_bundle_missing"
+    candidates: list[Path] = []
+    try:
+        case_directories = list(staging.iterdir())
+        if len(case_directories) > 8:
+            return None, "result_bundle_ambiguous"
+        for case_directory in case_directories:
+            metadata = case_directory.stat(follow_symlinks=False)
+            if (
+                case_directory.is_symlink()
+                or not stat.S_ISDIR(metadata.st_mode)
+                or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+                or re.fullmatch(r"case_[0-9a-f]{32}", case_directory.name) is None
+            ):
+                continue
+            result_directories = list(case_directory.iterdir())
+            if len(result_directories) > 8:
+                return None, "result_bundle_ambiguous"
+            for result_directory in result_directories:
+                result_metadata = result_directory.stat(follow_symlinks=False)
+                if (
+                    not result_directory.is_symlink()
+                    and stat.S_ISDIR(result_metadata.st_mode)
+                    and not bool(getattr(result_metadata, "st_file_attributes", 0) & 0x400)
+                    and re.fullmatch(r"result_[0-9a-f]{32}", result_directory.name)
+                    is not None
+                ):
+                    candidates.append(result_directory)
+    except OSError:
+        return None, "result_bundle_invalid"
+    if not candidates:
+        return None, "result_bundle_missing"
+    if len(candidates) != 1:
+        return None, "result_bundle_ambiguous"
+    return candidates[0], "result_bundle_discovered"
 
 
 def _result_bundle_is_valid(
@@ -250,21 +294,35 @@ def _result_bundle_is_valid(
 ) -> tuple[bool, str, str | None]:
     """Delegate all result/media/citation checks to the existing product verifier."""
 
-    bundle_path = _result_bundle_path(case, repository_root)
+    bundle_path, discovery_reason = _bounded_result_bundle_path(case, repository_root)
+    if bundle_path is None:
+        return False, discovery_reason, None
     relative = bundle_path.relative_to(repository_root).as_posix()
-    if not bundle_path.is_dir() or bundle_path.is_symlink():
-        return False, "result_bundle_missing", None
     try:
         verified = verify_result_bundle(bundle_path)
     except (OSError, ResultVerificationError, ValueError):
         return False, "result_bundle_invalid", relative
 
     manifest = verified.manifest
+    if (
+        manifest.identity.case_id != bundle_path.parent.name
+        or manifest.result_id != bundle_path.name
+    ):
+        return False, "result_identity_mismatch", relative
     if manifest.execution_backend.value != case.execution_backend.value:
         return False, "result_backend_mismatch", relative
     if manifest.status.value != case.actual_status.value:
         return False, "result_status_mismatch", relative
-    if manifest.availability.model_dump(mode="json") != case.availability.model_dump(mode="json"):
+    expected_availability = {
+        "report": case.availability.report,
+        "card": case.availability.card,
+        "recap_text": case.availability.recap_text,
+        "audio": case.availability.audio,
+    }
+    if (
+        manifest.availability.model_dump(mode="json") != expected_availability
+        or not case.availability.bundle
+    ):
         return False, "result_availability_mismatch", relative
     return True, "result_bundle_verified", relative
 
