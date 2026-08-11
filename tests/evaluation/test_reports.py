@@ -57,7 +57,12 @@ def test_prompt_projection_exposes_every_binding_without_inventing_scores_or_cos
     payload = json.loads(projection.json_bytes)
 
     assert [row["version"] for row in payload["rows"]] == ["v1", "v2", "v3", "v4"]
-    assert all(row["provenance"] == "verified_contract" for row in payload["rows"])
+    assert [row["provenance"] for row in payload["rows"]] == [
+        "verified_contract",
+        "blocked",
+        "blocked",
+        "blocked",
+    ]
     assert all(row["conclusion"]["code"] == "evidence_bound_diagnosis" for row in payload["rows"])
     assert all(len(row["accepted_diagnosis_sha256"]) == 64 for row in payload["rows"])
     assert all(len(row["accepted_result_sha256"]) == 64 for row in payload["rows"])

@@ -39,6 +39,7 @@ _FORBIDDEN_REFERENCE_MARKERS = {
     "deliverables",
 }
 _FROZEN_SUFFIXES = {".mp4", ".pptx", ".srt"}
+_ACCEPTED_V1_EVIDENCE_PATH = "evidence/evaluation/phase9/accepted-v1-contract.json"
 
 
 class EvaluationPath(StrictFrozenModel):
@@ -464,6 +465,36 @@ class PromptEvidenceKind(StrEnum):
 PromptEvidenceKindValue = Annotated[PromptEvidenceKind, Field(strict=False)]
 
 
+class PromptEvidenceBinding(StrictFrozenModel):
+    """Every identity a prompt claim must prove from reopened evidence bytes."""
+
+    common_input: PromptComparisonInput
+    prompt_sha256: Sha256
+    conclusion: SafeFixedCaseConclusion
+    accepted_diagnosis_sha256: Sha256
+    accepted_result_sha256: Sha256
+    candidate_sha256: Sha256
+
+
+class PromptRunManifest(StrictFrozenModel):
+    """Strict safe projection produced by one Phase 09 provider evaluation run."""
+
+    manifest_version: Literal["phase9-prompt-run-1.0"]
+    evidence_kind: Literal["evaluation_provider_run"]
+    status: Literal["accepted"]
+    binding: PromptEvidenceBinding
+
+
+class AcceptedV1ContractManifest(StrictFrozenModel):
+    """The fixed V1 contract receipt used only for non-live comparison claims."""
+
+    manifest_version: Literal["phase9-accepted-v1-contract-1.0"]
+    evidence_kind: Literal["accepted_v1_contract"]
+    version: Literal["v1"]
+    status: Literal["accepted"]
+    binding: PromptEvidenceBinding
+
+
 class PromptSourceEvidence(StrictFrozenModel):
     """A hash-bound safe reference for one comparison row's evidence source."""
 
@@ -481,9 +512,24 @@ class PromptSourceEvidence(StrictFrozenModel):
             "evidence/evaluation/phase9/"
         ):
             raise ValueError("provider evaluation evidence must remain under its Phase 09 root")
+        if (
+            self.kind is PromptEvidenceKind.ACCEPTED_V1_CONTRACT
+            and path != _ACCEPTED_V1_EVIDENCE_PATH
+        ):
+            raise ValueError("accepted contract evidence must use the exact accepted V1 source")
         if not self.reference.is_verified():
             raise ValueError("source evidence hash does not match current repository bytes")
         return self
+
+    def proven_binding(self) -> PromptEvidenceBinding | None:
+        """Strictly reopen claim-bearing evidence; formal Phase 08 is not a row receipt."""
+
+        raw = self.reference.path.resolve().read_bytes()
+        if self.kind is PromptEvidenceKind.EVALUATION_PROVIDER_RUN:
+            return PromptRunManifest.model_validate_json(raw, strict=True).binding
+        if self.kind is PromptEvidenceKind.ACCEPTED_V1_CONTRACT:
+            return AcceptedV1ContractManifest.model_validate_json(raw, strict=True).binding
+        return None
 
 
 class PromptComparisonRow(StrictFrozenModel):
@@ -507,10 +553,10 @@ class PromptComparisonRow(StrictFrozenModel):
         if not self.prompt_file.is_verified():
             raise ValueError("comparison row prompt file hash drifted")
         if self.provenance is PromptProvenance.GENERATED_LIVE:
-            if self.status != "accepted" or self.source_evidence.kind not in {
-                PromptEvidenceKind.PHASE8_FORMAL,
-                PromptEvidenceKind.EVALUATION_PROVIDER_RUN,
-            }:
+            if (
+                self.status != "accepted"
+                or self.source_evidence.kind is not PromptEvidenceKind.EVALUATION_PROVIDER_RUN
+            ):
                 raise ValueError(
                     "generated-live claims require their own accepted provider evidence"
                 )
@@ -524,6 +570,30 @@ class PromptComparisonRow(StrictFrozenModel):
             raise ValueError("rejected provenance must retain rejected status")
         elif self.provenance is PromptProvenance.BLOCKED and self.status != "blocked":
             raise ValueError("blocked provenance must retain blocked status")
+
+        proven = self.source_evidence.proven_binding()
+        expected = PromptEvidenceBinding(
+            common_input=self.common_input,
+            prompt_sha256=self.prompt_file.sha256,
+            conclusion=self.conclusion,
+            accepted_diagnosis_sha256=self.accepted_diagnosis_sha256,
+            accepted_result_sha256=self.accepted_result_sha256,
+            candidate_sha256=self.candidate_sha256,
+        )
+        if self.provenance in {
+            PromptProvenance.GENERATED_LIVE,
+            PromptProvenance.VERIFIED_CONTRACT,
+        }:
+            if proven != expected:
+                raise ValueError("prompt source evidence does not prove the comparison row")
+        elif proven is not None and (
+            proven.common_input != expected.common_input
+            or proven.conclusion != expected.conclusion
+            or proven.accepted_diagnosis_sha256 != expected.accepted_diagnosis_sha256
+            or proven.accepted_result_sha256 != expected.accepted_result_sha256
+            or proven.candidate_sha256 != expected.candidate_sha256
+        ):
+            raise ValueError("prompt source evidence does not prove the comparison row")
         return self
 
 

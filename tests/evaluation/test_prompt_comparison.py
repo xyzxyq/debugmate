@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,8 @@ from debugmate.evaluation.contracts import (
 CRITERIA_PATH = Path("evaluation/phase9/prompt-criteria.json")
 SOURCE_PLAN = ".planning/phases/08-dify-unified-live-chain/08-07-PLAN.md"
 SOURCE_PLAN_HASH = "f2d131057d2b989f3640f21931f1d45d94912e97e1a2d8a9029ba0b1b2c3bc2b"
+ACCEPTED_V1 = Path("evidence/evaluation/phase9/accepted-v1-contract.json")
+PROVIDER_V2 = Path("evidence/evaluation/phase9/run-v2.json")
 
 
 def load_criteria() -> PromptCriteriaRegistry:
@@ -23,6 +26,10 @@ def load_criteria() -> PromptCriteriaRegistry:
 
 def hash_value(character: str) -> str:
     return character * 64
+
+
+def file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def comparison_payload() -> dict[str, object]:
@@ -49,8 +56,8 @@ def comparison_payload() -> dict[str, object]:
     source_evidence = {
         "kind": "accepted_v1_contract",
         "reference": {
-            "path": {"path": SOURCE_PLAN},
-            "sha256": SOURCE_PLAN_HASH,
+            "path": {"path": ACCEPTED_V1.as_posix()},
+            "sha256": file_hash(ACCEPTED_V1),
         },
     }
     rows: list[dict[str, object]] = []
@@ -65,8 +72,8 @@ def comparison_payload() -> dict[str, object]:
                 "accepted_result_sha256": accepted["accepted_result_sha256"],
                 "candidate_sha256": accepted["candidate_sha256"],
                 "source_evidence": source_evidence,
-                "provenance": "verified_contract",
-                "status": "accepted",
+                "provenance": "verified_contract" if criterion.version == "v1" else "blocked",
+                "status": "accepted" if criterion.version == "v1" else "blocked",
             }
         )
     return {
@@ -136,10 +143,8 @@ def test_verified_contract_rejects_accepted_output_hash_drift(field: str) -> Non
 
 def test_verified_contract_cannot_serialize_as_a_generated_live_claim() -> None:
     comparison = PromptComparison.model_validate(comparison_payload())
-    assert all(row.provenance is PromptProvenance.VERIFIED_CONTRACT for row in comparison.rows)
-    assert all(
-        row.model_dump(mode="json")["provenance"] == "verified_contract" for row in comparison.rows
-    )
+    assert comparison.rows[0].provenance is PromptProvenance.VERIFIED_CONTRACT
+    assert comparison.rows[0].model_dump(mode="json")["provenance"] == "verified_contract"
 
     payload = comparison_payload()
     rows = payload["rows"]
@@ -147,6 +152,41 @@ def test_verified_contract_cannot_serialize_as_a_generated_live_claim() -> None:
     rows[1]["provenance"] = "generated_live"
 
     with pytest.raises(ValidationError):
+        PromptComparison.model_validate(payload)
+
+
+def test_generated_live_requires_its_provider_manifest_to_bind_every_row_identity() -> None:
+    payload = comparison_payload()
+    rows = payload["rows"]
+    assert isinstance(rows, list)
+    rows[1]["source_evidence"] = {
+        "kind": "evaluation_provider_run",
+        "reference": {
+            "path": {"path": PROVIDER_V2.as_posix()},
+            "sha256": file_hash(PROVIDER_V2),
+        },
+    }
+    rows[1]["provenance"] = "generated_live"
+    rows[1]["status"] = "accepted"
+
+    comparison = PromptComparison.model_validate(payload)
+    assert comparison.rows[1].provenance is PromptProvenance.GENERATED_LIVE
+
+    rows[1]["candidate_sha256"] = hash_value("f")
+    with pytest.raises(ValidationError, match="does not prove"):
+        PromptComparison.model_validate(payload)
+
+
+def test_accepted_v1_contract_rejects_any_other_hash_bound_source() -> None:
+    payload = comparison_payload()
+    rows = payload["rows"]
+    assert isinstance(rows, list)
+    rows[0]["source_evidence"] = {
+        "kind": "accepted_v1_contract",
+        "reference": {"path": {"path": SOURCE_PLAN}, "sha256": SOURCE_PLAN_HASH},
+    }
+
+    with pytest.raises(ValidationError, match="exact accepted V1"):
         PromptComparison.model_validate(payload)
 
 
