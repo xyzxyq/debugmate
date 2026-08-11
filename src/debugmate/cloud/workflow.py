@@ -46,6 +46,7 @@ from debugmate.diagnosis.workflow import (
 )
 from debugmate.gateway import CloudDispatchResult, CloudGateway, PreparedCloudDispatch
 from debugmate.hashing import canonical_json_bytes, sha256_bytes
+from debugmate.knowledge.build import ValidatedKnowledgeBuild, validate_knowledge_build
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation
 from debugmate.privacy.approval import verify_approval
@@ -98,17 +99,24 @@ def _approval_fingerprint(approved: ApprovedRedactedInput) -> str:
     return hashlib.sha256(approved.approval_signature.encode("ascii")).hexdigest()
 
 
-def _strict_manifest(value: Path | dict[str, object]) -> dict[str, object]:
-    if isinstance(value, Path):
-        path = value / "manifest.json" if value.is_dir() else value
-        payload = json.loads(path.read_text(encoding="utf-8"))
+def _strict_manifest(value: Path | ValidatedKnowledgeBuild) -> dict[str, object]:
+    if isinstance(value, ValidatedKnowledgeBuild):
+        validated = value
+    elif isinstance(value, Path):
+        build_path = value if value.is_dir() else value.parent
+        if value.is_file() and value.name != "manifest.json":
+            raise ValueError("knowledge authority must be a build directory or manifest")
+        validated = validate_knowledge_build(build_path)
     else:
-        payload = json.loads(json.dumps(value, ensure_ascii=False))
+        raise TypeError("raw knowledge manifests are not authoritative")
+    payload = json.loads(json.dumps(validated.manifest, ensure_ascii=False))
     if not isinstance(payload, dict):
         raise ValueError("knowledge manifest is invalid")
     sources = payload.get("sources")
     if not isinstance(sources, list) or len(sources) != 17:
         raise ValueError("exactly 17 sealed knowledge sources are required")
+    if payload.get("status") != "ready" or payload.get("syncable") is not True:
+        raise ValueError("knowledge build is not ready for live retrieval")
     return payload
 
 
@@ -160,7 +168,7 @@ class DifyLiveWorkflow:
         gateway: LiveGateway | CloudGateway,
         receipt_store: DifyReceiptStore,
         approval_key: bytes,
-        build_manifest: Path | dict[str, object],
+        build_manifest: Path | ValidatedKnowledgeBuild,
         readback_attestation: DifyReadbackAttestation,
         expected_dsl_semantic_sha256: str,
         clock: Callable[[], datetime] | None = None,
@@ -182,6 +190,30 @@ class DifyLiveWorkflow:
         self._clock = clock or (lambda: datetime.now(UTC))
         if self._manifest.get("build_id") != self._attestation.knowledge_build_id:
             raise ValueError("knowledge readback does not match sealed manifest")
+
+    @classmethod
+    def for_testing(
+        cls,
+        *,
+        gateway: LiveGateway | CloudGateway,
+        receipt_store: DifyReceiptStore,
+        approval_key: bytes,
+        validated_build: ValidatedKnowledgeBuild,
+        readback_attestation: DifyReadbackAttestation,
+        expected_dsl_semantic_sha256: str,
+        clock: Callable[[], datetime] | None = None,
+    ) -> DifyLiveWorkflow:
+        """Construct from an explicit prevalidated capability in deterministic tests."""
+
+        return cls(
+            gateway=gateway,
+            receipt_store=receipt_store,
+            approval_key=approval_key,
+            build_manifest=validated_build,
+            readback_attestation=readback_attestation,
+            expected_dsl_semantic_sha256=expected_dsl_semantic_sha256,
+            clock=clock,
+        )
 
     def _finish_failure(
         self,

@@ -14,6 +14,9 @@ from pydantic import SecretStr
 
 from debugmate.cloud.contracts import ExecutionBackend
 from debugmate.cloud.workflow import CloudWorkflowError, DifyLiveWorkflow
+from debugmate.contracts import ErrorCategory
+from debugmate.knowledge.build import ImmutableBuildCollision, build_knowledge
+from debugmate.knowledge.models import KnowledgeSource, SourceRegistry
 from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
 from debugmate.privacy.models import ApprovedRedactedInput, RedactedFields
 from debugmate.results.contracts import (
@@ -29,28 +32,50 @@ from debugmate.ui import serve as serve_module
 from debugmate.ui.app import UiCallbacks, build_app
 from debugmate.ui.presentation import render_view_state
 
-BUILD_ID = "b" * 64
-
 
 def _write_live_authority(root: Path) -> tuple[Path, Path, str]:
-    build_root = root / BUILD_ID
-    build_root.mkdir(parents=True)
-    manifest = {
-        "build_id": BUILD_ID,
-        "sources": [
-            {
-                "source_id": f"source-{index:02d}",
-                "url": f"https://example.invalid/source-{index:02d}",
-            }
-            for index in range(17)
-        ],
-    }
-    manifest_path = build_root / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "knowledge"
+        / "python-errors.html"
+    ).read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            content=fixture,
+        )
+
+    sources = [
+        KnowledgeSource(
+            source_id=f"source-{index:02d}",
+            title=f"Python reference {index:02d}",
+            url=f"https://docs.python.org/3/tutorial/errors-{index:02d}.html",
+            product="python",
+            version_scope="Python 3",
+            platform="cross-platform",
+            allowed_domain="docs.python.org",
+            heading_patterns=[r"^Exceptions$", r"^Handling Exceptions$"],
+            error_categories=[ErrorCategory.PYTHON_RUNTIME],
+            license_or_terms_note="Python documentation license applies.",
+            selection_reason="Deterministic live-authority test source.",
+        )
+        for index in range(17)
+    ]
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        build = build_knowledge(
+            SourceRegistry(registry_version="1.0.0", sources=sources),
+            root / "builds",
+            client,
+        )
+    manifest_path = build.path / "manifest.json"
 
     dataset_id = "configured-dataset-binding"
     attestation = DifyReadbackAttestation(
-        knowledge_build_id=BUILD_ID,
+        knowledge_build_id=build.build_id,
         dataset_fingerprint=hashlib.sha256(dataset_id.encode()).hexdigest(),
         document_count=17,
         document_fingerprints=[f"{index + 1:064x}" for index in range(17)],
@@ -98,6 +123,26 @@ def test_complete_local_authority_constructs_dify_without_network(
     assert dependencies.fallback_reason is None
     assert isinstance(dependencies.service._workflow, DifyLiveWorkflow)
     assert dependencies.service._live_execution_backend is ExecutionBackend.DIFY
+
+
+def test_self_asserted_manifest_mutation_is_rejected_before_dify_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest_path, attestation_path, dataset_id = _write_live_authority(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["sources"][0]["title"] = "tampered source metadata"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _poison_outbound(monkeypatch)
+
+    with pytest.raises(ImmutableBuildCollision, match="build_id"):
+        serve_module._live_dependencies(
+            settings=_settings(),
+            runtime_root=tmp_path / "runtime",
+            build_manifest=manifest_path,
+            readback_attestation=attestation_path,
+            dataset_binding=dataset_id,
+            app_ready=True,
+        )
 
 
 def test_incomplete_configuration_constructs_value_free_local_fallback(

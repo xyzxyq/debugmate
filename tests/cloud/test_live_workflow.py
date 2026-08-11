@@ -32,6 +32,7 @@ from debugmate.diagnosis.extraction import (
 from debugmate.diagnosis.workflow import validate_diagnosis_outcome
 from debugmate.gateway import CloudGateway
 from debugmate.hashing import canonical_json_bytes, sha256_bytes, sha256_file
+from debugmate.knowledge.build import ValidatedKnowledgeBuild
 from debugmate.knowledge.retrieval import RetrievalHit, RetrievalTrace
 from debugmate.knowledge.sync import DifyReadbackAttestation, DifySyncConfig
 from debugmate.privacy.approval import ApprovalInvalid, approve_preview
@@ -121,7 +122,21 @@ def _manifest() -> dict[str, object]:
                 "locators": ["ModuleNotFoundError" if index == 0 else "Reference"],
             }
         )
-    return {"build_id": BUILD_ID, "sources": sources, "notes": notes}
+    return {
+        "build_id": BUILD_ID,
+        "status": "ready",
+        "syncable": True,
+        "sources": sources,
+        "notes": notes,
+    }
+
+
+def _validated_build(tmp_path: Path) -> ValidatedKnowledgeBuild:
+    return ValidatedKnowledgeBuild(
+        path=tmp_path / BUILD_ID,
+        manifest=_manifest(),
+        note_bytes={},
+    )
 
 
 def _attestation() -> DifyReadbackAttestation:
@@ -241,11 +256,11 @@ class GatewaySpy:
 
 
 def _workflow(tmp_path: Path, gateway) -> DifyLiveWorkflow:
-    return DifyLiveWorkflow(
+    return DifyLiveWorkflow.for_testing(
         gateway=gateway,
         receipt_store=gateway.receipt_store,
         approval_key=KEY,
-        build_manifest=_manifest(),
+        validated_build=_validated_build(tmp_path),
         readback_attestation=_attestation(),
         expected_dsl_semantic_sha256="a" * 64,
         clock=lambda: NOW,
@@ -398,11 +413,11 @@ def test_invalid_approved_screenshot_fails_before_receipt_begin(tmp_path: Path) 
     gateway = CloudGateway(
         NoNetworkBackend(), approval_key=KEY, redacted_root=tmp_path
     )
-    workflow = DifyLiveWorkflow(
+    workflow = DifyLiveWorkflow.for_testing(
         gateway=gateway,
         receipt_store=store,
         approval_key=KEY,
-        build_manifest=_manifest(),
+        validated_build=_validated_build(tmp_path),
         readback_attestation=_attestation(),
         expected_dsl_semantic_sha256="a" * 64,
         clock=lambda: NOW,
