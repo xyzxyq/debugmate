@@ -1,7 +1,8 @@
 ---
 phase: 08-dify-unified-live-chain
-reviewed: 2026-08-11T09:09:07Z
+reviewed: 2026-08-11T09:26:37Z
 depth: standard
+iteration: 2
 files_reviewed: 41
 files_reviewed_list:
   - fixtures/replay/module-not-found/outcome.json
@@ -47,55 +48,36 @@ files_reviewed_list:
   - tests/ui/test_dify_live.py
 findings:
   critical: 0
-  warning: 4
+  warning: 0
   info: 0
-  total: 4
-status: issues_found
+  total: 0
+status: clean
 ---
 
 # Phase 08: Code Review Report
 
-**Reviewed:** 2026-08-11T09:09:07Z  
-**Depth:** standard  
-**Files Reviewed:** 41  
-**Status:** issues_found
+**Reviewed:** 2026-08-11T09:26:37Z
+**Depth:** standard
+**Iteration:** 2
+**Files Reviewed:** 41
+**Status:** clean
 
 ## Summary
 
-The Phase 08 Dify live chain, knowledge synchronization, result publication, and UI integration were reviewed at standard depth. The targeted test suite passed (`193 passed, 1 deselected`), and no critical vulnerability was found. Four correctness and evidence-integrity gaps remain: remote provenance fields are accepted without local binding, a pre-dispatch validation failure can strand a receipt, the live knowledge manifest bypasses the repository's strict build verifier, and the evidence capture script defaults to a machine-specific stale worktree interpreter.
+The exact 41-file Phase 08 scope from iteration 1 was re-reviewed at standard depth after fixes `e70ae6f`, `7bcafe5`, `cd0715e`, and `4b53c57`. All four original warnings are genuinely resolved:
 
-## Warnings
+- Remote DSL, retrieval-run, and retrieval-sanitizer fingerprints are now locally bound and independently mutation-tested.
+- Approved screenshot path, hash, bytes, image format, dimensions, and MIME are validated and snapshotted before receipt creation, so local validation failures cannot strand a `STARTED` receipt.
+- Production live knowledge authority is loaded through the repository's strict immutable-build verifier; raw manifest dictionaries are rejected outside the explicit test capability seam.
+- The evidence-capture script defaults to the current repository's `.venv\Scripts\python.exe`, retains an explicit override, and verifies that the resolved interpreter is a regular file.
 
-### WR-01: Remote DSL and retrieval fingerprints are parsed but never verified
+No new Critical, Warning, or Info finding was introduced by the four fix commits. The scoped regression suite passed (`199 passed, 1 deselected`); Ruff, Python bytecode compilation, PowerShell syntax parsing for all three scoped scripts, and `git diff --check` for the fix range also passed.
 
-**File:** `src/debugmate/cloud/workflow.py:202-240`  
-**Issue:** `_validate_envelope()` checks the schema, prompt, and knowledge build identifiers, but it never compares `envelope.contract.dsl_semantic_sha256` with the locally approved DSL identity. It also discards `retrieval_trace.run_fingerprint` and `node_fingerprint` while rebuilding the local trace. A stale or different Dify workflow can therefore return a structurally valid envelope and be accepted as the current same-run chain, even though the two provenance fingerprints do not bind it to the approved DSL or to this case's exact retrieval payload.
-
-**Fix:** Inject the expected DSL semantic hash into `DifyLiveWorkflow`, compare it with `secrets.compare_digest`/`hmac.compare_digest`, recompute the run fingerprint from the canonical `{case_id, hits}` payload, and compare the node fingerprint with the versioned retrieval-sanitizer identity before constructing `RetrievalTrace`. Add negative tests that mutate each of the three fingerprints while leaving the diagnosis and build ID valid.
-
-### WR-02: Local dispatch validation can leave a receipt permanently `STARTED`
-
-**File:** `src/debugmate/cloud/workflow.py:267-324`  
-**Issue:** The receipt is persisted before `CloudGateway.run_live()`, but the dispatch block handles only `DifyAmbiguousTransportError` and `DifyError`. `run_live()` can still raise `ApprovalInvalid` while resolving, hashing, decoding, or MIME-checking an approved screenshot, and can raise local contract/type errors before network dispatch. Those exceptions escape without a terminal receipt update. The receipt identity then blocks every retry as a duplicate, leaving an immutable `STARTED` record and no truthful terminal evidence.
-
-**Fix:** Split `CloudGateway` into a local `prepare_dispatch()` step that validates and snapshots the approved bytes before `begin()`, followed by a network-only dispatch using that immutable snapshot. Alternatively, catch all explicitly classified pre-dispatch validation errors after `begin()` and finish the receipt with a dedicated safe failure code. Add a live-workflow test using a replaced/invalid approved screenshot and assert that no receipt is stranded in `STARTED`.
-
-### WR-03: Live knowledge authority accepts a self-asserted manifest identity
-
-**File:** `src/debugmate/cloud/workflow.py:92-103`  
-**Issue:** `_strict_manifest()` only JSON-round-trips the value and checks that `sources` is a list of length 17. It does not use the existing `validate_knowledge_build()` boundary, recompute `build_id`/`content_hash`, verify note hashes, require the exact manifest shape, or reject unsafe manifest paths. Because the manifest later authorizes retrieval evidence, a locally modified manifest that retains the attested `build_id` can change the allowed source metadata while still being treated as the sealed build.
-
-**Fix:** Load live authority through `debugmate.knowledge.build.validate_knowledge_build()` and retain its validated immutable snapshot. Require a repository build directory/path in production; if dictionary injection is needed for tests, expose a separate test-only constructor that accepts an already validated capability rather than raw JSON. Add a test that changes source metadata without changing the claimed build ID and verify construction fails before any Dify call.
-
-### WR-04: Evidence capture defaults to an interpreter outside the current repository
-
-**File:** `scripts/capture_dify_c03_c04_c06.ps1:2`  
-**Issue:** The default `PythonPath` is an absolute path into `.worktrees/phase-1-foundation-platform-gate`. A normal clone, moved workspace, or cleaned worktree fails at `Resolve-Path`; when the old worktree still exists, the script silently uses that environment instead of the current repository's `.venv`. This makes the Phase 08 evidence procedure non-portable and can mix current source via `PYTHONPATH` with stale dependencies from another worktree.
-
-**Fix:** Make `PythonPath` optional and, after resolving `$repositoryRoot`, default it to `Join-Path $repositoryRoot '.venv\Scripts\python.exe'`. Keep an explicit override for controlled environments and validate the resolved interpreter is a regular file before capture.
+All reviewed files meet quality standards. No issues found.
 
 ---
 
-_Reviewed: 2026-08-11T09:09:07Z_  
-_Reviewer: Claude (gsd-code-reviewer)_  
+_Reviewed: 2026-08-11T09:26:37Z_
+_Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Iteration: 2_
