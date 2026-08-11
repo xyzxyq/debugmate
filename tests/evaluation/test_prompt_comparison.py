@@ -12,7 +12,6 @@ from debugmate.evaluation.contracts import (
     PromptProvenance,
 )
 
-
 CRITERIA_PATH = Path("evaluation/phase9/prompt-criteria.json")
 SOURCE_PLAN = ".planning/phases/08-dify-unified-live-chain/08-07-PLAN.md"
 SOURCE_PLAN_HASH = "f2d131057d2b989f3640f21931f1d45d94912e97e1a2d8a9029ba0b1b2c3bc2b"
@@ -39,7 +38,9 @@ def comparison_payload() -> dict[str, object]:
     accepted = {
         "conclusion": {
             "code": "evidence_bound_diagnosis",
-            "summary": "The fixed sanitized case remains bound to validated facts and retrieval evidence.",
+            "summary": (
+                "The fixed sanitized case remains bound to validated facts and retrieval evidence."
+            ),
         },
         "accepted_diagnosis_sha256": hash_value("6"),
         "accepted_result_sha256": hash_value("7"),
@@ -136,7 +137,9 @@ def test_verified_contract_rejects_accepted_output_hash_drift(field: str) -> Non
 def test_verified_contract_cannot_serialize_as_a_generated_live_claim() -> None:
     comparison = PromptComparison.model_validate(comparison_payload())
     assert all(row.provenance is PromptProvenance.VERIFIED_CONTRACT for row in comparison.rows)
-    assert all(row.model_dump(mode="json")["provenance"] == "verified_contract" for row in comparison.rows)
+    assert all(
+        row.model_dump(mode="json")["provenance"] == "verified_contract" for row in comparison.rows
+    )
 
     payload = comparison_payload()
     rows = payload["rows"]

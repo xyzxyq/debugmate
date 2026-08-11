@@ -22,6 +22,7 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 _ALLOWED_REFERENCE_ROOTS = (
     ".planning/phases/08-dify-unified-live-chain/",
     "evidence/dify-live/phase8/",
+    "evidence/evaluation/phase9/",
     "fixtures/replay/",
     "tests/fixtures/diagnosis/",
     "tests/results/",
@@ -362,7 +363,191 @@ class PromptProvenance(StrEnum):
     BLOCKED = "blocked"
 
 
+PromptProvenanceValue = Annotated[PromptProvenance, Field(strict=False)]
+
+
+class PromptVersion(StrEnum):
+    V1 = "v1"
+    V2 = "v2"
+    V3 = "v3"
+    V4 = "v4"
+
+
+PromptVersionValue = Annotated[PromptVersion, Field(strict=False)]
+
+
+_PROMPT_PATHS = {
+    PromptVersion.V1: "prompts/v1-baseline.md",
+    PromptVersion.V2: "prompts/v2-citations.md",
+    PromptVersion.V3: "prompts/v3-reliability.md",
+    PromptVersion.V4: "prompts/v4-course-release.md",
+}
+
+
+class PromptCriteriaRow(StrictFrozenModel):
+    """One versioned prompt's declared purpose, adoption rationale, and limitation."""
+
+    version: PromptVersionValue
+    prompt_file: HashBoundRepositoryReference
+    objective: str = Field(min_length=1, max_length=500)
+    adoption_rationale: str = Field(min_length=1, max_length=500)
+    limitation: str = Field(min_length=1, max_length=500)
+
+    @field_validator("objective", "adoption_rationale", "limitation")
+    @classmethod
+    def safe_criterion_text(cls, value: str) -> str:
+        assert_export_safe(value)
+        return value
+
+    @model_validator(mode="after")
+    def prompt_file_is_current_and_exact(self) -> PromptCriteriaRow:
+        if self.prompt_file.path.path != _PROMPT_PATHS[self.version]:
+            raise ValueError("prompt version does not match its current file")
+        if not self.prompt_file.is_verified():
+            raise ValueError("prompt file hash does not match current repository bytes")
+        return self
+
+
+class PromptCriteriaRegistry(StrictFrozenModel):
+    """The static V1-V4 design criteria, never a claim of provider execution."""
+
+    criteria_version: Literal["phase9-prompt-criteria-1.0"]
+    rows: tuple[PromptCriteriaRow, ...] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def exact_prompt_lineage(self) -> PromptCriteriaRegistry:
+        expected = (PromptVersion.V1, PromptVersion.V2, PromptVersion.V3, PromptVersion.V4)
+        if tuple(row.version for row in self.rows) != expected:
+            raise ValueError("prompt criteria must contain V1 through V4 exactly once in order")
+        return self
+
+
+class PromptComparisonInput(StrictFrozenModel):
+    """The immutable safe identity all compared prompt rows must share."""
+
+    case_id: Literal["P9-C01-live-private"]
+    sanitized_input_sha256: Sha256
+    facts_sha256: Sha256
+    retrieval_trace_sha256: Sha256
+    knowledge_build_id: Sha256
+    schema_sha256: Sha256
+
+
+class SafeFixedCaseConclusion(StrictFrozenModel):
+    """A bounded conclusion projection that never copies provider bodies or raw input."""
+
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")
+    summary: str = Field(min_length=1, max_length=500)
+
+    @field_validator("summary")
+    @classmethod
+    def safe_conclusion_summary(cls, value: str) -> str:
+        assert_export_safe(value)
+        return value
+
+
+class AcceptedV1Output(StrictFrozenModel):
+    """The one accepted V1 output against which contract-only variants bind."""
+
+    conclusion: SafeFixedCaseConclusion
+    accepted_diagnosis_sha256: Sha256
+    accepted_result_sha256: Sha256
+    candidate_sha256: Sha256
+
+
+class PromptEvidenceKind(StrEnum):
+    PHASE8_FORMAL = "phase8_formal"
+    EVALUATION_PROVIDER_RUN = "evaluation_provider_run"
+    ACCEPTED_V1_CONTRACT = "accepted_v1_contract"
+
+
+PromptEvidenceKindValue = Annotated[PromptEvidenceKind, Field(strict=False)]
+
+
+class PromptSourceEvidence(StrictFrozenModel):
+    """A hash-bound safe reference for one comparison row's evidence source."""
+
+    kind: PromptEvidenceKindValue
+    reference: HashBoundRepositoryReference
+
+    @model_validator(mode="after")
+    def source_kind_matches_its_safe_path(self) -> PromptSourceEvidence:
+        path = self.reference.path.path
+        if self.kind is PromptEvidenceKind.PHASE8_FORMAL and path != (
+            "evidence/dify-live/phase8/manifest.json"
+        ):
+            raise ValueError("formal Phase 08 evidence must use its exact manifest path")
+        if self.kind is PromptEvidenceKind.EVALUATION_PROVIDER_RUN and not path.startswith(
+            "evidence/evaluation/phase9/"
+        ):
+            raise ValueError("provider evaluation evidence must remain under its Phase 09 root")
+        if not self.reference.is_verified():
+            raise ValueError("source evidence hash does not match current repository bytes")
+        return self
+
+
+class PromptComparisonRow(StrictFrozenModel):
+    """One claimed prompt outcome with enough binding to reject label-only comparisons."""
+
+    version: PromptVersionValue
+    prompt_file: HashBoundRepositoryReference
+    common_input: PromptComparisonInput
+    conclusion: SafeFixedCaseConclusion
+    accepted_diagnosis_sha256: Sha256
+    accepted_result_sha256: Sha256
+    candidate_sha256: Sha256
+    source_evidence: PromptSourceEvidence
+    provenance: PromptProvenanceValue
+    status: Literal["accepted", "rejected", "blocked"]
+
+    @model_validator(mode="after")
+    def current_prompt_and_claim_shape(self) -> PromptComparisonRow:
+        if self.prompt_file.path.path != _PROMPT_PATHS[self.version]:
+            raise ValueError("comparison row prompt file does not match its version")
+        if not self.prompt_file.is_verified():
+            raise ValueError("comparison row prompt file hash drifted")
+        if self.provenance is PromptProvenance.GENERATED_LIVE:
+            if self.status != "accepted" or self.source_evidence.kind not in {
+                PromptEvidenceKind.PHASE8_FORMAL,
+                PromptEvidenceKind.EVALUATION_PROVIDER_RUN,
+            }:
+                raise ValueError(
+                    "generated-live claims require their own accepted provider evidence"
+                )
+        elif self.provenance is PromptProvenance.VERIFIED_CONTRACT:
+            if (
+                self.status != "accepted"
+                or self.source_evidence.kind is not PromptEvidenceKind.ACCEPTED_V1_CONTRACT
+            ):
+                raise ValueError("verified-contract rows require accepted V1 contract evidence")
+        elif self.provenance is PromptProvenance.REJECTED and self.status != "rejected":
+            raise ValueError("rejected provenance must retain rejected status")
+        elif self.provenance is PromptProvenance.BLOCKED and self.status != "blocked":
+            raise ValueError("blocked provenance must retain blocked status")
+        return self
+
+
 class PromptComparison(StrictFrozenModel):
-    """Placeholder public seam extended with full V1-V4 contracts in Task 2."""
+    """A fully bound V1-V4 comparison that refuses mixed-case or inflated claims."""
 
     comparison_version: Literal["phase9-prompt-comparison-1.0"]
+    common_input: PromptComparisonInput
+    accepted_v1: AcceptedV1Output
+    rows: list[PromptComparisonRow] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def one_case_and_truthful_provenance(self) -> PromptComparison:
+        expected = (PromptVersion.V1, PromptVersion.V2, PromptVersion.V3, PromptVersion.V4)
+        if tuple(row.version for row in self.rows) != expected:
+            raise ValueError("comparison must contain V1 through V4 exactly once in order")
+        if any(row.common_input != self.common_input for row in self.rows):
+            raise ValueError("prompt comparison input drift")
+        for row in self.rows:
+            if row.provenance is PromptProvenance.VERIFIED_CONTRACT and (
+                row.conclusion != self.accepted_v1.conclusion
+                or row.accepted_diagnosis_sha256 != self.accepted_v1.accepted_diagnosis_sha256
+                or row.accepted_result_sha256 != self.accepted_v1.accepted_result_sha256
+                or row.candidate_sha256 != self.accepted_v1.candidate_sha256
+            ):
+                raise ValueError("verified-contract row drifted from the accepted V1 output")
+        return self

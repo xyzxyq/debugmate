@@ -1,0 +1,45 @@
+{
+  "criteria_version": "phase9-prompt-criteria-1.0",
+  "rows": [
+    {
+      "version": "v1",
+      "prompt_file": {
+        "path": {"path": "prompts/v1-baseline.md"},
+        "sha256": "fb240c218da9d3fa60589f14d34e27125fb86aec670bea851af37d9061719227"
+      },
+      "objective": "Provide a minimal readable diagnosis without command execution.",
+      "adoption_rationale": "It is the currently bound baseline design for the product workflow.",
+      "limitation": "Its output structure and evidence discipline are less explicit than later designs."
+    },
+    {
+      "version": "v2",
+      "prompt_file": {
+        "path": {"path": "prompts/v2-citations.md"},
+        "sha256": "dec69a402a4ff9d129c6febb47b961601164599b3bc06e82c4a8c0c0749b4b2d"
+      },
+      "objective": "Require fact and knowledge citations while expressing missing information.",
+      "adoption_rationale": "It separates observed facts, supported inferences, and uncertainty.",
+      "limitation": "It is a design iteration and has no separate provider-run evidence yet."
+    },
+    {
+      "version": "v3",
+      "prompt_file": {
+        "path": {"path": "prompts/v3-reliability.md"},
+        "sha256": "1c96ed92060bdd0e88c234d9a669eaad2c02b0667c142d06c3c4024ae33f38ad"
+      },
+      "objective": "Constrain output to the diagnosis schema and calibrate uncertainty.",
+      "adoption_rationale": "It makes evidence, command safety, and schema validation explicit.",
+      "limitation": "It is a design iteration and has no separate provider-run evidence yet."
+    },
+    {
+      "version": "v4",
+      "prompt_file": {
+        "path": {"path": "prompts/v4-course-release.md"},
+        "sha256": "58532408f127a145266857f90117396ea675ea97d8e37fe8dd8780623f650275"
+      },
+      "objective": "Keep a structured diagnosis consistent across report, card, and recap outputs.",
+      "adoption_rationale": "It adds course presentation and multimodal consistency constraints.",
+      "limitation": "It is a recommended design, not a separately generated live comparison result."
+    }
+  ]
+}

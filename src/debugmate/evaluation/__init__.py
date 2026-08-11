@@ -7,6 +7,7 @@ from debugmate.evaluation.contracts import (
     Phase8SourceEvidence,
     Phase10SourceManifest,
     PromptComparison,
+    PromptCriteriaRegistry,
     PromptProvenance,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "Phase10SourceManifest",
     "Phase8SourceEvidence",
     "PromptComparison",
+    "PromptCriteriaRegistry",
     "PromptProvenance",
 ]
