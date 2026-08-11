@@ -30,7 +30,7 @@
 
 Phase 09 should be planned as an evidence compilation and verification layer over the current Phase 08/Phase 04 contracts, not as another diagnosis pipeline. The repository already has strict diagnosis evidence, result-manifest, ZIP, privacy-scan, citation-binding and execution-backend contracts; what is missing is one small versioned evaluation registry that references those verified objects and produces current case and prompt-comparison summaries. `[VERIFIED: src/debugmate/evidence.py; src/debugmate/results/contracts.py; src/debugmate/results/verifier.py; src/debugmate/privacy/output_scan.py; src/debugmate/diagnosis/evidence_binding.py]`
 
-The correct minimum set is four evaluation rows: (1) the Phase 08 synthetic-but-real Dify success, also carrying privacy coverage; (2) deterministic insufficient-information; (3) deterministic long-content replay; and (4) an honest local-fallback or typed failure row. This covers all locked dimensions without exceeding the 3–5-case V0.1 limit. `[VERIFIED: .planning/ROADMAP.md; tests/fixtures/diagnosis/workflow_cases.json; fixtures/replay/index.json; .planning/phases/08-dify-unified-live-chain/08-07-PLAN.md]`
+The correct minimum set is four evaluation rows: (1) the Phase 08 synthetic-but-real Dify success, also carrying privacy coverage; (2) deterministic insufficient-information; (3) deterministic long-content replay; and (4) the deterministic `local_fallback` partial audio-unavailable terminal row. This covers all locked dimensions without exceeding the 3–5-case V0.1 limit. `[VERIFIED: .planning/ROADMAP.md; tests/fixtures/diagnosis/workflow_cases.json; fixtures/replay/index.json; src/debugmate/results/contracts.py; tests/results/test_result_e2e.py]`
 
 The live row is currently blocked: `.planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md` and `evidence/dify-live/phase8/manifest.json` do not exist, and `DIFY_DATASET_API_KEY` is absent from the current environment. Phase 09 planning and offline Wave 0 work may proceed, but the runner must fail closed rather than emit `live_pass=true`. `[VERIFIED: filesystem inspection 2026-08-10; value-free environment probe 2026-08-10; 08-07-PLAN.md]`
 
@@ -42,7 +42,7 @@ The live row is currently blocked: `.planning/phases/08-dify-unified-live-chain/
 | ID | Description | Research Support |
 |---|---|---|
 | EVAL-01 | V0.1 保存 3–5 个可重复运行的代表性案例，覆盖完成、长内容、隐私/安全与平台降级状态。 `[VERIFIED: .planning/REQUIREMENTS.md]` | Use a four-row registry with explicit coverage tags, immutable input hashes, expected/actual status and a deterministic runner. `[VERIFIED: fixtures/replay/index.json; tests/fixtures/diagnosis/workflow_cases.json]` |
-| EVAL-03 | 项目保存 V1–V4 提示词、修改目标、固定案例结论和采用/限制说明。 `[VERIFIED: .planning/REQUIREMENTS.md]` | Bind all four prompt file hashes to the same sanitized input/output identity and record `generated_live`, `verified_contract`, `rejected` or `blocked` provenance per version. `[VERIFIED: prompts/README.md; prompts/v1-baseline.md through prompts/v4-course-release.md]` |
+| EVAL-03 | 项目保存 V1–V4 提示词、修改目标、固定案例结论和采用/限制说明。 `[VERIFIED: .planning/REQUIREMENTS.md]` | Bind all four prompt file hashes to the same sanitized input/output identity; require each row's safe fixed-case conclusion, accepted diagnosis/result/candidate SHA-256, source-evidence reference, and `generated_live`/`verified_contract`/`rejected`/`blocked` provenance. `[VERIFIED: prompts/README.md; prompts/v1-baseline.md through prompts/v4-course-release.md]` |
 | EVAL-05 | 进入 PPT 和视频的案例来自真实运行或明确标注的回放，并通过隐私、文件有效性与一致性代表性检查。 `[VERIFIED: .planning/REQUIREMENTS.md]` | Emit an eligibility ledger with execution backend, run/result hashes, privacy result, artifact validation and exclusion reasons; Phase 10 consumes only eligible rows. `[VERIFIED: src/debugmate/results/contracts.py; src/debugmate/results/verifier.py]` |
 | EVID-03 | 项目可以从真实运行证据自动生成提示词对比表、案例卡、工作流图和 PPT 素材清单。 `[VERIFIED: .planning/REQUIREMENTS.md]` | Phase 09 should generate machine-readable prompt/case/workflow/source manifests and Markdown previews; Phase 10 alone renders/finalizes screenshots, PPTX and video assets. `[VERIFIED: .planning/ROADMAP.md Phase 9/10 boundary; scripts/build-course-ppt.py; scripts/build-course-video.py]` |
 </phase_requirements>
@@ -191,7 +191,7 @@ class CaseEvaluation(StrictFrozenModel):
 | `P9-C01-live-private` | Exact accepted Phase 08 Plan 07 case. `[VERIFIED: 08-07-PLAN.md intended artifact]` | Backend `dify`, request/input hash, direct citations, report/PNG/MP3/ZIP hashes, privacy pass, limitations. | Also becomes the single V1–V4 case; blocked until Phase 08 manifest exists. |
 | `P9-C02-insufficient` | `insufficient_information` fixture rerun. `[VERIFIED: tests/fixtures/diagnosis/workflow_cases.json]` | Expected/actual blocked status, ≤3 questions, no fabricated diagnosis or media, privacy pass. | A correct non-answer is evidence, not failure. |
 | `P9-C03-long-replay` | Regenerated `long-content` replay. `[VERIFIED: fixtures/replay/index.json; generator script]` | Explicit replay provenance, long content markers, verified result identities/artifacts, limitations. | No screenshot capture in Phase 09. |
-| `P9-C04-fallback-failure` | Current local fallback or one typed Dify failure fixture. `[VERIFIED: Phase 08 backend/failure contracts]` | Explicit backend/failure code, receipt state when applicable, artifact availability/absence, safe recovery scope, limitations. | Prefer one case that demonstrates the most course-relevant honest degradation without adding a fifth row. |
+| `P9-C04-fallback-failure` | Deterministic `local_fallback` partial terminal result with the established audio-stage unavailability contract. `[VERIFIED: src/debugmate/results/contracts.py; tests/results/test_result_e2e.py; 08-06-SUMMARY.md]` | Explicit `execution_backend=local_fallback`, `status=partial`, report/card/recap availability, unavailable audio state, safe recovery scope, and limitations. | This single concrete degradation row demonstrates honest backend and modality truth without a fifth case or a cloud-failure ambiguity. |
 
 Each dimension must be a machine-checked coverage tag; prose alone does not close EVAL-01. `[VERIFIED: requirement structure and reproducibility constraint]`
 
@@ -203,8 +203,8 @@ Use this provenance enum:
 
 | Value | Meaning |
 |---|---|
-| `generated_live` | A provider run actually used this prompt hash and produced the recorded candidate. |
-| `verified_contract` | The same accepted output was checked against this version's declared constraints; no claim that the version generated it. |
+| `generated_live` | This row's provider-run source evidence actually used this prompt hash and produced its recorded candidate/accepted diagnosis/result. |
+| `verified_contract` | The row binds exactly to the accepted V1 diagnosis/result/candidate and its safe fixed-case conclusion, then checks that output against this version's declared constraints; no claim that the version generated it. |
 | `rejected` | A generated candidate existed but strict/schema/privacy/citation/command validation rejected it. |
 | `blocked` | Prerequisite/provider evidence was unavailable; no synthetic score or output was substituted. |
 
@@ -370,24 +370,15 @@ eligible = (
 
 | # | Claim | Section | Risk if wrong |
 |---|---|---|---|
-| — | No unverified factual claims are required for the recommended plan. The exact P9-C04 choice (local fallback versus typed Dify failure) remains planner discretion, not an assumed fact. | All | None. |
+| — | No unverified factual claims are required for the recommended plan. P9-C04 is fixed as the deterministic `local_fallback` partial terminal state because the existing result contract and fixtures already prove its honest modality availability. | All | None. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Will Phase 08 Plan 07 complete before Phase 09 execution starts?**
-   - What we know: its summary and formal manifest are currently missing. `[VERIFIED: filesystem inspection]`
-   - What's unclear: whether the missing dataset key will be supplied and the live gate will succeed. `[VERIFIED: environment probe]`
-   - Recommendation: plan Wave 0/offline work independently, but make the formal Phase 09 promotion depend on `08-07`. 
+1. **Phase 08 dependency:** Phase 09 formal collection and promotion are hard-gated by the completed `08-07-SUMMARY.md` and the exact, checksum-valid `evidence/dify-live/phase8/manifest.json` bundle. Until both validate, the formal runner emits `blocked`/`phase8_live_evidence_missing`, cannot mark P9-C01 live, and leaves the prior ledger untouched. `[VERIFIED: 08-07-PLAN.md; locked no-false-live decision]`
 
-2. **Should V2–V4 be real provider generations or deterministic contract verifications?**
-   - What we know: the ordinary product chain only accepts `diagnosis-v1`; the prompt README forbids implying unrun cloud comparisons. `[VERIFIED: current code; prompts/README.md]`
-   - What's unclear: whether the course needs four real model calls rather than four auditable version checks.
-   - Recommendation: use `verified_contract` by default; add evaluation-only generations only if the user explicitly approves the extra Dify configuration/quota and the plan keeps the product DSL immutable.
+2. **V2–V4 provenance:** V1 is `generated_live` only when the accepted Phase 08 output binds its exact prompt hash and source-evidence reference. V2–V4 default to `verified_contract`, each bound to that exact accepted V1 diagnosis/result/candidate and its safe fixed-case conclusion. A V2–V4 `generated_live` row is allowed only when its own separately recorded provider-run evidence and exact prompt hash validate; the product DSL remains immutable. `[VERIFIED: prompts/README.md; src/debugmate/cloud/workflow.py; platform/dify/app.dsl.yml]`
 
-3. **Which degradation row best serves P9-C04?**
-   - What we know: the repository has local fallback, partial TTS/card results and typed artifact-free Dify failures. `[VERIFIED: Phase 04/08 tests and contracts]`
-   - What's unclear: whether the final course narrative prefers recoverable partial output or a pre-diagnosis cloud failure.
-   - Recommendation: use a typed cloud/fallback row that demonstrates backend truth and honest artifact availability; do not add a fifth row unless both are required by the rubric.
+3. **P9-C04 degradation choice:** Use the deterministic `local_fallback` partial terminal state with the existing audio-stage unavailability semantics: report/card/recap remain identity-bound and available, audio is explicitly unavailable, and the row records the safe retry scope and limitation. This exercises the existing partial-result validator and makes the fallback evidence precise without implying a Dify failure. `[VERIFIED: src/debugmate/results/contracts.py; tests/results/test_result_e2e.py; 08-06-SUMMARY.md]`
 
 ## Environment Availability
 
@@ -430,7 +421,7 @@ eligible = (
 
 - Missing Phase 08 summary/manifest yields `blocked`, not live success. `[VERIFIED: locked prerequisite]`
 - Historical C01–C07 or `course-v0.1` manifest cannot satisfy P9-C01. `[VERIFIED: Phase 08 evidence distinction]`
-- Any prompt comparison input/facts/retrieval/prompt hash drift fails. `[VERIFIED: exact same-case decision]`
+- Any prompt comparison input/facts/retrieval/prompt hash, accepted diagnosis/result/candidate hash, conclusion, or source-evidence drift fails. `[VERIFIED: exact same-case decision]`
 - `verified_contract` cannot serialize as `generated_live`. `[VERIFIED: authenticity boundary]`
 - Secret, absolute personal path, approval material, raw remote ID/body or prompt injection in any JSON/Markdown blocks promotion. `[VERIFIED: project/Phase 08 security boundary]`
 - Artifact hash/MIME/ZIP/member/audio mismatch makes the row ineligible. `[VERIFIED: existing result verifier]`
