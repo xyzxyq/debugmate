@@ -9,7 +9,6 @@ from debugmate.evaluation.collector import (
 )
 from debugmate.evaluation.contracts import CaseRegistry
 
-
 CASES_PATH = Path("evaluation/phase9/cases.json")
 
 
@@ -30,7 +29,7 @@ def test_phase8_live_source_requires_the_current_formal_summary_and_manifest() -
     assert source.manifest_path == "evidence/dify-live/phase8/manifest.json"
 
 
-def test_collector_keeps_each_locked_case_truthful_and_safe_when_current_evidence_is_blocked() -> None:
+def test_collector_keeps_locked_cases_truthful_when_current_evidence_is_blocked() -> None:
     rows = collect_phase9_cases(load_registry())
     by_case_id = {row.case_id: row for row in rows}
 
