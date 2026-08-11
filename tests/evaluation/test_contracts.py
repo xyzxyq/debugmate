@@ -12,7 +12,6 @@ from debugmate.evaluation.contracts import (
     Phase8SourceEvidence,
 )
 
-
 CASES_PATH = Path("evaluation/phase9/cases.json")
 
 
@@ -53,9 +52,22 @@ def test_live_case_requires_current_phase8_summary_and_formal_manifest() -> None
 
     assert live.actual_status == "blocked"
     assert isinstance(live.phase8_source, Phase8SourceEvidence)
-    assert live.phase8_source.summary_path == ".planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md"
-    assert live.phase8_source.manifest_path == "evidence/dify-live/phase8/manifest.json"
+    assert (
+        live.phase8_source.summary_path.path
+        == ".planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md"
+    )
+    assert live.phase8_source.manifest_path.path == "evidence/dify-live/phase8/manifest.json"
     assert live.can_claim_live_success() is False
+
+
+def test_live_case_rejects_a_completed_claim_without_current_phase8_hashes() -> None:
+    registry = load_registry()
+    data = registry.model_dump(mode="json")
+    live = next(case for case in data["cases"] if case["case_id"] == "P9-C01-live-private")
+    live["actual_status"] = "completed"
+
+    with pytest.raises(ValidationError):
+        CaseRegistry.model_validate(data)
 
 
 def test_duplicate_case_keys_and_unbounded_fields_are_rejected() -> None:

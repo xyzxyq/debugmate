@@ -1,0 +1,79 @@
+{
+  "registry_version": "phase9-evaluation-1.0",
+  "cases": [
+    {
+      "case_id": "P9-C01-live-private",
+      "coverage": ["live_success", "privacy"],
+      "source_path": {"path": ".planning/phases/08-dify-unified-live-chain/08-07-PLAN.md"},
+      "source_sha256": "f2d131057d2b989f3640f21931f1d45d94912e97e1a2d8a9029ba0b1b2c3bc2b",
+      "mode": "live",
+      "execution_backend": "dify",
+      "provenance": "real_live",
+      "expected_status": "completed",
+      "actual_status": "blocked",
+      "availability": {"report": false, "card": false, "recap_text": false, "audio": false, "bundle": false},
+      "privacy": {"status": "blocked", "safe_scan_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "finding_count": 0},
+      "citations": {"status": "blocked", "count": 0},
+      "limitation": "Current live evidence is blocked until the formal Phase 08 acceptance summary and manifest are published and hash-verified.",
+      "retry_scope": "none",
+      "phase8_source": {
+        "acceptance_plan": {
+          "path": {"path": ".planning/phases/08-dify-unified-live-chain/08-07-PLAN.md"},
+          "sha256": "f2d131057d2b989f3640f21931f1d45d94912e97e1a2d8a9029ba0b1b2c3bc2b"
+        },
+        "summary_path": {"path": ".planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md"},
+        "summary_sha256": null,
+        "manifest_path": {"path": "evidence/dify-live/phase8/manifest.json"},
+        "manifest_sha256": null
+      }
+    },
+    {
+      "case_id": "P9-C02-insufficient",
+      "coverage": ["insufficient_data", "privacy"],
+      "source_path": {"path": "tests/fixtures/diagnosis/workflow_cases.json"},
+      "source_sha256": "ef176036f784831026e09c5b6d4eeb7b3bacf08dfdfb9ef5f12cc71156ab2798",
+      "mode": "replay",
+      "execution_backend": "replay",
+      "provenance": "explicit_replay",
+      "expected_status": "insufficient_data",
+      "actual_status": "insufficient_data",
+      "availability": {"report": false, "card": false, "recap_text": false, "audio": false, "bundle": false},
+      "privacy": {"status": "pass", "safe_scan_sha256": "ef176036f784831026e09c5b6d4eeb7b3bacf08dfdfb9ef5f12cc71156ab2798", "finding_count": 0},
+      "citations": {"status": "not_applicable", "count": 0},
+      "limitation": "The fixture intentionally has insufficient information, so it must not publish diagnosis or media artifacts.",
+      "retry_scope": "none"
+    },
+    {
+      "case_id": "P9-C03-long-replay",
+      "coverage": ["long_content"],
+      "source_path": {"path": "fixtures/replay/index.json"},
+      "source_sha256": "6452a9ccc770174520db764eee3ec50d9e4298c287fc64a6df72af2b42aec34d",
+      "mode": "replay",
+      "execution_backend": "replay",
+      "provenance": "explicit_replay",
+      "expected_status": "completed",
+      "actual_status": "blocked",
+      "availability": {"report": false, "card": false, "recap_text": false, "audio": false, "bundle": false},
+      "privacy": {"status": "blocked", "safe_scan_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "finding_count": 0},
+      "citations": {"status": "blocked", "count": 0},
+      "limitation": "The long-content replay is registered but has not yet been regenerated into current Phase 09 evidence.",
+      "retry_scope": "none"
+    },
+    {
+      "case_id": "P9-C04-fallback-failure",
+      "coverage": ["fallback_or_failure"],
+      "source_path": {"path": "tests/results/test_result_e2e.py"},
+      "source_sha256": "75712397131eacd4c0eec46531b818098eb0a21e027c3a95c0f771348fd9c9e0",
+      "mode": "live",
+      "execution_backend": "local_fallback",
+      "provenance": "local_fallback",
+      "expected_status": "partial",
+      "actual_status": "partial",
+      "availability": {"report": true, "card": true, "recap_text": true, "audio": false, "bundle": true},
+      "privacy": {"status": "pass", "safe_scan_sha256": "75712397131eacd4c0eec46531b818098eb0a21e027c3a95c0f771348fd9c9e0", "finding_count": 0},
+      "citations": {"status": "verified", "count": 1},
+      "limitation": "The local fallback row is deliberately partial because audio generation is unavailable; it does not claim an MP3 artifact.",
+      "retry_scope": "audio"
+    }
+  ]
+}

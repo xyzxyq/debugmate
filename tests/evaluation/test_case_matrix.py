@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from debugmate.evaluation.contracts import CaseRegistry
 
-
 CASES_PATH = Path("evaluation/phase9/cases.json")
 
 
@@ -39,9 +38,10 @@ def test_insufficient_information_cannot_claim_diagnosis_artifacts() -> None:
 
     assert insufficient.actual_status == "insufficient_data"
     assert insufficient.availability.report is False
-    assert insufficient.availability.card_png is False
-    assert insufficient.availability.recap_mp3 is False
-    assert insufficient.availability.evidence_zip is False
+    assert insufficient.availability.card is False
+    assert insufficient.availability.recap_text is False
+    assert insufficient.availability.audio is False
+    assert insufficient.availability.bundle is False
 
 
 def test_local_fallback_partial_row_has_only_established_audio_unavailable_state() -> None:
@@ -51,9 +51,9 @@ def test_local_fallback_partial_row_has_only_established_audio_unavailable_state
     assert fallback.execution_backend == "local_fallback"
     assert fallback.actual_status == "partial"
     assert fallback.availability.report is True
-    assert fallback.availability.card_png is True
-    assert fallback.availability.recap_mp3 is True
-    assert fallback.availability.evidence_zip is True
+    assert fallback.availability.card is True
+    assert fallback.availability.recap_text is True
+    assert fallback.availability.bundle is True
     assert fallback.availability.audio is False
     assert fallback.retry_scope == "audio"
 
