@@ -328,6 +328,12 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
                     }
                     for item in pending_metadata[str(document["id"])]
                 ]
+                document["doc_metadata"].extend(
+                    [
+                        {"name": "document_name", "value": document["name"]},
+                        {"name": "source", "value": "upload_file"},
+                    ]
+                )
             return httpx.Response(200, json={"result": "success"})
         if request.method == "GET" and path.endswith("/datasets/dataset"):
             return httpx.Response(
