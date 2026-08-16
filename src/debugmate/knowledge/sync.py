@@ -48,6 +48,22 @@ class MissingDatasetBinding(KnowledgeSyncError):
     """Raised before network access when no safe dataset binding is configured."""
 
 
+class DifyKnowledgeRateLimitError(KnowledgeSyncError):
+    """Raised for Dify's exact tenant-wide knowledge request limit denial."""
+
+
+class DifyDocumentCapacityError(KnowledgeSyncError):
+    """Raised for Dify's exact document-capacity denial."""
+
+
+class DifyVectorCapacityError(KnowledgeSyncError):
+    """Raised for Dify's exact vector-capacity denial."""
+
+
+class DifyKnowledgeForbiddenError(KnowledgeSyncError):
+    """Raised for an unclassified Dify knowledge HTTP 403 response."""
+
+
 class DifySyncConfig(StrictKnowledgeModel):
     """Versioned Dify indexing and retrieval settings bound to every plan."""
 
@@ -609,6 +625,30 @@ def _dify_document_payload(
 
 
 _MAX_PROVIDER_RESPONSE_BYTES = 1_048_576
+_DIFY_FORBIDDEN_CLASSIFICATIONS: dict[str, tuple[type[KnowledgeSyncError], str]] = {
+    "Sorry, you have reached the knowledge base request rate limit of your subscription.": (
+        DifyKnowledgeRateLimitError,
+        "knowledge_request_rate_limited",
+    ),
+    "The number of documents has reached the limit of your subscription.": (
+        DifyDocumentCapacityError,
+        "document_capacity_exceeded",
+    ),
+    "The capacity of the vector space has reached the limit of your subscription.": (
+        DifyVectorCapacityError,
+        "vector_capacity_exceeded",
+    ),
+}
+_DIFY_SAFE_CODE_CLASSIFICATIONS = {
+    "knowledge_rate_limited": "knowledge_request_rate_limited",
+}
+_DIFY_CLASSIFICATION_ERRORS: dict[str, type[KnowledgeSyncError]] = {
+    "knowledge_request_rate_limited": DifyKnowledgeRateLimitError,
+    "document_capacity_exceeded": DifyDocumentCapacityError,
+    "vector_capacity_exceeded": DifyVectorCapacityError,
+}
+_DIFY_ERROR_SHAPE_KEYS = frozenset({"code", "error_code", "message", "description", "status"})
+_SAFE_PROVIDER_CODE = re.compile(r"^[a-z0-9_.-]{1,64}$")
 _REQUIRED_METADATA_FIELDS = (
     "source_id",
     "content_sha256",
@@ -622,10 +662,72 @@ _REQUIRED_METADATA_FIELDS = (
 )
 
 
+def inspect_dify_knowledge_error(response: httpx.Response) -> dict[str, object]:
+    """Return a value-free bounded description of a Dify knowledge HTTP error."""
+
+    raw = response.content
+    body_sha256 = hashlib.sha256(raw).hexdigest()
+    if response.status_code != 403 or len(raw) > _MAX_PROVIDER_RESPONSE_BYTES:
+        return {
+            "body_sha256": body_sha256,
+            "classification": None if response.status_code != 403 else "knowledge_forbidden",
+            "safe_code": None,
+            "shape_sha256": hashlib.sha256(b"[]").hexdigest(),
+            "top_level_keys": [],
+        }
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        value = None
+    if not isinstance(value, dict):
+        return {
+            "body_sha256": body_sha256,
+            "classification": "knowledge_forbidden",
+            "safe_code": None,
+            "shape_sha256": hashlib.sha256(b"[]").hexdigest(),
+            "top_level_keys": [],
+        }
+    top_level_keys = sorted(key for key in value if key in _DIFY_ERROR_SHAPE_KEYS)
+    shape = [(key, type(value[key]).__name__) for key in top_level_keys]
+    shape_sha256 = hashlib.sha256(
+        json.dumps(shape, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    ).hexdigest()
+    raw_code = value.get("code")
+    if not isinstance(raw_code, str) or _SAFE_PROVIDER_CODE.fullmatch(raw_code) is None:
+        raw_code = value.get("error_code")
+    safe_code = (
+        raw_code
+        if isinstance(raw_code, str) and _SAFE_PROVIDER_CODE.fullmatch(raw_code) is not None
+        else None
+    )
+    classification = _DIFY_SAFE_CODE_CLASSIFICATIONS.get(safe_code or "")
+    provider_message = value.get("message")
+    if not isinstance(provider_message, str):
+        provider_message = value.get("description")
+    message_classification = (
+        _DIFY_FORBIDDEN_CLASSIFICATIONS.get(provider_message, (None, None))[1]
+        if isinstance(provider_message, str)
+        else None
+    )
+    return {
+        "body_sha256": body_sha256,
+        "classification": classification or message_classification or "knowledge_forbidden",
+        "safe_code": safe_code,
+        "shape_sha256": shape_sha256,
+        "top_level_keys": top_level_keys,
+    }
+
+
+def classify_dify_knowledge_error(response: httpx.Response) -> str | None:
+    """Return an allowlisted safe classification for a Dify knowledge HTTP error."""
+
+    classification = inspect_dify_knowledge_error(response)["classification"]
+    return classification if isinstance(classification, str) else None
+
+
 def _response_json(
     response: httpx.Response, response_hashes: list[str] | None = None
 ) -> dict[str, object]:
-    response.raise_for_status()
     raw = response.content
     if len(raw) > _MAX_PROVIDER_RESPONSE_BYTES:
         raise KnowledgeSyncError("provider response exceeds size limit")
@@ -634,9 +736,22 @@ def _response_json(
     try:
         value = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        if response.status_code == 403:
+            raise DifyKnowledgeForbiddenError("knowledge_forbidden") from error
+        response.raise_for_status()
         raise KnowledgeSyncError("provider response is not valid JSON") from error
     if not isinstance(value, dict):
+        if response.status_code == 403:
+            raise DifyKnowledgeForbiddenError("knowledge_forbidden")
+        response.raise_for_status()
         raise KnowledgeSyncError("provider response must be an object")
+    if response.status_code == 403:
+        safe_code = classify_dify_knowledge_error(response)
+        error_type = _DIFY_CLASSIFICATION_ERRORS.get(safe_code or "")
+        if error_type is None or safe_code is None:
+            raise DifyKnowledgeForbiddenError("knowledge_forbidden")
+        raise error_type(safe_code)
+    response.raise_for_status()
     return value
 
 
@@ -986,7 +1101,7 @@ def synchronize_knowledge(
             {
                 "document_id": document_ids[item.source_id],
                 "metadata_list": [
-                    {"id": field_ids[name], "value": values[name]}
+                    {"id": field_ids[name], "name": name, "value": values[name]}
                     for name in _REQUIRED_METADATA_FIELDS
                 ],
             }
@@ -1005,7 +1120,21 @@ def synchronize_knowledge(
     dataset_payload = _response_json(
         client.get(f"datasets/{dataset_id}", headers=headers), response_hashes
     )
-    config = _config_from_dataset(dataset_payload)
+    config_document_id = document_ids[local_items[0].source_id]
+    document_payload = _response_json(
+        client.get(
+            f"datasets/{dataset_id}/documents/{config_document_id}",
+            headers=headers,
+            params={"metadata": "without"},
+        ),
+        response_hashes,
+    )
+    config = _config_from_dataset(
+        {
+            **dataset_payload,
+            "process_rule": document_payload.get("dataset_process_rule"),
+        }
+    )
     readback_remote = list_remote_documents(
         client, dataset_id, headers, response_hashes=response_hashes
     )

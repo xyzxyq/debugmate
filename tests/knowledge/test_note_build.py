@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from debugmate.contracts import ErrorCategory
 from debugmate.knowledge.build import ImmutableBuildCollision, build_knowledge
 from debugmate.knowledge.models import KnowledgeSource, SourceRegistry
-from debugmate.knowledge.note_builder import NoteSummarizer
+from debugmate.knowledge.note_builder import NoteSummarizer, _short_text
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -108,6 +108,15 @@ def test_note_has_source_anchors_and_never_copies_full_page(
     assert "<html" not in note.markdown
     assert "Documentation footer" not in note.markdown
     assert note.content_sha256 == hashlib.sha256(note.markdown.encode()).hexdigest()
+
+
+def test_short_text_collapses_fenced_commands_without_backtick_delimiters() -> None:
+    source = "Install like so:\n```\npython -m pip install -r requirements.txt\n```"
+
+    rendered = _short_text(source, 600)
+
+    assert "`" not in rendered
+    assert "python -m pip install -r requirements.txt" in rendered
 
 
 class _InvalidSummarizer(NoteSummarizer):

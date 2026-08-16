@@ -15,7 +15,7 @@ from debugmate.knowledge.extractor import ExtractedSection
 from debugmate.knowledge.fetcher import FetchedSource
 from debugmate.knowledge.models import KnowledgeSource, StrictKnowledgeModel
 
-NOTE_GENERATOR_VERSION: Final = "1.0.2"
+NOTE_GENERATOR_VERSION: Final = "1.0.3"
 MAX_NOTE_BYTES: Final = 32_000
 MAX_SECTIONS_PER_NOTE: Final = 8
 MAX_SNIPPET_CHARACTERS: Final = 600
@@ -50,7 +50,17 @@ def _frontmatter_value(value: str) -> str:
 
 
 def _short_text(text: str, limit: int) -> str:
-    normalized = re.sub(r"\s+", " ", text).strip()
+    def inline_fence(match: re.Match[str]) -> str:
+        code = re.sub(r"\s+", " ", match.group(1)).strip()
+        return code
+
+    inline_code = re.sub(
+        r"```\s*(.*?)\s*```",
+        inline_fence,
+        text,
+        flags=re.DOTALL,
+    ).replace("`", "")
+    normalized = re.sub(r"\s+", " ", inline_code).strip()
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: limit - 1].rstrip()}…"

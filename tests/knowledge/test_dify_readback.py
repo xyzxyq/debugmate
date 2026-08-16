@@ -11,11 +11,16 @@ from debugmate.cli import main
 from debugmate.knowledge.build import build_knowledge
 from debugmate.knowledge.models import load_registry
 from debugmate.knowledge.sync import (
+    DifyDocumentCapacityError,
+    DifyKnowledgeForbiddenError,
+    DifyKnowledgeRateLimitError,
     DifyReadbackAttestation,
     DifySyncConfig,
+    DifyVectorCapacityError,
     KnowledgeSyncError,
     MissingDatasetKey,
     SyncConfirmationRequired,
+    inspect_dify_knowledge_error,
     list_remote_documents,
     synchronize_knowledge,
 )
@@ -158,6 +163,96 @@ def test_paginated_inventory_collects_all_pages_and_rejects_duplicates() -> None
         list_remote_documents(client, "dataset", {"Authorization": "Bearer key"}, page_size=1)
 
 
+@pytest.mark.parametrize(
+    ("message", "error_type", "safe_code"),
+    [
+        (
+            "Sorry, you have reached the knowledge base request rate limit of your subscription.",
+            DifyKnowledgeRateLimitError,
+            "knowledge_request_rate_limited",
+        ),
+        (
+            "The number of documents has reached the limit of your subscription.",
+            DifyDocumentCapacityError,
+            "document_capacity_exceeded",
+        ),
+        (
+            "The capacity of the vector space has reached the limit of your subscription.",
+            DifyVectorCapacityError,
+            "vector_capacity_exceeded",
+        ),
+    ],
+)
+def test_dify_forbidden_responses_receive_distinct_safe_classifications(
+    message: str,
+    error_type: type[KnowledgeSyncError],
+    safe_code: str,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"message": message})
+
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)
+        ) as client,
+        pytest.raises(error_type) as captured,
+    ):
+        list_remote_documents(client, "dataset", {"Authorization": "Bearer key"})
+
+    assert str(captured.value) == safe_code
+    assert message not in str(captured.value)
+
+
+def test_unknown_dify_forbidden_response_never_leaks_provider_text() -> None:
+    secret = "SECRET_SENTINEL_DO_NOT_LOG"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"message": f"unclassified provider text {secret}"})
+
+    with (
+        httpx.Client(
+            base_url="https://api.dify.ai/v1/", transport=httpx.MockTransport(handler)
+        ) as client,
+        pytest.raises(DifyKnowledgeForbiddenError) as captured,
+    ):
+        list_remote_documents(client, "dataset", {"Authorization": "Bearer key"})
+
+    assert str(captured.value) == "knowledge_forbidden"
+    assert secret not in str(captured.value)
+
+
+def test_safe_dify_error_inspection_accepts_only_bounded_codes_and_shapes() -> None:
+    secret = "SECRET_SENTINEL_DO_NOT_LOG"
+    response = httpx.Response(
+        403,
+        json={
+            "code": "knowledge_rate_limited",
+            "message": f"drifted provider text {secret}",
+            secret: secret,
+        },
+    )
+
+    inspection = inspect_dify_knowledge_error(response)
+    serialized = json.dumps(inspection, sort_keys=True)
+
+    assert inspection["classification"] == "knowledge_request_rate_limited"
+    assert inspection["safe_code"] == "knowledge_rate_limited"
+    assert inspection["top_level_keys"] == ["code", "message"]
+    assert len(str(inspection["shape_sha256"])) == 64
+    assert len(str(inspection["body_sha256"])) == 64
+    assert secret not in serialized
+
+
+@pytest.mark.parametrize("unsafe_code", ["UPPERCASE", "contains space", "x" * 65, 123])
+def test_safe_dify_error_inspection_rejects_unbounded_codes(unsafe_code: object) -> None:
+    inspection = inspect_dify_knowledge_error(
+        httpx.Response(403, json={"error_code": unsafe_code, "message": "private"})
+    )
+
+    assert inspection["safe_code"] is None
+    assert inspection["classification"] == "knowledge_forbidden"
+
+
 def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads_back(
     tmp_path: Path,
 ) -> None:
@@ -198,6 +293,18 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
             )
         if request.method == "GET" and path.endswith("/metadata"):
             return httpx.Response(200, json={"doc_metadata": fields})
+        if request.method == "GET" and "/documents/doc-" in path:
+            return httpx.Response(
+                200,
+                json={
+                    "dataset_process_rule": {
+                        "mode": "custom",
+                        "rules": {
+                            "segmentation": {"max_tokens": 800, "chunk_overlap": 120}
+                        },
+                    }
+                },
+            )
         if request.method == "POST" and path.endswith("/metadata") and "/documents/" not in path:
             payload = json.loads(request.content)
             field = {"id": f"field-{len(fields)}", "name": payload["name"], "type": payload["type"]}
@@ -205,6 +312,10 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
             return httpx.Response(200, json=field)
         if request.method == "POST" and path.endswith("/documents/metadata"):
             for operation in json.loads(request.content)["operation_data"]:
+                for item in operation["metadata_list"]:
+                    assert item["name"] == next(
+                        field["name"] for field in fields if field["id"] == item["id"]
+                    )
                 pending_metadata[operation["document_id"]] = operation["metadata_list"]
             for document in documents:
                 document["doc_metadata"] = [
@@ -228,9 +339,6 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
                         "top_k": 3,
                         "score_threshold_enabled": True,
                         "score_threshold": 0.5,
-                    },
-                    "process_rule": {
-                        "rules": {"segmentation": {"max_tokens": 800, "chunk_overlap": 120}}
                     },
                 },
             )
