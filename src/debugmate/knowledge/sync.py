@@ -967,7 +967,11 @@ def _readback_manifest(
         raw = raw_by_id.get(remote.document_id)
         if expected is None or raw is None or expected.source_metadata is None:
             raise KnowledgeSyncError("readback contains an unexpected document")
-        values = _metadata_values(raw.get("doc_metadata"))
+        values = {
+            name: value
+            for name, value in _metadata_values(raw.get("doc_metadata")).items()
+            if name in _REQUIRED_METADATA_FIELDS
+        }
         if values != _metadata_for_item(expected, plan.build_id):
             raise KnowledgeSyncError("remote metadata does not exactly match sealed build")
         result.append(
@@ -1119,24 +1123,37 @@ def synchronize_knowledge(
     if metadata_result.get("result") != "success":
         raise KnowledgeSyncError("metadata batch update failed")
 
-    dataset_payload = _response_json(
-        client.get(f"datasets/{dataset_id}", headers=headers), response_hashes
-    )
     config_document_id = document_ids[local_items[0].source_id]
-    document_payload = _response_json(
-        client.get(
-            f"datasets/{dataset_id}/documents/{config_document_id}",
-            headers=headers,
-            params={"metadata": "without"},
-        ),
-        response_hashes,
-    )
-    config = _config_from_dataset(
-        {
-            **dataset_payload,
-            "process_rule": document_payload.get("dataset_process_rule"),
-        }
-    )
+    config: DifySyncConfig | None = None
+    config_error: KnowledgeSyncError | None = None
+    for attempt in range(3):
+        dataset_payload = _response_json(
+            client.get(f"datasets/{dataset_id}", headers=headers), response_hashes
+        )
+        document_payload = _response_json(
+            client.get(
+                f"datasets/{dataset_id}/documents/{config_document_id}",
+                headers=headers,
+                params={"metadata": "without"},
+            ),
+            response_hashes,
+        )
+        try:
+            config = _config_from_dataset(
+                {
+                    **dataset_payload,
+                    "process_rule": document_payload.get("dataset_process_rule"),
+                }
+            )
+            break
+        except KnowledgeSyncError as error:
+            config_error = error
+            if attempt < 2:
+                sleep(2.0)
+    if config is None:
+        raise KnowledgeSyncError(
+            "dataset configuration readback did not stabilize"
+        ) from config_error
     readback_remote = list_remote_documents(
         client, dataset_id, headers, response_hashes=response_hashes
     )
