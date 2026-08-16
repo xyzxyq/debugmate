@@ -333,12 +333,13 @@ def test_full_seventeen_source_sync_polls_then_writes_metadata_and_exactly_reads
             return httpx.Response(
                 200,
                 json={
-                    "indexing_technique": "high_quality",
+                    "indexing_technique": "economy",
                     "retrieval_model_dict": {
-                        "search_method": "semantic_search",
+                        "search_method": "keyword_search",
                         "top_k": 3,
-                        "score_threshold_enabled": True,
+                        "score_threshold_enabled": False,
                         "score_threshold": 0.5,
+                        "reranking_enable": True,
                     },
                 },
             )

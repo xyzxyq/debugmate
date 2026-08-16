@@ -202,7 +202,11 @@ def test_sync_plan_and_request_carry_source_metadata_and_fixed_dify_config(
     assert plan.document_count == 1
     assert plan.config.chunk_size == 800
     assert plan.config.chunk_overlap == 120
-    assert plan.config.retrieval_method == "semantic_search"
+    assert plan.config.indexing_technique == "economy"
+    assert plan.config.retrieval_method == "keyword_search"
+    assert plan.config.top_k == 3
+    assert plan.config.score_threshold_enabled is False
+    assert plan.config.score_threshold == 0.5
     assert plan.creates[0].source_metadata.product == "python"
     assert plan.creates[0].source_metadata.source_sha256 == build.notes[0].source_sha256
 
@@ -229,7 +233,14 @@ def test_sync_plan_and_request_carry_source_metadata_and_fixed_dify_config(
         "max_tokens": 800,
         "chunk_overlap": 120,
     }
-    assert payload["retrieval_model"]["search_method"] == "semantic_search"
+    assert payload["indexing_technique"] == "economy"
+    assert payload["retrieval_model"] == {
+        "search_method": "keyword_search",
+        "reranking_enable": True,
+        "top_k": 3,
+        "score_threshold_enabled": False,
+        "score_threshold": 0.5,
+    }
 
 
 def test_remote_readback_strictly_compares_count_metadata_hashes_and_config(
