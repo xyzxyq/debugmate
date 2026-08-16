@@ -69,11 +69,12 @@ class DifySyncConfig(StrictKnowledgeModel):
 
     chunk_size: Literal[800] = CHUNK_SIZE
     chunk_overlap: Literal[120] = CHUNK_OVERLAP
-    indexing_technique: Literal["high_quality"] = "high_quality"
-    retrieval_method: Literal["semantic_search"] = "semantic_search"
+    indexing_technique: Literal["economy"] = "economy"
+    retrieval_method: Literal["keyword_search"] = "keyword_search"
     top_k: Literal[3] = 3
-    score_threshold_enabled: Literal[True] = True
+    score_threshold_enabled: Literal[False] = False
     score_threshold: Literal[0.5] = 0.5
+    reranking_enable: Literal[True] = True
 
 
 class SourceSyncMetadata(StrictKnowledgeModel):
@@ -616,7 +617,7 @@ def _dify_document_payload(
         },
         "retrieval_model": {
             "search_method": config.retrieval_method,
-            "reranking_enable": False,
+            "reranking_enable": config.reranking_enable,
             "top_k": config.top_k,
             "score_threshold_enabled": config.score_threshold_enabled,
             "score_threshold": config.score_threshold,
@@ -998,6 +999,7 @@ def _config_from_dataset(payload: dict[str, object]) -> DifySyncConfig:
             top_k=retrieval.get("top_k"),
             score_threshold_enabled=retrieval.get("score_threshold_enabled"),
             score_threshold=retrieval.get("score_threshold"),
+            reranking_enable=retrieval.get("reranking_enable"),
         )
     except Exception as error:
         raise KnowledgeSyncError("dataset configuration does not match fixed contract") from error
