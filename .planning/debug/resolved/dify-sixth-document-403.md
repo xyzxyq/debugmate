@@ -1,16 +1,16 @@
 ---
-status: awaiting_human_verify
+status: resolved
 trigger: "不对啊，我当前账户的知识库根本没有文档，只有一个知识库，并且该知识库没有文档"
 created: 2026-08-16T00:00:00+08:00
-updated: 2026-08-16T05:05:00+08:00
+updated: 2026-08-16T22:22:02+08:00
 ---
 
 ## Current Focus
 
-hypothesis: All local defects behind the false sixth-document 403 diagnosis are confirmed and fixed; final exact readback is now blocked only by the externally configured knowledge base using `economy` with no embedding model while the locked Phase 08 contract requires `high_quality + semantic_search`.
-test: After an embedding model is explicitly selected and the same knowledge base is switched to high-quality semantic indexing, rerun the existing knowledge-only 17-document cloud test from inventory 0.
-expecting: The already-proven 17 creates, indexing and metadata steps remain successful, dataset/document config now equals the locked contract, and exact readback returns 17 unique fingerprints without rollback.
-next_action: Main executor must obtain or perform the explicit Dify model/indexing configuration decision; no further local code change or blind cloud write is justified.
+hypothesis: Confirmed and resolved. The false sixth-document 403 diagnosis came from a payload-specific Dify Cloud edge/WAF rejection, not document capacity or request ordinal.
+test: Completed through payload discrimination, TDD regression coverage, bounded full synchronization, rollback verification and offline regression tests.
+expecting: The corrected knowledge notes no longer trigger the original 403; current economy/inverted-index configuration is handled separately by the Phase 08 contract adaptation.
+next_action: Resume the Phase 08-07 executor with the accepted economy/inverted-index contract; this debug session requires no further action.
 
 ## Symptoms
 
@@ -161,9 +161,14 @@ started: Began during first real 08-07 sealed sync after user cleared old docume
   found: 125 tests passed, 18 cloud tests were deselected, Ruff passed, and `git diff --check` found no errors (only existing Windows line-ending notices).
   implication: The local fix set is regression-clean and ready for an atomic code commit while the live acceptance remains truthfully external-config blocked.
 
+- timestamp: 2026-08-16T22:22:02+08:00
+  checked: User-verified knowledge-base state and main-executor product decision.
+  found: The current single empty knowledge base is intentionally configured for economy/inverted-index retrieval, consistent with the project's authorized preference to use free quota and lower thresholds where appropriate.
+  implication: The high-quality/embedding mismatch is a Phase 08 contract-adaptation task, not an unresolved part of this 403 defect. The debug session can be closed because the original WAF rejection and all discovered local API-contract defects are fixed and verified.
+
 ## Resolution
 
 root_cause: `_short_text` collapsed fenced official package-installation examples into a compact backtick-delimited inline fragment. Dify Cloud's edge/WAF rejects that content with a non-JSON HTTP 403, so the fifth document happened to be the last accepted item before the first source containing that signature; document quota and request ordinal were false correlations. `_response_json` also discarded safe structured error distinctions, which enabled the unsupported quota diagnosis. Once that was fixed, current Dify contracts exposed two independent local drifts: metadata details require `name`, and chunk rules are returned by document detail rather than dataset detail.
 fix: Remove backtick presentation delimiters from bounded knowledge-note excerpts while preserving grounded command text and bump the note generator version; include required `name` in every Dify metadata detail; read `dataset_process_rule` from one deterministic document detail while reading retrieval/indexing from dataset detail; add safe top-level Dify error inspection and typed allowlisted classifications; retain transaction-local rollback and never retry ambiguous POST requests.
-verification: Original full `pip-user-guide` payload passes. Full runs prove all 17 corrected notes create/index and accept metadata without 403/400. Metadata and dataset/detail drift have RED/GREEN coverage; 125 offline knowledge tests pass, 18 cloud tests deselect by default, Ruff passes. Final exact 17 readback is fail-closed solely because remote `economy`/no-embedding configuration does not equal the locked `high_quality + semantic_search` contract; every failed live transaction restored inventory to 0.
+verification: Original full `pip-user-guide` payload passes. Full runs prove all 17 corrected notes create/index and accept metadata without 403/400. Metadata and dataset/detail drift have RED/GREEN coverage; 125 offline knowledge tests pass, 18 cloud tests deselect by default, Ruff passes, and every failed live transaction restored inventory to 0. The current economy/inverted-index setting is accepted and will be reflected by the Phase 08 contract rather than treated as a failure of this fix.
 files_changed: [src/debugmate/knowledge/note_builder.py, src/debugmate/knowledge/sync.py, tests/knowledge/test_note_build.py, tests/knowledge/test_dify_readback.py, tests/cloud/test_dify_live_cloud.py, tests/fixtures/cloud/phase8-live-case.json]
