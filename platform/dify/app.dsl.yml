@@ -1057,7 +1057,8 @@ workflow:
                       return []
               if isinstance(value, list):
                   return value
-              records = as_dict(value).get("records", [])
+              container = as_dict(value)
+              records = container.get("records", container.get("result", []))
               return records if isinstance(records, list) else []
 
 

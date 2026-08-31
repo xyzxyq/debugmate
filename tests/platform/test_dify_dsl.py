@@ -126,7 +126,7 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     assert "locator_from_content" in sanitizer_code
     assert "retrieval_records" in sanitizer_code
     assert "source_url_from_metadata" in sanitizer_code
-    assert 'get("records", [])' in sanitizer_code
+    assert 'get("records", container.get("result", []))' in sanitizer_code
     assert "retrieved_chunks_json" in sanitizer_code
     assert sanitizer_data["outputs"]["retrieved_chunks_json"]["type"] == "string"
     assert envelope_data is not None
@@ -270,6 +270,31 @@ def test_dify_workflow_records_use_metadata_doc_metadata_and_markdown_url() -> N
     hit = result["retrieval_trace"]["hits"][0]
     assert hit["source_url"] == "https://docs.python.org/3/library/venv.html"
     assert hit["locator"] == "#creating-virtual-environments"
+
+    wrapped_result = namespace["main"](
+        {
+            "result": [
+                {
+                    "metadata": {
+                        "segment_id": "segment-python-venv-7",
+                        "document_name": "python-venv",
+                        "doc_metadata": {
+                            "source_id": "python-venv",
+                            "source_url": "https://docs.python.org/3/library/venv.html",
+                            "knowledge_build_id": (
+                                "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+                            ),
+                        },
+                    },
+                    "title": "python-venv",
+                    "content": "- #creating-virtual-environments: official note",
+                    "score": 0.8,
+                }
+            ]
+        },
+        "case_00000000000000000000000000000001",
+    )
+    assert len(wrapped_result["retrieval_trace"]["hits"]) == 1
 
 
 def test_dify_safety_sink_rejects_unsupported_install_recommendation() -> None:
