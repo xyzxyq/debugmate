@@ -41,7 +41,7 @@ Phase 9 已完成：四案例严格合同、V1–V4 同案例绑定、当前证�
 - Phase 8 标准代码审查 iteration 2 为 clean；4 个 Warning 已全部原子修复。安全审计关闭 25/25 条登记威胁，OPEN 0；Nyquist 审计确认 14/14 executed tasks 均有直接自动化覆盖。
 - Phase 9 聚焦回归为 60 passed，scope/privacy gate passed；四案例账本明确记录 0 个 Phase 10 eligible source，不扩写未验证的云端输出。
 - Phase 10 已重新生成 PPTX、MP4、SRT、asset manifest 和 video manifest，并完成解压/播放/字幕/哈希/隐私自动检查。
-- 本轮首次 GitHub 同步提交为 `98848fc`；最终提交将在全部回归完成后再次推送并校验远端一致。
+- 本轮首次 GitHub 同步提交为 `98848fc`；全部回归完成后的最终收尾提交为 `b2bc610`，本地与 GitHub `master` 已校验一致。
 
 ## Remaining UAT Debt
 
