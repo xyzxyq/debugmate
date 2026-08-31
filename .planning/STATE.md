@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
 status: Phase 08 live acceptance awaiting user configuration
-last_updated: "2026-08-11T18:00:00+08:00"
+last_updated: "2026-08-31T19:45:00+08:00"
 progress:
   total_phases: 10
   completed_phases: 7
@@ -16,9 +16,9 @@ progress:
 
 ## Current Position
 
-Phase: 08 (dify-unified-live-chain) — 08-01 至 08-06 COMPLETE，08-07 BLOCKED
+Phase: 08 (dify-unified-live-chain) — 08-01 至 08-06 COMPLETE，08-07 PARTIAL/BLOCKED
 Plan: 6 of 7；Phase 09 已提前完成 09-01 与 09-02，09-03 依赖 08-07
-DebugMate V0.1 已完成 Phase 1–7。Phase 8 的离线合同、知识同步、Dify 适配、后端 provenance、实时编排、受控修复和 UI/service 接线已完成；唯一未执行项是 08-07 的真实 Dify Knowledge readback、当前应用同次 run、Edge 与 TTS 最终证据晋升。
+DebugMate V0.1 已完成 Phase 1–7。Phase 8 的离线合同、知识同步、Dify 适配、后端 provenance、实时编排、受控修复和 UI/service 接线已完成；08-07 已完成真实 17 源 readback、当前 PNG 上传调用、零跳过 cloud/Edge runner 和安全闸门。本次真实调用证明远端应用仍返回旧版 `diagnosis` 而非新版 `run_envelope`，因此最终 Edge/TTS/ZIP 证据尚未晋升。
 
 GSD 文件记账：现场共有 39 份阶段 PLAN 和 37 份对应 SUMMARY；未完成的两份是 `08-07` 与依赖它的 `09-03`。阶段完成度仍为 7/10（70%），不得在真实云端验收前把 Phase 8 或 Phase 9 标为 complete。
 
@@ -40,10 +40,11 @@ Phase 9 的离线 Wave 1–2 已完成：四案例严格合同、V1–V4 同案�
 - Phase 8 08-01～08-06 默认离线回归最新为 1107 passed、58 deselected、0 failed；计划级聚焦门禁与 Ruff 全绿。
 - Phase 8 标准代码审查 iteration 2 为 clean；4 个 Warning 已全部原子修复。安全审计关闭 25/25 条登记威胁，OPEN 0；Nyquist 审计确认 14/14 executed tasks 均有直接自动化覆盖。
 - Phase 9 09-01/09-02 共 47 个 evaluation 聚焦测试通过；所有 Phase 10 媒体路径仍由冻结门禁保护，尚未刷新。
+- 2026-08-31 本轮新增 Phase 08 本地验收契约 23 passed、Ruff passed、冻结素材与安全范围闸门 passed；GitHub `master` 已同步至 `e8037fd`。
 
 ## Remaining UAT Debt
 
-Phase 4 的实体设备 Local SAPI 中文听验已由用户确认通过。当前唯一需要用户操作的验收前置条件是：配置 `DIFY_DATASET_API_KEY`、`DIFY_DATASET_ID` 与 `DEBUGMATE_DIFY_DIAGNOSIS_APP_CONFIGURED=1`，并完全重启 Codex 使新用户环境变量进入当前进程。
+Phase 4 的实体设备 Local SAPI 中文听验已由用户确认通过。当前环境变量已在本次 Codex 进程中就绪并已完成知识库真实 readback；剩余唯一外部操作是登录 Dify Cloud 控制台，导入并发布当前 `platform/dify/app.dsl.yml`，重新绑定同一 17 源知识库。当前浏览器会话尚未登录，API key 本身不具备 DSL 控制台发布权限。
 
 ## Course Deliverables Boundary
 
@@ -58,8 +59,8 @@ Phase 8 与 Phase 9 当前工作不修改 PPTX、视频、字幕或最终截图�
 
 ## Next Order
 
-1. 用户完成三个 Dify 环境变量配置并重启 Codex。
-2. 执行 08-07：真实 17-source readback、当前 DSL/app 同次 run、严格 DiagnosisRecord、Edge/TTS/ZIP 与证据原子晋升；随后完成 Phase 8 最终验证。
+1. 在 Dify Cloud 控制台登录，导入并发布当前 `platform/dify/app.dsl.yml`，重新绑定已回读的 17 源知识库。
+2. 执行 08-07 runner：严格 `run_envelope`、Edge、TTS/ZIP 与证据原子晋升；随后完成 Phase 8 最终验证。
 3. 执行 09-03：用 08-07 当前证据生成四案例正式 ledger，并完成 Phase 9 审查、验证与收尾。
 4. Phase 10 最后统一更新 PPTX、视频、字幕和最终截图，完成 freshness/claim/hash 与人工翻页/听验 QA。
 
