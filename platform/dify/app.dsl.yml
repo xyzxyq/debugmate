@@ -912,7 +912,11 @@ workflow:
 
 
           INSTALL_PATTERN = re.compile(
-              r"\b(?:pip(?:3)?\s+install|conda\s+install|poetry\s+add|uv\s+add)\b",
+              r"(?:\b(?:pip(?:3)?\s+install|conda\s+install|poetry\s+add|uv\s+add)\b"
+              r"|(?:通过|使用|建议|请|可|可以|直接)[^。；;\n]{0,16}"
+              r"(?:pip(?:3)?|conda|poetry|uv)[^。；;\n]{0,16}(?:安装|添加|下载)"
+              r"|(?:建议|请|可|可以|直接)?[^。；;\n]{0,8}"
+              r"(?:安装|添加|下载)[^。；;\n]{0,8}(?:此|该|这个)?模块)",
               re.IGNORECASE,
           )
 

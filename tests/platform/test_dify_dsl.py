@@ -312,6 +312,41 @@ def test_dify_safety_sink_rejects_unsupported_install_recommendation() -> None:
     assert diagnosis["support_links"] == []
 
 
+def test_dify_safety_sink_rejects_chinese_install_recommendation() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    safety = _node_by_title(payload, "安全收口")
+    safety_data = safety["data"]
+    assert isinstance(safety_data, dict)
+    namespace: dict[str, object] = {}
+    exec(safety_data["code"], namespace)
+    main = namespace["main"]
+    assert callable(main)
+
+    result = main(
+        {
+            "schema_version": "1.1.0",
+            "case_id": "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+            "category": "dependency_environment",
+            "observed_facts": [],
+            "evidence": [],
+            "support_links": [],
+            "root_cause_candidates": [],
+            "missing_information": [],
+            "checks": [],
+            "fixes": [],
+            "verification_steps": [],
+            "confidence": 0.7,
+            "limitations": [],
+            "recap_text": "建议通过pip安装此模块，然后重新运行脚本。",
+        },
+        "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+    )
+    diagnosis = result["diagnosis"]
+    assert diagnosis["recap_text"].startswith("当前已确认存在模块导入失败")
+    assert "pip" not in diagnosis["recap_text"].lower()
+
+
 def test_authoritative_dsl_exports_bounded_same_run_envelope() -> None:
     payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
     assert isinstance(payload, dict)
