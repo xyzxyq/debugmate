@@ -111,6 +111,10 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     ))
     assert retrieval_data["multiple_retrieval_config"]["top_k"] == 4
     assert retrieval_data["dataset_ids"] == []
+    assert retrieval_data["query_variable_selector"] == [
+        "1786193038905",
+        "error_text",
+    ]
 
     sanitizer_variables = sanitizer_data["variables"]
     direct_selector = [retrieval["id"], "result"]

@@ -1324,8 +1324,8 @@ workflow:
           top_k: 4
         query_attachment_selector: []
         query_variable_selector:
-        - '1786194236320'
-        - prompt_payload
+        - '1786193038905'
+        - error_text
         retrieval_mode: multiple
         selected: false
         title: 知识检索
