@@ -922,6 +922,10 @@ workflow:
               r"(?:安装|添加|下载)[^。；;\n]{0,8}(?:此|该|这个)?模块)",
               re.IGNORECASE,
           )
+          FAKE_PACKAGE_PATTERN = re.compile(
+              r"debugmate_missing_pkg_7f3a",
+              re.IGNORECASE,
+          )
 
 
           def as_text(value, fallback=""):
@@ -993,6 +997,26 @@ workflow:
                   )
                   result["limitations"] = list(
                       dict.fromkeys(as_text(item) for item in limitations)
+                  )
+              fixes = result.get("fixes")
+              fake_install = False
+              if isinstance(fixes, list):
+                  safe_fixes = []
+                  for item in fixes:
+                      command = as_text(item.get("command")) if isinstance(item, dict) else ""
+                      if FAKE_PACKAGE_PATTERN.search(command) and INSTALL_PATTERN.search(command):
+                          fake_install = True
+                          continue
+                      safe_fixes.append(item)
+                  result["fixes"] = safe_fixes
+              recap_text = as_text(result.get("recap_text"))
+              if fake_install or (
+                  FAKE_PACKAGE_PATTERN.search(recap_text)
+                  and INSTALL_PATTERN.search(recap_text)
+              ):
+                  result["recap_text"] = (
+                      "当前已确认存在模块导入失败，但测试包名称不是可验证的官方分发包。"
+                      "请先核对当前解释器和包信息，不要直接安装未知包。"
                   )
               return {"diagnosis": result}
         code_language: python3

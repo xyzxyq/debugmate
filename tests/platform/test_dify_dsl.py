@@ -427,6 +427,44 @@ def test_dify_safety_sink_rejects_wrong_knowledge_build_evidence() -> None:
     assert "pip" not in diagnosis["recap_text"].lower()
 
 
+def test_dify_safety_sink_rejects_fake_package_even_with_valid_evidence() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    safety = _node_by_title(payload, "安全收口")
+    safety_data = safety["data"]
+    assert isinstance(safety_data, dict)
+    namespace: dict[str, object] = {}
+    exec(safety_data["code"], namespace)
+    main = namespace["main"]
+    assert callable(main)
+
+    result = main(
+        {
+            "confidence": 0.95,
+            "evidence": [
+                {
+                    "knowledge_build_id": (
+                        "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+                    ),
+                }
+            ],
+            "support_links": [],
+            "root_cause_candidates": [],
+            "fixes": [
+                {
+                    "command": "pip install debugmate_missing_pkg_7f3a",
+                }
+            ],
+            "recap_text": "建议通过pip安装 debugmate_missing_pkg_7f3a。",
+        },
+        "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+    )
+    diagnosis = result["diagnosis"]
+    assert diagnosis["evidence"]
+    assert diagnosis["fixes"] == []
+    assert "debugmate_missing_pkg_7f3a" not in diagnosis["recap_text"]
+
+
 def test_authoritative_dsl_exports_bounded_same_run_envelope() -> None:
     payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
     assert isinstance(payload, dict)
