@@ -941,6 +941,13 @@ workflow:
               return records if isinstance(records, list) else []
 
 
+          def source_url_from_metadata(value):
+              value = bounded_text(value, 2000)
+              if value.startswith("[") and "](" in value and value.endswith(")"):
+                  value = value.split("](", 1)[1][:-1].strip()
+              return value
+
+
           def main(retrieval_result=None, case_id=""):
               raw_hits = retrieval_records(retrieval_result)
               hits = []
@@ -950,8 +957,10 @@ workflow:
                       continue
                   segment = as_dict(item.get("segment"))
                   document = as_dict(segment.get("document"))
+                  item_metadata = as_dict(item.get("metadata"))
                   metadata = {
-                      **as_dict(item.get("metadata")),
+                      **item_metadata,
+                      **as_dict(item_metadata.get("doc_metadata")),
                       **as_dict(segment.get("metadata")),
                       **as_dict(document.get("doc_metadata")),
                   }
@@ -965,7 +974,7 @@ workflow:
                       512,
                   )
                   source_id = bounded_text(metadata.get("source_id"), 128)
-                  source_url = bounded_text(metadata.get("source_url"), 2000)
+                  source_url = source_url_from_metadata(metadata.get("source_url"))
                   summary = bounded_text(
                       item.get("content") or segment.get("content"), 2000
                   )

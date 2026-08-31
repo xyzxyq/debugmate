@@ -122,6 +122,7 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     assert "segment.get(\"content\")" in sanitizer_code
     assert "locator_from_content" in sanitizer_code
     assert "retrieval_records" in sanitizer_code
+    assert "source_url_from_metadata" in sanitizer_code
     assert 'get("records", [])' in sanitizer_code
     envelope_code = envelope_data["code"]
     for required in (
@@ -214,6 +215,42 @@ def test_dify_segment_records_are_normalized_with_embedded_locator() -> None:
         "case_00000000000000000000000000000001",
     )
     assert len(string_result["retrieval_trace"]["hits"]) == 1
+
+
+def test_dify_workflow_records_use_metadata_doc_metadata_and_markdown_url() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    sanitizer = _node_by_title(payload, "知识证据净化")
+    sanitizer_data = sanitizer["data"]
+    assert isinstance(sanitizer_data, dict)
+    namespace: dict[str, object] = {}
+    exec(sanitizer_data["code"], namespace)
+
+    result = namespace["main"](
+        [
+            {
+                "metadata": {
+                    "segment_id": "segment-python-venv-7",
+                    "document_name": "python-venv",
+                    "doc_metadata": {
+                        "source_id": "python-venv",
+                        "source_url": "[https://docs.python.org/3/library/venv.html](https://docs.python.org/3/library/venv.html)",
+                        "knowledge_build_id": (
+                            "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+                        ),
+                    },
+                },
+                "title": "python-venv",
+                "content": "- #creating-virtual-environments：official note",
+                "score": 0.8,
+            }
+        ],
+        "case_00000000000000000000000000000001",
+    )
+    assert len(result["retrieval_trace"]["hits"]) == 1
+    hit = result["retrieval_trace"]["hits"][0]
+    assert hit["source_url"] == "https://docs.python.org/3/library/venv.html"
+    assert hit["locator"] == "#creating-virtual-environments"
 
 
 def test_authoritative_dsl_exports_bounded_same_run_envelope() -> None:
