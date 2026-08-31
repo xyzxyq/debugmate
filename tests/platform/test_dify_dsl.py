@@ -121,6 +121,7 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     assert "document.get(\"doc_metadata\")" in sanitizer_code
     assert "segment.get(\"content\")" in sanitizer_code
     assert "locator_from_content" in sanitizer_code
+    assert "retrieval_records" in sanitizer_code
     assert 'get("records", [])' in sanitizer_code
     envelope_code = envelope_data["code"]
     for required in (
@@ -184,6 +185,35 @@ def test_dify_segment_records_are_normalized_with_embedded_locator() -> None:
     assert isinstance(result, dict)
     assert len(result["retrieval_trace"]["hits"]) == 1
     assert result["retrieval_trace"]["hits"][0]["locator"] == "#the-import-system"
+
+    string_result = namespace["main"](
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "score": 0.91,
+                        "segment": {
+                            "id": "segment-python-import-40",
+                            "content": "- #the-import-system：import details",
+                            "document": {
+                                "name": "python-import",
+                                "doc_metadata": {
+                                    "source_id": "python-import",
+                                    "source_url": "https://docs.python.org/3/reference/import.html",
+                                    "knowledge_build_id": (
+                                        "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+                                    ),
+                                },
+                            },
+                        },
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        "case_00000000000000000000000000000001",
+    )
+    assert len(string_result["retrieval_trace"]["hits"]) == 1
 
 
 def test_authoritative_dsl_exports_bounded_same_run_envelope() -> None:

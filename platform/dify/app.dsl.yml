@@ -929,12 +929,20 @@ workflow:
               return ""
 
 
+          def retrieval_records(value):
+              if isinstance(value, str):
+                  try:
+                      value = json.loads(value)
+                  except (TypeError, ValueError):
+                      return []
+              if isinstance(value, list):
+                  return value
+              records = as_dict(value).get("records", [])
+              return records if isinstance(records, list) else []
+
+
           def main(retrieval_result=None, case_id=""):
-              if isinstance(retrieval_result, list):
-                  raw_hits = retrieval_result
-              else:
-                  raw_hits = as_dict(retrieval_result).get("records", [])
-                  raw_hits = raw_hits if isinstance(raw_hits, list) else []
+              raw_hits = retrieval_records(retrieval_result)
               hits = []
               seen = set()
               for item in raw_hits:
