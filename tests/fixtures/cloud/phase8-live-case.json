@@ -1,0 +1,13 @@
+{
+  "case_id": "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+  "error_text": "ModuleNotFoundError: No module named 'debugmate_missing_pkg_7f3a'",
+  "code": "import debugmate_missing_pkg_7f3a",
+  "environment": {
+    "platform": "Windows",
+    "python_version": "3.13.5"
+  },
+  "screenshot_path": "tests/fixtures/phase8/terminal-module-not-found-redacted.png",
+  "screenshot_sha256": "3989af7ccc015c3652397f4dddff2de8b88fc6bbc51163159f1ae25bca7e4047",
+  "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff",
+  "knowledge_content_sha256": "99e1cb67af4fc982d14a4fcfbb962087549439597e4395275cf502d2f45c39df"
+}
