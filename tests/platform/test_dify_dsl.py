@@ -127,6 +127,15 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     assert "retrieval_records" in sanitizer_code
     assert "source_url_from_metadata" in sanitizer_code
     assert 'get("records", [])' in sanitizer_code
+    assert "retrieved_chunks_json" in sanitizer_code
+    assert sanitizer_data["outputs"]["retrieved_chunks_json"]["type"] == "string"
+    assert envelope_data is not None
+    assert payload["workflow"]["graph"]["nodes"]
+    llm = _node_by_title(payload, "LLM")
+    llm_data = llm["data"]
+    assert llm_data["context"]["enabled"] is False
+    assert "{{#context#}}" not in llm_data["prompt_template"][1]["text"]
+    assert "1786200000001.retrieved_chunks_json" in llm_data["prompt_template"][1]["text"]
     safety_code = safety_data["code"]
     assert "INSTALL_PATTERN" in safety_code
     assert "当前没有可追溯知识证据" in safety_code

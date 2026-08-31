@@ -285,10 +285,8 @@ workflow:
       zIndex: 0
     - data:
         context:
-          enabled: true
-          variable_selector:
-          - '1786200000001'
-          - retrieved_chunks
+          enabled: false
+          variable_selector: []
         model:
           completion_params:
             temperature: 0
@@ -336,7 +334,7 @@ workflow:
 
             以下是专属知识库的检索结果，只能作为可追溯证据使用：
 
-            {{#context#}}
+            {{#1786200000001.retrieved_chunks_json#}}
 
             如果上下文为空，不得虚构 evidence。
 
@@ -1161,8 +1159,12 @@ workflow:
                   ).hexdigest(),
                   "hits": hits,
               }
+              retrieved_chunks_json = json.dumps(
+                  hits, ensure_ascii=False, separators=(",", ":")
+              )
               return {
                   "retrieved_chunks": hits,
+                  "retrieved_chunks_json": retrieved_chunks_json,
                   "retrieval_trace": retrieval_trace,
               }
         code_language: python3
@@ -1173,6 +1175,9 @@ workflow:
           retrieved_chunks:
             children: null
             type: array[object]
+          retrieved_chunks_json:
+            children: null
+            type: string
         selected: false
         title: 知识证据净化
         type: code
