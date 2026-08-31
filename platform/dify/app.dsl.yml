@@ -911,6 +911,9 @@ workflow:
           import re
 
 
+          EXPECTED_KNOWLEDGE_BUILD_ID = "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+
+
           INSTALL_PATTERN = re.compile(
               r"(?:\b(?:pip(?:3)?\s+install|conda\s+install|poetry\s+add|uv\s+add)\b"
               r"|(?:通过|使用|建议|请|可|可以|直接)[^。；;\n]{0,16}"
@@ -943,8 +946,18 @@ workflow:
                       diagnosis = {}
               result = dict(diagnosis) if isinstance(diagnosis, dict) else {}
               evidence = result.get("evidence")
-              has_evidence = isinstance(evidence, list) and bool(evidence)
+              has_evidence = (
+                  isinstance(evidence, list)
+                  and bool(evidence)
+                  and all(
+                      isinstance(item, dict)
+                      and item.get("knowledge_build_id")
+                      == EXPECTED_KNOWLEDGE_BUILD_ID
+                      for item in evidence
+                  )
+              )
               if not has_evidence:
+                  result["evidence"] = []
                   result["confidence"] = min(as_score(result.get("confidence")), 0.70)
                   result["support_links"] = []
                   safe_candidates = []
@@ -1164,8 +1177,12 @@ workflow:
                   ).hexdigest(),
                   "hits": hits,
               }
+              prompt_hits = [
+                  dict(hit, knowledge_build_id=build_id)
+                  for hit in hits
+              ]
               retrieved_chunks_json = json.dumps(
-                  hits, ensure_ascii=False, separators=(",", ":")
+                  prompt_hits, ensure_ascii=False, separators=(",", ":")
               )
               return {
                   "retrieved_chunks": hits,

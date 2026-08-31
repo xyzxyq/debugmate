@@ -132,6 +132,8 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     assert "source_url_from_metadata" in sanitizer_code
     assert 'get("records", container.get("result", []))' in sanitizer_code
     assert "retrieved_chunks_json" in sanitizer_code
+    assert "prompt_hits" in sanitizer_code
+    assert "knowledge_build_id=build_id" in sanitizer_code
     assert sanitizer_data["outputs"]["retrieved_chunks_json"]["type"] == "string"
     assert envelope_data is not None
     assert payload["workflow"]["graph"]["nodes"]
@@ -299,6 +301,10 @@ def test_dify_workflow_records_use_metadata_doc_metadata_and_markdown_url() -> N
         "case_00000000000000000000000000000001",
     )
     assert len(wrapped_result["retrieval_trace"]["hits"]) == 1
+    prompt_hits = json.loads(wrapped_result["retrieved_chunks_json"])
+    assert prompt_hits[0]["knowledge_build_id"] == (
+        "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+    )
 
 
 def test_dify_safety_sink_rejects_unsupported_install_recommendation() -> None:
@@ -373,6 +379,51 @@ def test_dify_safety_sink_rejects_chinese_install_recommendation() -> None:
     )
     diagnosis = result["diagnosis"]
     assert diagnosis["recap_text"].startswith("当前已确认存在模块导入失败")
+    assert "pip" not in diagnosis["recap_text"].lower()
+
+
+def test_dify_safety_sink_rejects_wrong_knowledge_build_evidence() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    safety = _node_by_title(payload, "安全收口")
+    safety_data = safety["data"]
+    assert isinstance(safety_data, dict)
+    namespace: dict[str, object] = {}
+    exec(safety_data["code"], namespace)
+    main = namespace["main"]
+    assert callable(main)
+
+    result = main(
+        {
+            "confidence": 0.95,
+            "evidence": [
+                {
+                    "knowledge_build_id": "debugmate_knowledge_base_v1",
+                }
+            ],
+            "support_links": [{"evidence_ids": ["evidence_wrong"]}],
+            "root_cause_candidates": [
+                {
+                    "claim_kind": "grounded",
+                    "evidence_ids": ["evidence_wrong"],
+                    "confidence": 0.95,
+                    "fact_ids": [],
+                }
+            ],
+            "fixes": [
+                {
+                    "command": "pip install debugmate_missing_pkg_7f3a",
+                }
+            ],
+            "recap_text": "建议通过pip安装此模块。",
+            "limitations": [],
+        },
+        "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+    )
+    diagnosis = result["diagnosis"]
+    assert diagnosis["evidence"] == []
+    assert diagnosis["fixes"] == []
+    assert diagnosis["confidence"] == 0.70
     assert "pip" not in diagnosis["recap_text"].lower()
 
 
