@@ -13,9 +13,9 @@ DebugMate V0.1 以“尽快形成完整课程作品”为目标。前三阶段�
 - [x] **Phase 5: 代表性案例与提示词说明** - 用 3-5 个案例说明效果、提示词优化、局限与改进。 (completed 2026-07-19)
 - [x] **Phase 6: 课程提交包** - 从真实运行素材生成 PPT、讲解稿、字幕和最终视频。 (completed 2026-07-19)
 - [x] **Phase 7: 真实输入与隐私预览接线** - 让普通 Gradio 页面接受真实文本、代码、环境和截图，并复用本地脱敏、预览与审批合同。 (completed 2026-08-09)
-- [~] **Phase 8: Dify 统一实时诊断链** - 17 源 readback、本地零跳过 runner、安全闸门与当前 DSL 已完成；待 Dify 控制台重新发布后完成同次 `run_envelope`、Edge、TTS/ZIP 证据晋升。
-- [ ] **Phase 9: 当前代表案例与提示词证据** - 用当前实现重跑 3–5 个代表案例并形成 V1–V4 同案例对照、隐私与一致性证据。
-- [ ] **Phase 10: 最终课程提交包刷新** - 最后统一刷新真实截图、PPTX、讲解稿、字幕、视频和全部材料 manifest，并完成最终 QA。
+- [x] **Phase 8: Dify 统一实时诊断链** - 17 源 readback、严格 `run_envelope`、检索版本绑定、Edge 本地降级、TTS/ZIP 产物和安全证据已完成；远端浏览器节点的超时/旧契约响应保留为明确限制。 (completed 2026-08-31, core passed with explicit fallback)
+- [x] **Phase 9: 当前代表案例与提示词证据** - 已形成 4 个案例、V1–V4 同输入账本、引用/隐私/限制和 Phase 10 来源清单；无证据的 provider 输出保持 blocked。 (completed 2026-08-31)
+- [x] **Phase 10: 最终课程提交包刷新** - 已按当前事实口径重新生成 PPTX、MP4、SRT、asset/video manifest 并完成自动格式、字幕、哈希和安全检查。 (completed 2026-08-31)
 
 ## Phase Details
 
@@ -175,9 +175,9 @@ DebugMate V0.1 以“尽快形成完整课程作品”为目标。前三阶段�
 | 5. 代表性案例与提示词说明 | 1/1 | Complete | 2026-07-19 |
 | 6. 课程提交包 | 1/1 | Complete | 2026-07-19 |
 | 7. 真实输入与隐私预览接线 | 5/5 | Complete    | 2026-08-09 |
-| 8. Dify 统一实时诊断链 | 0/0 | Pending | — |
-| 9. 当前代表案例与提示词证据 | 0/0 | Pending | — |
-| 10. 最终课程提交包刷新 | 0/0 | Pending | — |
+| 8. Dify 统一实时诊断链 | 1/1 | Complete with explicit fallback | 2026-08-31 |
+| 9. 当前代表案例与提示词证据 | 1/1 | Complete with explicit blockers | 2026-08-31 |
+| 10. 最终课程提交包刷新 | 1/1 | Complete | 2026-08-31 |
 
 ---
 *Roadmap created: 2026-07-10*  

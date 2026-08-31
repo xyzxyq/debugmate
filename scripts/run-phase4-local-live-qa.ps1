@@ -2,6 +2,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 function Test-LoopbackPortClosed {
     param([Parameter(Mandatory)][ValidateRange(1, 65535)][int]$Port)

@@ -2,6 +2,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 function Get-Phase7ExpectedInventory {
     return @(

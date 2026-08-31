@@ -1,0 +1,191 @@
+{
+  "envelope_version": "1.0.0",
+  "case_id": "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+  "diagnosis": {
+    "schema_version": "1.1.0",
+    "case_id": "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+    "category": "dependency_environment",
+    "observed_facts": [
+      {
+        "fact_id": "fact_c014716b53ca379fc41508f79d205e75",
+        "field_id": "error_text",
+        "value": "ModuleNotFoundError: No module named 'debugmate_missing_pkg_7f3a'",
+        "source_kind": "vlm",
+        "confidence": 1.0,
+        "locator": "terminal_output"
+      },
+      {
+        "fact_id": "fact_c61fd6776d50bb0ccb530b0ddd59267b",
+        "field_id": "code",
+        "value": "import debugmate_missing_pkg_7f3a",
+        "source_kind": "vlm",
+        "confidence": 1.0,
+        "locator": "terminal_output"
+      },
+      {
+        "fact_id": "fact_5c2d0c8034889232defc823e0fc7b47b",
+        "field_id": "platform",
+        "value": "Windows",
+        "source_kind": "vlm",
+        "confidence": 1.0,
+        "locator": "terminal_output"
+      },
+      {
+        "fact_id": "fact_d0cb69062c59566e184713938149e7b3",
+        "field_id": "python_version",
+        "value": "3.13.5",
+        "source_kind": "vlm",
+        "confidence": 1.0,
+        "locator": "terminal_output"
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "evidence_9c02f45533f10715e6c1e994ee4dd399",
+        "chunk_id": "142f19b1327518fe367ce6aa7d862657b74ba72431c8c5bcccc8255fa360d5ae",
+        "content_summary": "- #5-the-import-system：官方“5. The import system ¶”章节记录：Python code in one module gains access to the code in another module by the process of importing it. The import statement is the most common way of invoking the import machinery, but it is not the only way. Functions such as importlib.impo…",
+        "source_id": "python-import",
+        "source_url": "https://docs.python.org/3/reference/import.html",
+        "locator": "#5-the-import-system",
+        "relevance_score": 0.18111940481369118,
+        "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+      },
+      {
+        "evidence_id": "evidence_5b8905792a742ad84da427986e1a3ad0",
+        "chunk_id": "e2e2030d27349614447c1b911ce4a83f84a503a45444c16be1cb937f6c9e0fed",
+        "content_summary": "- #5-3-searching：To begin the search, Python needs the fully qualified name of the module (or package, but for the purposes of this discussion, the difference is immaterial) being imported. This name may come from various arguments to the import statement, or from the parameters to the importlib.import_module() or __import__() functions. This name will be used in various phases of the import search, and it may be the dotted path to a submodule, e.g. foo.bar.baz . In this case, Python first tries to import foo , then foo.bar , and finally foo.bar.baz . If any of the intermediate imports fail, a ModuleNotFoundE…",
+        "source_id": "python-import",
+        "source_url": "https://docs.python.org/3/reference/import.html",
+        "locator": "#5-3-searching",
+        "relevance_score": 0.18111940481369118,
+        "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff"
+      }
+    ],
+    "support_links": [
+      {
+        "fact_ids": [
+          "fact_c014716b53ca379fc41508f79d205e75",
+          "fact_c61fd6776d50bb0ccb530b0ddd59267b"
+        ],
+        "evidence_ids": [
+          "evidence_9c02f45533f10715e6c1e994ee4dd399",
+          "evidence_5b8905792a742ad84da427986e1a3ad0"
+        ],
+        "support_type": "supports"
+      }
+    ],
+    "root_cause_candidates": [
+      {
+        "candidate_id": "candidate_903260457371573b815a8b9bc139ceb4",
+        "cause": "Python环境中缺少名为 'debugmate_missing_pkg_7f3a' 的模块。当Python尝试导入该模块时，由于无法找到它，导致抛出 `ModuleNotFoundError` 异常。",
+        "claim_kind": "grounded",
+        "fact_ids": [
+          "fact_c014716b53ca379fc41508f79d205e75",
+          "fact_c61fd6776d50bb0ccb530b0ddd59267b"
+        ],
+        "evidence_ids": [
+          "evidence_9c02f45533f10715e6c1e994ee4dd399",
+          "evidence_5b8905792a742ad84da427986e1a3ad0"
+        ],
+        "confidence": 0.95,
+        "applicability": "高",
+        "counterevidence_or_limits": "无"
+      }
+    ],
+    "missing_information": [],
+    "checks": [
+      {
+        "command": "pip show debugmate_missing_pkg_7f3a",
+        "platform": "windows_powershell",
+        "impact": "只读操作，无副作用。",
+        "expected_result": "显示模块 'debugmate_missing_pkg_7f3a' 的详细信息，如果未安装则显示找不到。",
+        "rollback": "无"
+      },
+      {
+        "command": "pip list",
+        "platform": "windows_powershell",
+        "impact": "只读操作，无副作用。",
+        "expected_result": "列出当前Python环境中所有已安装的包及其版本。",
+        "rollback": "无"
+      }
+    ],
+    "fixes": [],
+    "verification_steps": [
+      {
+        "command": "python -c \"import debugmate_missing_pkg_7f3a\"",
+        "platform": "windows_powershell",
+        "impact": "只读操作，无副作用。",
+        "expected_result": "命令执行成功，不返回任何错误信息。",
+        "rollback": "无"
+      }
+    ],
+    "confidence": 0.95,
+    "limitations": [],
+    "recap_text": "当前已确认存在模块导入失败，但测试包名称不是可验证的官方分发包。请先核对当前解释器和包信息，不要直接安装未知包。"
+  },
+  "extraction_facts": [
+    {
+      "fact_id": "fact_c014716b53ca379fc41508f79d205e75",
+      "field_id": "error_text",
+      "value": "ModuleNotFoundError: No module named 'debugmate_missing_pkg_7f3a'",
+      "source_kind": "vlm",
+      "confidence": 1.0,
+      "locator": "terminal_output"
+    },
+    {
+      "fact_id": "fact_c61fd6776d50bb0ccb530b0ddd59267b",
+      "field_id": "code",
+      "value": "import debugmate_missing_pkg_7f3a",
+      "source_kind": "vlm",
+      "confidence": 1.0,
+      "locator": "terminal_output"
+    },
+    {
+      "fact_id": "fact_5c2d0c8034889232defc823e0fc7b47b",
+      "field_id": "platform",
+      "value": "Windows",
+      "source_kind": "vlm",
+      "confidence": 1.0,
+      "locator": "terminal_output"
+    },
+    {
+      "fact_id": "fact_d0cb69062c59566e184713938149e7b3",
+      "field_id": "python_version",
+      "value": "3.13.5",
+      "source_kind": "vlm",
+      "confidence": 1.0,
+      "locator": "terminal_output"
+    }
+  ],
+  "retrieval_trace": {
+    "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff",
+    "run_fingerprint": "8d9471aa6a85d8d94098225fd390406673e3958d4def168b7ee3e0b30511538f",
+    "node_fingerprint": "6689d84d6e4f39f833b812b39a22bc27ca5956a2fa9e574a93590d9ca20793b4",
+    "hits": [
+      {
+        "chunk_fingerprint": "142f19b1327518fe367ce6aa7d862657b74ba72431c8c5bcccc8255fa360d5ae",
+        "source_id": "python-import",
+        "source_title": "python-import",
+        "source_url": "https://docs.python.org/3/reference/import.html",
+        "locator": "#5-the-import-system",
+        "content_summary": "- #5-the-import-system：官方“5. The import system ¶”章节记录：Python code in one module gains access to the code in another module by the process of importing it. The import statement is the most common way of invoking the import machinery, but it is not the only way. Functions such as importlib.impo…",
+        "relevance_score": 0.18111940481369118
+      },
+      {
+        "chunk_fingerprint": "e2e2030d27349614447c1b911ce4a83f84a503a45444c16be1cb937f6c9e0fed",
+        "source_id": "python-import",
+        "source_title": "python-import",
+        "source_url": "https://docs.python.org/3/reference/import.html",
+        "locator": "#5-3-searching",
+        "content_summary": "- #5-3-searching：To begin the search, Python needs the fully qualified name of the module (or package, but for the purposes of this discussion, the difference is immaterial) being imported. This name may come from various arguments to the import statement, or from the parameters to the importlib.import_module() or __import__() functions. This name will be used in various phases of the import search, and it may be the dotted path to a submodule, e.g. foo.bar.baz . In this case, Python first tries to import foo , then foo.bar , and finally foo.bar.baz . If any of the intermediate imports fail, a ModuleNotFoundE…",
+        "relevance_score": 0.18111940481369118
+      }
+    ]
+  },
+  "contract": {
+    "schema_version": "1.1.0",
+    "prompt_version": "diagnosis-v1",
+    "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff",
+    "dsl_semantic_sha256": "9a195fcd01c9525f15f52ee70794485c6dc09b980ac8fff6bde5314d03eb4357"
+  }
+}

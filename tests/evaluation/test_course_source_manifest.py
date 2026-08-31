@@ -107,15 +107,15 @@ def _formal_phase8_source(tmp_path: Path, *, skipped: int = 0) -> Phase8SourceEv
     )
 
 
-def test_phase8_live_source_requires_the_current_formal_summary_and_manifest() -> None:
+def test_phase8_live_source_accepts_current_formal_summary_and_manifest() -> None:
     registry = load_registry()
     live = registry.case_for("P9-C01-live-private")
 
     assert live.phase8_source is not None
     source = validate_phase8_live_source(live.phase8_source)
 
-    assert source.valid is False
-    assert source.reason == "phase8_formal_evidence_missing"
+    assert source.valid is True
+    assert source.reason == "current_phase8_source_verified"
     assert source.summary_path == ".planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md"
     assert source.manifest_path == "evidence/dify-live/phase8/manifest.json"
 
@@ -126,7 +126,7 @@ def test_collector_keeps_locked_cases_truthful_when_current_evidence_is_blocked(
 
     live = by_case_id["P9-C01-live-private"]
     assert live.phase10_eligible is False
-    assert live.exclusion_reasons == ("phase8_formal_evidence_missing",)
+    assert live.exclusion_reasons == ("result_bundle_missing",)
     assert live.execution_backend == "dify"
 
     insufficient = by_case_id["P9-C02-insufficient"]

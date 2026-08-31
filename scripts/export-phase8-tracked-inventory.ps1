@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 $root = (Resolve-Path -LiteralPath $RepositoryRoot -ErrorAction Stop).Path
 $output = [System.IO.Path]::GetFullPath($OutputPath)
 $entries = [System.Collections.Generic.List[object]]::new()

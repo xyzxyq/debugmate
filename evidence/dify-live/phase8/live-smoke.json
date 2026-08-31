@@ -1,0 +1,22 @@
+{
+  "backend": "dify",
+  "case_id_sha256": "011281a151601ec99edc16576fb44c81dfab568122eba33408afc239c148199e",
+  "dataset_fingerprint": "b6a2ef44116eb03f008b91a88749c59f65b34e782de49b7a8607b7b8ae6b3d23",
+  "diagnosis_sha256": "5375c491fa92b622a57bf057922c570ffbf8cd7fcb367db2558b97835a258ebb",
+  "dsl_semantic_sha256": "9a195fcd01c9525f15f52ee70794485c6dc09b980ac8fff6bde5314d03eb4357",
+  "image_sha256": "3989af7ccc015c3652397f4dddff2de8b88fc6bbc51163159f1ae25bca7e4047",
+  "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff",
+  "parameters_sha256": "a370a5c58d5b4c721c99822f6640659b1a4fc1788e63f494a44d26da8bbc87b3",
+  "prompt_version": "diagnosis-v1",
+  "retrieval_node_fingerprint": "6689d84d6e4f39f833b812b39a22bc27ca5956a2fa9e574a93590d9ca20793b4",
+  "retrieval_run_fingerprint": "6bd494518459ad79f28e50b7c94f6abbbd07082f455692ceb560d3efce82833e",
+  "run_fingerprint": "run_8db4fc2229666c6d7c5c2274f07c7613",
+  "schema_version": "1.0.0",
+  "upload_fingerprint": "4d5791b6481b64ed0c505588cdf425c0f87c74e9fda86da096117e50376dd5b4",
+  "usage": {
+    "elapsed_time": "not_reported",
+    "total_price": "not_reported",
+    "total_steps": "not_reported",
+    "total_tokens": "not_reported"
+  }
+}

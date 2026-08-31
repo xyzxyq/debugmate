@@ -12,9 +12,9 @@
       "expected_status": "completed",
       "actual_status": "blocked",
       "availability": {"report": false, "card": false, "recap_text": false, "audio": false, "bundle": false},
-      "privacy": {"status": "blocked", "safe_scan_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "finding_count": 0},
-      "citations": {"status": "blocked", "count": 0},
-      "limitation": "Current live evidence is blocked until the formal Phase 08 acceptance summary and manifest are published and hash-verified.",
+      "privacy": {"status": "pass", "safe_scan_sha256": "b648e096bc7c9d99b2276fe673f253e5dcd64d6baf7b3c8e3135aa87e4a9c678", "finding_count": 0},
+      "citations": {"status": "verified", "count": 2},
+      "limitation": "Dify envelope and retrieval evidence are verified; browser media was produced by an explicitly labeled local fallback after real Dify timeout or envelope failures.",
       "retry_scope": "none",
       "phase8_source": {
         "acceptance_plan": {
@@ -22,9 +22,9 @@
           "sha256": "f2d131057d2b989f3640f21931f1d45d94912e97e1a2d8a9029ba0b1b2c3bc2b"
         },
         "summary_path": {"path": ".planning/phases/08-dify-unified-live-chain/08-07-SUMMARY.md"},
-        "summary_sha256": null,
+        "summary_sha256": "f511d17897abddb94cce825b2272df98c7f97b6a851d66f35b447ff3ddd34989",
         "manifest_path": {"path": "evidence/dify-live/phase8/manifest.json"},
-        "manifest_sha256": null
+        "manifest_sha256": "62ff69c02c0d8e2836badb63f36d9e136bbdba3ce8f4c4ed03ebb0852c2711d4"
       }
     },
     {
@@ -54,9 +54,9 @@
       "expected_status": "completed",
       "actual_status": "blocked",
       "availability": {"report": false, "card": false, "recap_text": false, "audio": false, "bundle": false},
-      "privacy": {"status": "blocked", "safe_scan_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "finding_count": 0},
-      "citations": {"status": "blocked", "count": 0},
-      "limitation": "The long-content replay is registered but has not yet been regenerated into current Phase 09 evidence.",
+      "privacy": {"status": "pass", "safe_scan_sha256": "6452a9ccc770174520db764eee3ec50d9e4298c287fc64a6df72af2b42aec34d", "finding_count": 0},
+      "citations": {"status": "verified", "count": 1},
+      "limitation": "The long-content replay is current and privacy-safe, but its result bundle has not been regenerated into Phase 09 evidence.",
       "retry_scope": "none"
     },
     {

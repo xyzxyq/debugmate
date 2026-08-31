@@ -13,13 +13,14 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 - 多模态成果：文字、图像、语音均由同一 `DiagnosisRecord` 派生。
 - 提示词优化：`prompts/v1-baseline.md` 至 `prompts/v4-course-release.md`。
 - 真实成果：`evidence/course-v0.1/` 保存当前代码真实 Edge 截图和哈希清单。
-- 局限说明：Dify 在线路径受账号、额度和模型 provider 影响，录制安全路径使用明确标注的本地规则/固定回放。
+- 当前验收口径：Dify 知识库 readback 与严格 `DifyRunEnvelope` 已通过，Edge 结果包因真实 Dify 超时/契约波动采用明确标注的 `local_fallback`；不得把 fallback 媒体称为 Dify 生成。
+- 评测账本：`evidence/evaluation/phase9/` 和 `docs/course/current-evaluation.md`，保留 4 个案例、V1–V4 绑定及阻塞原因。
 
 ## 主要工具
 
 | 工具 | 功能定位 |
 |---|---|
-| Dify Cloud（可选增强） | 视觉模型、知识检索、LLM 工作流和未来在线演示 |
+| Dify Cloud（已验收检索契约） | 视觉模型、知识检索、LLM 工作流；受 provider、额度和网络影响 |
 | Python + Pydantic | 本地工作流、严格 Schema、结果一致性与证据生成 |
 | RapidOCR + Pillow | 截图文字候选与上传前像素脱敏；确定性绘制 PNG |
 | Gradio | 统一输入、隐私确认、诊断结果和下载页面 |
@@ -34,7 +35,7 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 .\.venv\Scripts\python.exe -m debugmate.ui.serve
 ```
 
-打开命令输出中的本地地址。在“固定回放案例”中选择案例并点击“加载回放案例”。页面会明确显示“离线回放”，不会伪装成云端实时调用。
+打开命令输出中的本地地址。正常演示可选择固定回放；若实时 Dify 不可用，页面明确显示“本地降级”，不会伪装成云端实时调用。
 
 ## 建议演示顺序
 
@@ -60,6 +61,6 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 ## 已知限制
 
 - 当前只有少量代表性案例，不代表覆盖全部 Python/AI 故障。
-- Dify 在线视觉与 TTS 未作为 V0.1 完成前提。
+- Dify 检索和 envelope 已有真实证据，但浏览器端工作流曾出现 `ambiguous_timeout`/结构波动；本次最终媒体包使用明确标记的本地 fallback。
 - 本地 SAPI MP3 在正式录屏前仍需人工试听一次。
 - 系统不会自动执行修复命令，建议由用户审阅后自行运行。

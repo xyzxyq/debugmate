@@ -1,31 +1,31 @@
 {
   "schema_version": "debugmate-course-assets-1.0",
-  "generated_on": "2026-07-19",
+  "generated_on": "2026-08-31",
   "pptx": {
     "path": "deliverables/DebugMate-V0.1.pptx",
-    "sha256": "3522a589932ae37cb4c6c6c0aa493cbca5773e047ffaf7ecca98f585fb6b87a9",
+    "sha256": "9c9aa4324733a0934e6803b3c5d2320b5f2464bf9b5baa45e5e2e164f7d6ac9e",
     "slides": 13
   },
   "assets": [
     {
       "path": "docs/course/README.md",
-      "bytes": 3377,
-      "sha256": "34b43aa66971d208c776e627423d08fe7f284c7323038885b7f5920534d51d0d"
+      "bytes": 3784,
+      "sha256": "737a795609791bfef4b7cf197f892793b75f294e98b8d6cee277e10b20afb6e1"
     },
     {
       "path": "docs/course/presentation-outline.md",
-      "bytes": 1040,
-      "sha256": "b688dcdbb4d6bc7380befaac9b022514094c6d0ea62e61f9ca1dc51ed2194dd4"
+      "bytes": 1055,
+      "sha256": "a382347d19b7f57766bc4e7df814d7b5b4d7d7a37b8cad552cbd2ea7bd733d4c"
     },
     {
       "path": "docs/course/video-script.md",
-      "bytes": 5375,
-      "sha256": "7ea16c867650a35bba180e18cfb6d64c2d9bf87e2b800e458053a76073ecdd4a"
+      "bytes": 5372,
+      "sha256": "45b10ab272d3795663a070418f13c11dc7b705f0fae119e819394adfab61dfec"
     },
     {
       "path": "docs/course/prompt-iteration.md",
-      "bytes": 1270,
-      "sha256": "d2fe78dabd5a0580134877a326c1ae3bcdbd3cc4d9efcacb27df996851117943"
+      "bytes": 1362,
+      "sha256": "0940905e88da61cb8c33e29966733adf065dc7ca8e03f27addd9378c0a55ef9b"
     },
     {
       "path": "evidence/course-v0.1/screenshots/01-completed-overview.png",
@@ -45,7 +45,7 @@
     {
       "path": "deliverables/DebugMate-V0.1.pptx",
       "bytes": 492927,
-      "sha256": "3522a589932ae37cb4c6c6c0aa493cbca5773e047ffaf7ecca98f585fb6b87a9"
+      "sha256": "9c9aa4324733a0934e6803b3c5d2320b5f2464bf9b5baa45e5e2e164f7d6ac9e"
     }
   ]
 }

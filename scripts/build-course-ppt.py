@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -596,7 +597,7 @@ def build() -> None:
     ]
     manifest = {
         "schema_version": "debugmate-course-assets-1.0",
-        "generated_on": "2026-07-19",
+        "generated_on": datetime.now(UTC).strftime("%Y-%m-%d"),
         "pptx": {
             "path": str(OUT.relative_to(ROOT)).replace("\\", "/"),
             "sha256": ppt_hash,

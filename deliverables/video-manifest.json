@@ -1,11 +1,11 @@
 {
   "schema_version": "debugmate-course-video-1.0",
-  "generated_on": "2026-07-19",
+  "generated_on": "2026-08-31",
   "video": {
     "path": "deliverables/DebugMate-V0.1-demo.mp4",
-    "bytes": 10469035,
-    "sha256": "78464aadd30599bbc2d6776f062b001be6022f34b56000fb0fe021cd4aaecb1b",
-    "duration_seconds": 358.923,
+    "bytes": 10388444,
+    "sha256": "4390945c1865b81a1295a9bc9ec70356b956d5742d9389f8162a09d17cc01271",
+    "duration_seconds": 355.39,
     "resolution": "1920x1080",
     "fps": 30,
     "video_codec": "h264",
@@ -15,8 +15,8 @@
   },
   "subtitles": {
     "path": "deliverables/DebugMate-V0.1-subtitles.srt",
-    "bytes": 5513,
-    "sha256": "ad9b17d0e27eb5b63d416b99c1860e44fdeab54ea727e9d3a964671f32e7552a"
+    "bytes": 5472,
+    "sha256": "7af651c54170f518d99185697ea848bcbf329043493822c3e2bd937d272089f9"
   },
   "scenes": 8,
   "source_script": "docs/course/video-script.md",

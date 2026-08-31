@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 function Invoke-GitLines {
     param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string[]]$Arguments)

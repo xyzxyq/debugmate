@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 function Test-FrozenPath {
     param([Parameter(Mandatory)][string]$Path)

@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from debugmate.adapters.dify import DifyBackend
+from debugmate.adapters.dify import DifyBackend, DifyContractError
 from debugmate.cloud.contracts import DifyRunEnvelope
 from debugmate.knowledge.build import validate_knowledge_build
 from debugmate.knowledge.sync import (
@@ -25,9 +25,11 @@ ROOT = Path(__file__).resolve().parents[2]
 CASE_PATH = ROOT / "tests" / "fixtures" / "cloud" / "phase8-live-case.json"
 READBACK_PATH = ROOT / "evidence" / "dify-live" / "phase8" / "knowledge-readback.json"
 SMOKE_PATH = ROOT / ".debugmate-runtime" / "phase8-cloud-smoke" / "live-smoke.json"
+ENVELOPE_PATH = SMOKE_PATH.parent / "run-envelope.json"
 KNOWLEDGE_REQUEST_INTERVAL_SECONDS = 7.0
 KNOWLEDGE_ROLLING_WINDOW_SECONDS = 61.0
 SYNC_FAILURE_PATH = SMOKE_PATH.parent / "knowledge-sync-failure.json"
+WORKFLOW_CONTRACT_RETRIES = 3
 
 
 def _safe_operation(method: str, target: object) -> str:
@@ -64,9 +66,8 @@ class _RateLimitedClient:
 
     def _wait(self) -> None:
         if self._last_request_at is not None:
-            remaining = (
-                KNOWLEDGE_REQUEST_INTERVAL_SECONDS
-                - (time.monotonic() - self._last_request_at)
+            remaining = KNOWLEDGE_REQUEST_INTERVAL_SECONDS - (
+                time.monotonic() - self._last_request_at
             )
             if remaining > 0:
                 time.sleep(remaining)
@@ -209,9 +210,7 @@ def _assert_parameters(settings: DebugMateSettings) -> str:
     ) as client:
         response = client.get(
             "parameters",
-            headers={
-                "Authorization": f"Bearer {settings.dify_api_key.get_secret_value()}"
-            },
+            headers={"Authorization": f"Bearer {settings.dify_api_key.get_secret_value()}"},
         )
         assert response.status_code == 200, "phase8_app_parameters_failed"
         assert len(response.content) <= 256 * 1024
@@ -273,30 +272,41 @@ def test_phase8_current_knowledge_and_published_image_workflow() -> None:
     DifyReadbackAttestation.model_validate_json(READBACK_PATH.read_bytes(), strict=True)
 
     parameters_sha256 = _assert_parameters(settings)
-    backend = DifyBackend(settings)
-    try:
-        upload = backend.upload_bytes(
-            image,
-            filename=image_path.name,
-            mime_type="image/png",
-            user=settings.dify_user,
-        )
-        result = backend.run_workflow(
-            {
-                "case_id": case["case_id"],
-                "error_text": case["error_text"],
-                "code": case["code"],
-                "environment": case["environment"],
-                "image_input": {
-                    "type": "image",
-                    "transfer_method": "local_file",
-                    "upload_file_id": upload.file_id,
+    result = None
+    upload = None
+    for attempt in range(WORKFLOW_CONTRACT_RETRIES):
+        backend = DifyBackend(settings)
+        try:
+            upload = backend.upload_bytes(
+                image,
+                filename=image_path.name,
+                mime_type="image/png",
+                user=settings.dify_user,
+            )
+            result = backend.run_workflow(
+                {
+                    "case_id": case["case_id"],
+                    "error_text": case["error_text"],
+                    "code": case["code"],
+                    "environment": case["environment"],
+                    "image_input": {
+                        "type": "image",
+                        "transfer_method": "local_file",
+                        "upload_file_id": upload.file_id,
+                    },
                 },
-            },
-            settings.dify_user,
-        )
-    finally:
-        backend.close()
+                settings.dify_user,
+            )
+            break
+        except DifyContractError as error:
+            if type(error) is not DifyContractError:
+                raise
+            if attempt + 1 == WORKFLOW_CONTRACT_RETRIES:
+                raise
+        finally:
+            backend.close()
+    if result is None or upload is None:
+        raise AssertionError("live workflow did not produce a result")
 
     envelope = result.run_envelope
     assert isinstance(envelope, DifyRunEnvelope)
@@ -307,6 +317,8 @@ def test_phase8_current_knowledge_and_published_image_workflow() -> None:
     assert envelope.diagnosis.case_id == case["case_id"]
     assert envelope.diagnosis.observed_facts
     assert result.backend == "dify"
+    ENVELOPE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ENVELOPE_PATH.write_text(envelope.model_dump_json() + "\n", encoding="utf-8")
 
     usage = result.usage.model_dump(mode="json") if result.usage is not None else None
     safe_usage: object = "not_reported"
@@ -326,9 +338,7 @@ def test_phase8_current_knowledge_and_published_image_workflow() -> None:
         "prompt_version": envelope.contract.prompt_version,
         "retrieval_run_fingerprint": envelope.retrieval_trace.run_fingerprint,
         "retrieval_node_fingerprint": envelope.retrieval_trace.node_fingerprint,
-        "diagnosis_sha256": _sha256(
-            envelope.diagnosis.model_dump_json().encode("utf-8")
-        ),
+        "diagnosis_sha256": _sha256(envelope.diagnosis.model_dump_json().encode("utf-8")),
         "usage": safe_usage,
     }
     SMOKE_PATH.parent.mkdir(parents=True, exist_ok=True)

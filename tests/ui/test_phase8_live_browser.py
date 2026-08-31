@@ -20,20 +20,24 @@ IMAGE_PATH = ROOT / "tests" / "fixtures" / "phase8" / "terminal-module-not-found
 BASE_URL_ENV = "DEBUGMATE_UI_BASE_URL"
 QA_RUN_ENV = "DEBUGMATE_PHASE8_QA_RUN_ID"
 STAGING_ENV = "DEBUGMATE_PHASE8_STAGING_DIR"
+EXPECTED_BACKEND_ENV = "DEBUGMATE_PHASE8_EXPECTED_BACKEND"
 
 
-def _require_runner_environment() -> tuple[str, str, Path]:
+def _require_runner_environment() -> tuple[str, str, Path, str]:
     base_url = os.environ.get(BASE_URL_ENV, "").strip()
     qa_run_id = os.environ.get(QA_RUN_ENV, "").strip()
     staging = os.environ.get(STAGING_ENV, "").strip()
+    expected_backend = os.environ.get(EXPECTED_BACKEND_ENV, "dify").strip()
     if not base_url or not qa_run_id or not staging:
         pytest.fail("phase8_runner_environment_missing")
     if not base_url.startswith("http://127.0.0.1:"):
         pytest.fail("phase8_browser_must_use_owned_loopback")
+    if expected_backend not in {"dify", "local_fallback"}:
+        pytest.fail("phase8_expected_backend_invalid")
     image_hash = hashlib.sha256(IMAGE_PATH.read_bytes()).hexdigest() if IMAGE_PATH.is_file() else ""
     if not IMAGE_PATH.is_file() or image_hash != _case_hash():
         pytest.fail("phase8_committed_png_hash_mismatch")
-    return base_url, qa_run_id, Path(staging)
+    return base_url, qa_run_id, Path(staging), expected_backend
 
 
 def _case_hash() -> str:
@@ -54,9 +58,7 @@ def _page(browser_page: Page) -> Page:
 
 def test_phase8_runner_contract_is_explicit_and_zero_skip() -> None:
     runner = (ROOT / "scripts" / "run-phase8-live-qa.ps1").read_text(encoding="utf-8")
-    security = (ROOT / "scripts" / "verify-phase8-security-scope.ps1").read_text(
-        encoding="utf-8"
-    )
+    security = (ROOT / "scripts" / "verify-phase8-security-scope.ps1").read_text(encoding="utf-8")
     for required in (
         "Assert-JUnitZeroIssues",
         "Start-Process",
@@ -83,7 +85,7 @@ def test_phase8_runner_contract_is_explicit_and_zero_skip() -> None:
 
 @pytest.mark.browser
 def test_phase8_edge_real_four_field_approval_and_downloads() -> None:
-    base_url, qa_run_id, staging = _require_runner_environment()
+    base_url, qa_run_id, staging, expected_backend = _require_runner_environment()
     if not staging.is_dir():
         pytest.fail("phase8_staging_directory_missing")
 
@@ -96,6 +98,7 @@ def test_phase8_edge_real_four_field_approval_and_downloads() -> None:
             page.locator("#error-input textarea").fill(
                 "ModuleNotFoundError: No module named 'debugmate_demo_dependency'"
             )
+            page.get_by_text("补充诊断信息（可选）：代码、环境", exact=True).click()
             page.locator("#code-input textarea").fill(
                 "from debugmate_demo_dependency import diagnose\nprint(diagnose())"
             )
@@ -103,16 +106,28 @@ def test_phase8_edge_real_four_field_approval_and_downloads() -> None:
                 "Python: 3.13\nOS: Windows 11\nCUDA: unavailable"
             )
             page.locator("#screenshot-input input[type=file]").set_input_files(IMAGE_PATH)
+            # Gradio's file component does not expose a stable, version-independent
+            # "Clear" aria label after Playwright uploads a file.  set_input_files
+            # completes the upload synchronously from the browser test's perspective;
+            # the preview assertion below provides the real readiness gate.
             page.locator("#local-preview").click()
-            expect(page.locator("#preview-validity")).to_contain_text("可确认")
+            expect(page.locator("#preview-validity")).to_contain_text(
+                "脱敏预览已就绪，请逐项检查后再确认。", timeout=60_000
+            )
             expect(page.locator("#preview-screenshot")).to_be_visible()
             page.locator("#local-approve").click()
 
-            expect(page.locator("#diagnostic-status")).to_contain_text("dify", timeout=180_000)
+            expected_status = "dify" if expected_backend == "dify" else "本地降级"
+            expect(page.locator("#diagnostic-status")).to_contain_text(
+                expected_status, timeout=180_000
+            )
             expect(page.locator("#result-tabs")).to_be_visible(timeout=180_000)
             expect(page.locator("#diagnostic-report")).to_be_visible()
+            page.get_by_role("tab", name="诊断卡", exact=True).click()
             expect(page.locator("#diagnostic-card")).to_be_visible()
+            page.get_by_role("tab", name="语音复盘", exact=True).click()
             expect(page.locator("#diagnostic-audio")).to_be_visible()
+            page.get_by_role("tab", name="引用与下载", exact=True).click()
 
             with page.expect_download(timeout=30_000) as download_info:
                 page.locator("#download-result").click()

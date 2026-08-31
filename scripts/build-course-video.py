@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -355,7 +356,7 @@ def build() -> None:
         raise RuntimeError(f"course video is too short: {total_duration:.3f}s")
     manifest = {
         "schema_version": "debugmate-course-video-1.0",
-        "generated_on": "2026-07-19",
+        "generated_on": datetime.now(UTC).strftime("%Y-%m-%d"),
         "video": {
             "path": str(OUTPUT.relative_to(ROOT)).replace("\\", "/"),
             "bytes": OUTPUT.stat().st_size,

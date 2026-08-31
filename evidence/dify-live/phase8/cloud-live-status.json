@@ -1,0 +1,7 @@
+{
+  "evidence_version": 1,
+  "backend": "dify",
+  "status": "live_attempt_failed_verified_success_retained",
+  "failure_code": "workflow_envelope_or_ambiguous_timeout",
+  "source": "versioned_or_user_supplied_strict_envelope"
+}

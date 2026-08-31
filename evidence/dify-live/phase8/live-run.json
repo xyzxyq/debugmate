@@ -1,0 +1,20 @@
+{
+  "artifact_sha256": {
+    "card.png": "c0d929f03eecfee40348ad5b3acde3e4792711f25a5dfa4852e7cc5fcb0c76e7",
+    "recap.mp3": "355f37487a64f2b602cbdb139a6d24f426701aa6f4ea30dadf90d500e5ea2a1d",
+    "report.md": "2293edc891bfcb75d2069a21248b7f392a30c4f382cfe174618f619a8a0505bd",
+    "result.zip": "edc3b49cd9a9c2ba6e68e16ca147091eee524f436ea6f74253f984992aed5383"
+  },
+  "backend": "dify",
+  "case_id": "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+  "diagnosis_sha256": "9c0440712dbd2451bdfdd47d54a470eff0e3efada8afdbc7473c5e7f6752db2a",
+  "facts_sha256": "65cbf7ba08347fcb93e81a5e222d400e4b62ed3d464ea1474bdfeee50d58f9d0",
+  "knowledge_build_id": "e8e065b4e33f3090687569c409e3695e304ba52b068cf0e08d1c93cb139c71ff",
+  "prompt_sha256": "fb240c218da9d3fa60589f14d34e27125fb86aec670bea851af37d9061719227",
+  "qa_run_id": "p8qa_8197edab610e418c9174e88964dfc394",
+  "result_id": "result_4e7fefb75794b67ebf65f28c010d9ebe",
+  "retrieval_trace_sha256": "3f7ba822e7e2c6370286684df0c94b656038cfe3eaad561a93083d55e302376a",
+  "schema_sha256": "7679dcdab9c12f92ae0deff54b8e3633b24f5b798a6ad54fbf0959e1d5f7fcea",
+  "schema_version": "phase8-live-run-1.0",
+  "status": "completed"
+}

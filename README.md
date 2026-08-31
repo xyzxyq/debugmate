@@ -40,7 +40,7 @@ V0.1 不是公网部署、生产系统或自动修复工具。页面展示的命
 | Pydantic | 严格验证 `DiagnosisRecord`、结果状态和 manifest，拒绝静默类型转换与额外字段 |
 | Pillow / 本地 TTS | 从同一诊断记录确定性生成 PNG；按可用后端生成并验证 MP3 |
 | Gradio | 提供输入、隐私确认、学生诊断摘要、多模态结果、技术细节和下载入口 |
-| Dify（可选增强） | C01–C07 均有版本化现场证据；C06 绑定 independent app 导入、重导出、规范化结构相等与 reconstructed-app 复跑 |
+| Dify（实时增强） | 当前知识库 readback、检索命中和严格 `DifyRunEnvelope` 已有版本化证据；浏览器端仍可能因远端超时/契约波动转入明确的本地降级 |
 
 Git 仓库是可提交事实源。云端配置不能替代仓库中的知识源、提示词、Schema、回放样例、测试和运行证据。
 
@@ -130,6 +130,12 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 ## 当前验证
 
+2026-08-31 收尾验证已完成 Phase 8 核心链、Phase 9 四案例账本和 Phase 10 课程媒体刷新。Phase 8 的云端 envelope/readback 与知识库版本绑定通过；真实浏览器调用出现过 `ambiguous_timeout` 和旧契约响应，因此最终演示材料明确区分 Dify live、local fallback 和固定回放，没有将降级产物冒充云端成功。Phase 9 的 V1–V4 账本保留 4 个案例，其中 V1 是已接受合同基线，V2–V4 为 blocked/contract-only，不伪造云端批量分数。
+
+- Phase 8：严格 envelope、非空检索命中、`knowledge_build_id` 绑定、ZIP/MP3/PNG/报告和安全范围检查已通过；外部 Dify 浏览器节点保留真实失败记录并允许本地降级。
+- Phase 9：`scripts/run-phase9-evaluation.py` 生成当前账本，4 个案例和 V1–V4 绑定可追溯；scope/privacy gate 通过。
+- Phase 10：PPTX、MP4、SRT 和两个 manifest 已依据当前课程文案与证据重新生成，媒体格式、字幕时序、哈希和隐私检查在最终回归中验证。
+
 以下是 **2026-08-08** 已保存验证记录的摘要，不是本次 README 更新重新运行后的永久保证：
 
 - [`tests/ui/test_app.py`](tests/ui/test_app.py)：`34 passed`。
@@ -140,7 +146,7 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 ## 当前限制
 
-- [`platform/dify/capability-matrix.json`](platform/dify/capability-matrix.json) 中 C01–C07 全部为 `pass`。C03/C04 分别绑定真实图像请求和 direct retrieval node log；C06 绑定 independent import、re-export、规范化结构等价与 reconstructed-app rerun。此次证据提升未刷新 PPTX、视频、字幕或最终截图。
+- [`platform/dify/capability-matrix.json`](platform/dify/capability-matrix.json) 的历史 C01–C07 能力证据仍按各自证据链解释；本轮 Phase 8 另保存当前知识库 readback、严格 envelope 和真实浏览器失败/本地降级记录。不要把历史 capability matrix 或本地 fallback 解读为当前每次 Dify 浏览器调用都成功。
 - 当前本地规则与知识快照覆盖课程选取的 Python/AI 高频场景，不代表覆盖全部框架、版本和故障。
 - Local SAPI 中文复盘已在实体播放设备上完成人耳听验；该本地降级验证与 C07 的 Dify 现场 TTS 证据仍是两条独立链路。
 - V0.1 面向单用户 Windows 本地课程演示，不包含公网部署、多人账号、生产监控、SLA 或并发压测。
@@ -148,9 +154,6 @@ Edge 套件会启动真实浏览器，耗时明显长于普通测试；其中依
 
 ## 后续工作顺序
 
-1. 先持续保持本地课程演示、证据、README 与项目状态一致。
-2. 保持 C06 independent roundtrip/rerun 证据与 capability matrix 的哈希绑定。
-3. 继续冻结课程材料，直到事实口径稳定并单独授权刷新。
-4. 最后才统一刷新 PPTX、视频、字幕和最终截图，避免反复改写交付物。
-
-本次 README/STATE 真值同步不处理或刷新 PPTX、视频、字幕、最终截图及其他课程交付物。
+1. 提交并推送本轮已验收的代码、证据、账本和课程材料。
+2. 演示前优先检查 Dify 账号/额度；若实时节点超时，使用页面明确标注的本地降级或固定回放。
+3. 若后续继续开发，先新增可追溯证据再更新课程材料，不覆盖本轮真实失败记录。

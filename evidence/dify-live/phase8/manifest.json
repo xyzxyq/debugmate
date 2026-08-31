@@ -1,0 +1,46 @@
+{
+  "artifacts": [
+    {
+      "path": "knowledge-readback.json",
+      "sha256": "c1182b5c6a768beb35ea963ca612e2a5d8086f1c16190dc5ba8e56ceebf2f88f"
+    },
+    {
+      "path": "live-run.json",
+      "sha256": "59f644c3be685369971dbf444747ecf102c2cd959e0a6c6746914d2c63262da5"
+    },
+    {
+      "path": "report.md",
+      "sha256": "2293edc891bfcb75d2069a21248b7f392a30c4f382cfe174618f619a8a0505bd"
+    },
+    {
+      "path": "card.png",
+      "sha256": "c0d929f03eecfee40348ad5b3acde3e4792711f25a5dfa4852e7cc5fcb0c76e7"
+    },
+    {
+      "path": "recap.mp3",
+      "sha256": "355f37487a64f2b602cbdb139a6d24f426701aa6f4ea30dadf90d500e5ea2a1d"
+    },
+    {
+      "path": "result.zip",
+      "sha256": "edc3b49cd9a9c2ba6e68e16ca147091eee524f436ea6f74253f984992aed5383"
+    }
+  ],
+  "backend": "dify",
+  "cloud_junit": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 1
+  },
+  "edge_junit": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 1
+  },
+  "evidence_time_utc": "2026-08-31T15:28:36Z",
+  "qa_run_id": "p8qa_8197edab610e418c9174e88964dfc394",
+  "schema_version": "phase8-formal-acceptance-1.0",
+  "source_commit": "98848fc23448975a2733ce66a85c48c96ea6752d",
+  "worktree_scope_sha256": "e46dd5431dae9bf4cef6b007f6764c2b59ddc82954ad520b07fab8a225e58b02"
+}

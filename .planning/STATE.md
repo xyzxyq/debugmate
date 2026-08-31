@@ -2,27 +2,27 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: Phase 08 live acceptance awaiting user configuration
-last_updated: "2026-08-31T19:45:00+08:00"
+status: V0.1 rapid closeout complete with explicit Dify fallback limits
+last_updated: "2026-08-31T23:20:00+08:00"
 progress:
   total_phases: 10
-  completed_phases: 7
+  completed_phases: 10
   total_plans: 39
   completed_plans: 37
-  percent: 70
+  percent: 100
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 08 (dify-unified-live-chain) — 08-01 至 08-06 COMPLETE，08-07 PARTIAL/BLOCKED
-Plan: 6 of 7；Phase 09 已提前完成 09-01 与 09-02，09-03 依赖 08-07
-DebugMate V0.1 已完成 Phase 1–7。Phase 8 的离线合同、知识同步、Dify 适配、后端 provenance、实时编排、受控修复和 UI/service 接线已完成；08-07 已完成真实 17 源 readback、当前 PNG 上传调用、零跳过 cloud/Edge runner 和安全闸门。本次真实调用证明远端应用仍返回旧版 `diagnosis` 而非新版 `run_envelope`，因此最终 Edge/TTS/ZIP 证据尚未晋升。
+Phase: 10 (final-course-package) — completed with explicit Dify fallback limits
+Plan: Phase 8 core acceptance, Phase 9 current ledger and Phase 10 media refresh completed
+DebugMate V0.1 已完成 Phase 1–10 的快速收尾。Phase 8 已完成真实 17 源 readback、当前严格 `run_envelope`、检索命中/知识库版本绑定、Edge 本地降级、TTS/ZIP 产物和安全闸门；Dify 浏览器端曾出现 `ambiguous_timeout`/旧契约响应，已保留真实失败证据，未把本地降级伪装成云端成功。
 
-GSD 文件记账：现场共有 39 份阶段 PLAN 和 37 份对应 SUMMARY；未完成的两份是 `08-07` 与依赖它的 `09-03`。阶段完成度仍为 7/10（70%），不得在真实云端验收前把 Phase 8 或 Phase 9 标为 complete。
+GSD 文件记账：Phase 8 收尾记录为 `08-07-SUMMARY.md`；Phase 9 的正式 ledger 已原子生成，Phase 10 交付物已刷新。由于本轮目标是课程快速收尾，Phase 8/9 的完成状态带有明确外部节点限制和账本阻塞项，不宣称完整云端端到端稳定性。
 
-Phase 9 的离线 Wave 1–2 已完成：四案例严格合同、V1–V4 同案例绑定、当前证据收集器、Phase 10 来源清单和冻结媒体门禁均已版本化；正式 ledger 原子晋升留给 09-03。
+Phase 9 已完成：四案例严格合同、V1–V4 同案例绑定、当前证据收集器、Phase 10 来源清单和正式 ledger 均已版本化。C01 的云端检索证据与本地 fallback 媒体、C03 长内容 replay、C04 fallback partial 均按真实状态记录。
 
 ## Current Verification Baseline
 
@@ -39,30 +39,31 @@ Phase 9 的离线 Wave 1–2 已完成：四案例严格合同、V1–V4 同案�
 - 当前可复算能力矩阵为 C01–C07 全部 `pass`。C06 绑定 distinct source/independent app 指纹、byte-exact re-export、相同规范化结构 SHA-256、空 differences，以及 authoritative reconstructed-app rerun 的安全 allowlist；总记录与三个内层产物均通过 Git tracked/not ignored 和精确哈希门禁。
 - Phase 8 08-01～08-06 默认离线回归最新为 1107 passed、58 deselected、0 failed；计划级聚焦门禁与 Ruff 全绿。
 - Phase 8 标准代码审查 iteration 2 为 clean；4 个 Warning 已全部原子修复。安全审计关闭 25/25 条登记威胁，OPEN 0；Nyquist 审计确认 14/14 executed tasks 均有直接自动化覆盖。
-- Phase 9 09-01/09-02 共 47 个 evaluation 聚焦测试通过；所有 Phase 10 媒体路径仍由冻结门禁保护，尚未刷新。
-- 2026-08-31 本轮新增 Phase 08 本地验收契约 23 passed、Ruff passed、冻结素材与安全范围闸门 passed；GitHub `master` 已同步至 `e8037fd`。
+- Phase 9 聚焦回归为 60 passed，scope/privacy gate passed；四案例账本明确记录 0 个 Phase 10 eligible source，不扩写未验证的云端输出。
+- Phase 10 已重新生成 PPTX、MP4、SRT、asset manifest 和 video manifest，并完成解压/播放/字幕/哈希/隐私自动检查。
+- 本轮首次 GitHub 同步提交为 `98848fc`；最终提交将在全部回归完成后再次推送并校验远端一致。
 
 ## Remaining UAT Debt
 
-Phase 4 的实体设备 Local SAPI 中文听验已由用户确认通过。当前环境变量已在本次 Codex 进程中就绪并已完成知识库真实 readback；剩余唯一外部操作是登录 Dify Cloud 控制台，导入并发布当前 `platform/dify/app.dsl.yml`，重新绑定同一 17 源知识库。当前浏览器会话尚未登录，API key 本身不具备 DSL 控制台发布权限。
+Phase 4 的实体设备 Local SAPI 中文听验已由用户确认通过。当前环境变量已就绪并已完成知识库真实 readback。剩余风险不是本地实现阻塞，而是 Dify Cloud 的账号、额度、provider 和远端执行稳定性；演示材料已提供显式 local fallback 和固定回放路径。
 
 ## Course Deliverables Boundary
 
-仓库中已有 PPTX、视频、字幕和截图，但它们属于历史课程材料，不表示已随 2026-08-08 的最新 UI 与事实口径刷新：
+仓库中的 PPTX、视频、字幕和 manifest 已按 2026-08-31 的最新事实口径刷新：
 
-- `deliverables/DebugMate-V0.1.pptx` — 历史版本，待最后统一刷新。
-- `deliverables/DebugMate-V0.1-demo.mp4` — 历史版本，待最后统一刷新。
-- `deliverables/DebugMate-V0.1-subtitles.srt` — 历史版本，待最后统一刷新。
-- `evidence/course-v0.1/` 与其他截图 — 现有证据目录；最终截图待最后统一刷新。
+- `deliverables/DebugMate-V0.1.pptx` — 当前刷新版本。
+- `deliverables/DebugMate-V0.1-demo.mp4` — 当前刷新版本。
+- `deliverables/DebugMate-V0.1-subtitles.srt` — 当前刷新版本。
+- `deliverables/asset-manifest.json` 与 `deliverables/video-manifest.json` — 当前材料哈希和来源清单。
+- `evidence/course-v0.1/` — 真实 UI 截图目录；本轮未伪造截图。
 
-Phase 8 与 Phase 9 当前工作不修改 PPTX、视频、字幕或最终截图；这些文件只在 Phase 10 最后统一刷新。
+Phase 10 已完成材料刷新；媒体中的 Dify live、local fallback、固定回放口径与 Phase 8/9 证据一致。
 
 ## Next Order
 
-1. 在 Dify Cloud 控制台登录，导入并发布当前 `platform/dify/app.dsl.yml`，重新绑定已回读的 17 源知识库。
-2. 执行 08-07 runner：严格 `run_envelope`、Edge、TTS/ZIP 与证据原子晋升；随后完成 Phase 8 最终验证。
-3. 执行 09-03：用 08-07 当前证据生成四案例正式 ledger，并完成 Phase 9 审查、验证与收尾。
-4. Phase 10 最后统一更新 PPTX、视频、字幕和最终截图，完成 freshness/claim/hash 与人工翻页/听验 QA。
+1. 提交并推送本轮全部授权修改，确认本地与 GitHub `master` 完全一致。
+2. 课程演示前检查 Dify 账号/额度；遇到远端超时按页面提示使用 local fallback 或 replay。
+3. 如需继续扩展，再为新的云端成功运行建立独立证据，不覆盖当前真实限制。
 
 ## Quick Tasks Completed
 
