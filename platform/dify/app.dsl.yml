@@ -912,28 +912,62 @@ workflow:
               return value.strip()[:limit]
 
 
+          def as_dict(value):
+              return value if isinstance(value, dict) else {}
+
+
+          def locator_from_content(value):
+              if not isinstance(value, str):
+                  return ""
+              for line in value.splitlines():
+                  line = line.strip()
+                  if not line.startswith("- #"):
+                      continue
+                  locator = line[2:].split("：", 1)[0].split(":", 1)[0].strip()
+                  if locator.startswith("#"):
+                      return locator
+              return ""
+
+
           def main(retrieval_result=None, case_id=""):
-              raw_hits = retrieval_result if isinstance(retrieval_result, list) else []
+              if isinstance(retrieval_result, list):
+                  raw_hits = retrieval_result
+              else:
+                  raw_hits = as_dict(retrieval_result).get("records", [])
+                  raw_hits = raw_hits if isinstance(raw_hits, list) else []
               hits = []
               seen = set()
               for item in raw_hits:
                   if not isinstance(item, dict):
                       continue
-                  metadata = item.get("metadata")
-                  metadata = metadata if isinstance(metadata, dict) else {}
+                  segment = as_dict(item.get("segment"))
+                  document = as_dict(segment.get("document"))
+                  metadata = {
+                      **as_dict(item.get("metadata")),
+                      **as_dict(segment.get("metadata")),
+                      **as_dict(document.get("doc_metadata")),
+                  }
                   raw_chunk_id = bounded_text(
                       item.get("id")
                       or item.get("segment_id")
+                      or segment.get("id")
+                      or segment.get("segment_id")
                       or metadata.get("segment_id")
                       or metadata.get("chunk_id"),
                       512,
                   )
                   source_id = bounded_text(metadata.get("source_id"), 128)
                   source_url = bounded_text(metadata.get("source_url"), 2000)
-                  locator = bounded_text(metadata.get("locator"), 300)
-                  summary = bounded_text(item.get("content"), 2000)
+                  summary = bounded_text(
+                      item.get("content") or segment.get("content"), 2000
+                  )
+                  locator = bounded_text(
+                      metadata.get("locator") or locator_from_content(summary), 300
+                  )
                   source_title = bounded_text(
                       item.get("title")
+                      or segment.get("title")
+                      or document.get("name")
                       or metadata.get("document_name")
                       or metadata.get("title"),
                       300,
@@ -955,7 +989,10 @@ workflow:
                   if chunk_id_fingerprint in seen:
                       continue
                   seen.add(chunk_id_fingerprint)
-                  score = item.get("score", metadata.get("score", "not_reported"))
+                  score = item.get(
+                      "score",
+                      segment.get("score", metadata.get("score", "not_reported")),
+                  )
                   if isinstance(score, bool) or not isinstance(score, (int, float)):
                       score = "not_reported"
                   else:

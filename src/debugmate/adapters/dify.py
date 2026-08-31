@@ -274,7 +274,14 @@ class DifyBackend:
                 if isinstance(raw_envelope, str):
                     envelope = DifyRunEnvelope.model_validate_json(raw_envelope, strict=True)
                 else:
-                    envelope = DifyRunEnvelope.model_validate(raw_envelope, strict=True)
+                    # Dify's object output is already JSON-shaped, but enum
+                    # members arrive as strings. Re-parse through JSON so the
+                    # strict contract validates the wire representation rather
+                    # than requiring Python Enum instances from the provider.
+                    envelope = DifyRunEnvelope.model_validate_json(
+                        json.dumps(raw_envelope, ensure_ascii=False, separators=(",", ":")),
+                        strict=True,
+                    )
                 candidate_payload: object = envelope.diagnosis.model_dump(mode="json")
             else:
                 candidate_payload = outputs["diagnosis"]

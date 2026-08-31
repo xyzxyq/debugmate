@@ -6,6 +6,7 @@ import json
 import httpx
 import pytest
 from pydantic import SecretStr
+from tests.cloud.test_run_envelope import _envelope_payload
 
 import debugmate.adapters.dify as dify
 from debugmate.adapters.dify import (
@@ -30,6 +31,29 @@ def _workflow_response() -> dict[str, object]:
         "workflow_run_id": "remote-run-id",
         "data": {"outputs": {"diagnosis": {"case_id": "case_candidate"}}},
     }
+
+
+def test_object_run_envelope_uses_strict_json_wire_validation() -> None:
+    payload = _envelope_payload()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "workflow_run_id": "remote-run-id",
+                "data": {"outputs": {"run_envelope": payload}},
+            },
+            request=request,
+        )
+
+    backend = DifyBackend(
+        _settings(),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        test_base_url="https://dify.test/v1",
+    )
+    result = backend.run_workflow({}, user="debugmate-stable")
+    assert result.run_envelope is not None
+    assert result.run_envelope.diagnosis.schema_version == "1.1.0"
 
 
 def test_constructor_does_not_dispatch_and_incomplete_config_fails_locally() -> None:
