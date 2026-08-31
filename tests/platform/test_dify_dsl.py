@@ -93,16 +93,19 @@ def _node_by_title(payload: dict[str, object], title: str) -> dict[str, object]:
 def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     retrieval = _node_by_title(payload, "知识检索")
     sanitizer = _node_by_title(payload, "知识证据净化")
+    safety = _node_by_title(payload, "安全收口")
     envelope = _node_by_title(payload, "同次运行信封")
     end = _node_by_title(payload, "输出")
 
     retrieval_data = retrieval["data"]
     sanitizer_data = sanitizer["data"]
+    safety_data = safety["data"]
     envelope_data = envelope["data"]
     end_data = end["data"]
     assert all(isinstance(value, dict) for value in (
         retrieval_data,
         sanitizer_data,
+        safety_data,
         envelope_data,
         end_data,
     ))
@@ -124,6 +127,9 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     assert "retrieval_records" in sanitizer_code
     assert "source_url_from_metadata" in sanitizer_code
     assert 'get("records", [])' in sanitizer_code
+    safety_code = safety_data["code"]
+    assert "INSTALL_PATTERN" in safety_code
+    assert "当前没有可追溯知识证据" in safety_code
     envelope_code = envelope_data["code"]
     for required in (
         "envelope_version",
@@ -138,6 +144,10 @@ def _assert_phase8_same_run_contract(payload: dict[str, object]) -> None:
     envelope_variables = envelope_data["variables"]
     assert any(
         item.get("value_selector") == [sanitizer["id"], "retrieval_trace"]
+        for item in envelope_variables
+    )
+    assert any(
+        item.get("value_selector") == [safety["id"], "diagnosis"]
         for item in envelope_variables
     )
     assert end_data["outputs"] == [
@@ -251,6 +261,46 @@ def test_dify_workflow_records_use_metadata_doc_metadata_and_markdown_url() -> N
     hit = result["retrieval_trace"]["hits"][0]
     assert hit["source_url"] == "https://docs.python.org/3/library/venv.html"
     assert hit["locator"] == "#creating-virtual-environments"
+
+
+def test_dify_safety_sink_rejects_unsupported_install_recommendation() -> None:
+    payload = yaml.safe_load(AUTHORITATIVE_DSL.read_text(encoding="utf-8-sig"))
+    assert isinstance(payload, dict)
+    safety = _node_by_title(payload, "安全收口")
+    safety_data = safety["data"]
+    assert isinstance(safety_data, dict)
+    namespace: dict[str, object] = {}
+    exec(safety_data["code"], namespace)
+
+    result = namespace["main"](
+        {
+            "confidence": 0.95,
+            "evidence": [],
+            "support_links": [],
+            "root_cause_candidates": [
+                {
+                    "claim_kind": "inference",
+                    "evidence_ids": [],
+                    "confidence": 0.95,
+                    "fact_ids": ["fact_00000000000000000000000000000000"],
+                }
+            ],
+            "fixes": [
+                {
+                    "command": "pip install debugmate_missing_pkg_7f3a",
+                }
+            ],
+            "recap_text": "建议运行 pip install debugmate_missing_pkg_7f3a。",
+            "limitations": [],
+        },
+        "case_8f6c2a9d4e1b7c305f8a6d2c9e4b1a70",
+    )
+    diagnosis = result["diagnosis"]
+    assert diagnosis["confidence"] == 0.70
+    assert diagnosis["root_cause_candidates"][0]["confidence"] == 0.70
+    assert diagnosis["fixes"] == []
+    assert "pip install" not in diagnosis["recap_text"].lower()
+    assert diagnosis["support_links"] == []
 
 
 def test_authoritative_dsl_exports_bounded_same_run_envelope() -> None:

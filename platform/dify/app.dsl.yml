@@ -101,8 +101,20 @@ workflow:
         isInLoop: false
         sourceType: code
         targetType: code
-      id: 1786195379702-source-1786200000002-target
+      id: 1786195379702-source-1786200000003-target
       source: '1786195379702'
+      sourceHandle: source
+      target: '1786200000003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: 1786200000003-source-1786200000002-target
+      source: '1786200000003'
       sourceHandle: source
       target: '1786200000002'
       targetHandle: target
@@ -897,6 +909,112 @@ workflow:
       zIndex: 0
     - data:
         code: |
+          import json
+          import re
+
+
+          INSTALL_PATTERN = re.compile(
+              r"\b(?:pip(?:3)?\s+install|conda\s+install|poetry\s+add|uv\s+add)\b",
+              re.IGNORECASE,
+          )
+
+
+          def as_text(value, fallback=""):
+              if isinstance(value, str):
+                  value = value.strip()
+                  return value or fallback
+              return fallback
+
+
+          def as_score(value):
+              try:
+                  return max(0.0, min(1.0, float(value)))
+              except (TypeError, ValueError):
+                  return 0.0
+
+
+          def main(diagnosis=None, expected_case_id=""):
+              if isinstance(diagnosis, str):
+                  try:
+                      diagnosis = json.loads(diagnosis)
+                  except (TypeError, ValueError):
+                      diagnosis = {}
+              result = dict(diagnosis) if isinstance(diagnosis, dict) else {}
+              evidence = result.get("evidence")
+              has_evidence = isinstance(evidence, list) and bool(evidence)
+              if not has_evidence:
+                  result["confidence"] = min(as_score(result.get("confidence")), 0.70)
+                  result["support_links"] = []
+                  safe_candidates = []
+                  for item in result.get("root_cause_candidates") or []:
+                      if not isinstance(item, dict):
+                          continue
+                      candidate = dict(item)
+                      candidate["claim_kind"] = "inference"
+                      candidate["evidence_ids"] = []
+                      candidate["confidence"] = min(
+                          as_score(candidate.get("confidence")), 0.70
+                      )
+                      safe_candidates.append(candidate)
+                  result["root_cause_candidates"] = safe_candidates
+                  fixes = result.get("fixes")
+                  if isinstance(fixes, list):
+                      result["fixes"] = [
+                          item
+                          for item in fixes
+                          if isinstance(item, dict)
+                          and not INSTALL_PATTERN.search(as_text(item.get("command")))
+                      ]
+                  recap_text = as_text(result.get("recap_text"))
+                  if INSTALL_PATTERN.search(recap_text):
+                      result["recap_text"] = (
+                          "当前已确认存在模块导入失败，但尚无可追溯知识证据确认对应的官方分发包名称。"
+                          "请先核对当前解释器和包信息，不要直接安装未知包。"
+                      )
+                  limitations = result.get("limitations")
+                  limitations = list(limitations) if isinstance(limitations, list) else []
+                  limitations.append(
+                      "当前没有可追溯知识证据，不提供直接安装命令；请先确认官方分发包名称。"
+                  )
+                  result["limitations"] = list(
+                      dict.fromkeys(as_text(item) for item in limitations)
+                  )
+              return {"diagnosis": result}
+        code_language: python3
+        outputs:
+          diagnosis:
+            children: null
+            type: object
+        selected: false
+        title: 安全收口
+        type: code
+        variables:
+        - value_selector:
+          - '1786195379702'
+          - diagnosis
+          value_type: object
+          variable: diagnosis
+        - value_selector:
+          - '1786193038905'
+          - case_id
+          value_type: string
+          variable: expected_case_id
+      height: 51
+      id: '1786200000003'
+      position:
+        x: 1510
+        y: 541
+      positionAbsolute:
+        x: 1510
+        y: 541
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: |
           import hashlib
           import json
           import re
@@ -1157,7 +1275,7 @@ workflow:
         type: code
         variables:
         - value_selector:
-          - '1786195379702'
+          - '1786200000003'
           - diagnosis
           value_type: object
           variable: diagnosis
