@@ -86,3 +86,4 @@ Phase 8 与 Phase 9 当前工作不修改 PPTX、视频、字幕或最终截图�
 | 260809-ghz | Version independent Dify C03/C04 evidence and preserve the accurate C06 blocker | 2026-08-09 | e3b9ed9 | Verified | [260809-ghz-dify-c03-c04-c06-dsl-readme-state-pptx](./quick/260809-ghz-dify-c03-c04-c06-dsl-readme-state-pptx/) |
 | 260809-icj | Promote C06 through independent DSL roundtrip and authoritative rerun evidence | 2026-08-09 | task commits | Verified | [260809-icj-c06-pass-pptx](./quick/260809-icj-c06-pass-pptx/) |
 | 260831-tjm | Extend Dify safety sink to block Chinese unsupported install advice | 2026-08-31 | 2bc68c4 | Needs Review | [260831-tjm-validate-dify](./quick/260831-tjm-validate-dify/) |
+| 260831-tnv | Support Dify Knowledge Retrieval result wrapper | 2026-08-31 | 0f81361 | Needs Review | [260831-tnv-dify-knowledge-retrieval-result](./quick/260831-tnv-dify-knowledge-retrieval-result/) |
