@@ -87,3 +87,4 @@ Phase 8 与 Phase 9 当前工作不修改 PPTX、视频、字幕或最终截图�
 | 260809-icj | Promote C06 through independent DSL roundtrip and authoritative rerun evidence | 2026-08-09 | task commits | Verified | [260809-icj-c06-pass-pptx](./quick/260809-icj-c06-pass-pptx/) |
 | 260831-tjm | Extend Dify safety sink to block Chinese unsupported install advice | 2026-08-31 | 2bc68c4 | Needs Review | [260831-tjm-validate-dify](./quick/260831-tjm-validate-dify/) |
 | 260831-tnv | Support Dify Knowledge Retrieval result wrapper | 2026-08-31 | 0f81361 | Needs Review | [260831-tnv-dify-knowledge-retrieval-result](./quick/260831-tnv-dify-knowledge-retrieval-result/) |
+| 260831-tuz | Stabilize Dify Knowledge Retrieval query | 2026-08-31 | 7bdb4b0 | Needs Review | [260831-tuz-dify](./quick/260831-tuz-dify/) |
