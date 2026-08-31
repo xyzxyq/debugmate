@@ -1,51 +1,44 @@
 {
-  "schema_version": "debugmate-course-assets-1.0",
-  "generated_on": "2026-08-31",
+  "schema_version": "debugmate-defense-deck-assets-1.0",
+  "generated_on": "2026-09-01",
   "pptx": {
     "path": "deliverables/DebugMate-V0.1.pptx",
-    "sha256": "9c9aa4324733a0934e6803b3c5d2320b5f2464bf9b5baa45e5e2e164f7d6ac9e",
-    "slides": 13
+    "sha256": "6de67cbdc220be49c66b26bc90f2121ba2de64038fb3a4cd1d9793ba995c71e5",
+    "slides": 15,
+    "authoring_project": "projects/debugmate-defense-ppt_ppt169_20260901"
   },
+  "outline": "docs/course/presentation-outline.md",
   "assets": [
     {
-      "path": "docs/course/README.md",
-      "bytes": 3784,
-      "sha256": "737a795609791bfef4b7cf197f892793b75f294e98b8d6cee277e10b20afb6e1"
+      "path": "projects/debugmate-defense-ppt_ppt169_20260901/images/cover-concept.png",
+      "bytes": 2056263,
+      "sha256": "9e5e22d6d56e24cba67ecff29617b50ca0bfe42ac8ed2bdfde385ff07f6006ef"
     },
     {
-      "path": "docs/course/presentation-outline.md",
-      "bytes": 1055,
-      "sha256": "a382347d19b7f57766bc4e7df814d7b5b4d7d7a37b8cad552cbd2ea7bd733d4c"
-    },
-    {
-      "path": "docs/course/video-script.md",
-      "bytes": 5372,
-      "sha256": "45b10ab272d3795663a070418f13c11dc7b705f0fae119e819394adfab61dfec"
-    },
-    {
-      "path": "docs/course/prompt-iteration.md",
-      "bytes": 1362,
-      "sha256": "0940905e88da61cb8c33e29966733adf065dc7ca8e03f27addd9378c0a55ef9b"
-    },
-    {
-      "path": "evidence/course-v0.1/screenshots/01-completed-overview.png",
+      "path": "projects/debugmate-defense-ppt_ppt169_20260901/images/01-completed-overview.png",
       "bytes": 178634,
       "sha256": "2c826b40123418f95eab0cd7a7d0075cd306666973007d80a0ac04b85249b49d"
     },
     {
-      "path": "evidence/course-v0.1/screenshots/02-tts-partial.png",
+      "path": "projects/debugmate-defense-ppt_ppt169_20260901/images/02-tts-partial.png",
       "bytes": 246866,
       "sha256": "ba24d724188073f9f03e30f2017188c12cc3c9cd2d8ff1def4a427e8c76297de"
     },
     {
-      "path": "evidence/course-v0.1/screenshots/03-card-partial.png",
+      "path": "projects/debugmate-defense-ppt_ppt169_20260901/images/03-card-partial.png",
       "bytes": 256247,
       "sha256": "801cc5765744eee1aad63508a282dabc767f4b0939a114b840715fab169ba75e"
     },
     {
-      "path": "deliverables/DebugMate-V0.1.pptx",
-      "bytes": 492927,
-      "sha256": "9c9aa4324733a0934e6803b3c5d2320b5f2464bf9b5baa45e5e2e164f7d6ac9e"
+      "path": "projects/debugmate-defense-ppt_ppt169_20260901/images/terminal-module-not-found-redacted.png",
+      "bytes": 46120,
+      "sha256": "3989af7ccc015c3652397f4dddff2de8b88fc6bbc51163159f1ae25bca7e4047"
+    },
+    {
+      "path": "projects/debugmate-defense-ppt_ppt169_20260901/images/card.png",
+      "bytes": 375276,
+      "sha256": "c0d929f03eecfee40348ad5b3acde3e4792711f25a5dfa4852e7cc5fcb0c76e7"
     }
-  ]
+  ],
+  "quality_gate": "projects/debugmate-defense-ppt_ppt169_20260901/validation/svg_quality_report.json"
 }

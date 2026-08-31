@@ -1,0 +1,81 @@
+{
+  "roles": {
+    "body": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 22.0,
+      "cjk_chars_per_100px": 4.3,
+      "latin_chars_per_100px": 8.8,
+      "longest_planned_line": {
+        "px": 1448.0,
+        "slide": "P14",
+        "text": "4 个代表性案例；V1–V4 同输入；1177 passed / 60 des…"
+      }
+    },
+    "title": {
+      "family": "'Microsoft YaHei, Aptos Display, Arial'",
+      "size": 34.0,
+      "cjk_chars_per_100px": 2.8,
+      "latin_chars_per_100px": 5.7,
+      "longest_planned_line": {
+        "px": 691.7,
+        "slide": "P07",
+        "text": "系统架构：DiagnosisRecord 是单一事实源"
+      }
+    },
+    "subtitle": {
+      "family": "'Microsoft YaHei, Aptos Display, Arial'",
+      "size": 18.0,
+      "cjk_chars_per_100px": 5.2,
+      "latin_chars_per_100px": 10.8,
+      "longest_planned_line": {
+        "px": 800.5,
+        "slide": "P12",
+        "text": "case_id + source_run_id + diagnosis_has…"
+      }
+    },
+    "annotation": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 16.0,
+      "cjk_chars_per_100px": 5.9,
+      "latin_chars_per_100px": 12.1,
+      "longest_planned_line": null
+    },
+    "compact_display": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 24.0,
+      "cjk_chars_per_100px": 3.9,
+      "latin_chars_per_100px": 8.1,
+      "longest_planned_line": null
+    },
+    "cover_display": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 68.0,
+      "cjk_chars_per_100px": 1.4,
+      "latin_chars_per_100px": 2.9,
+      "longest_planned_line": null
+    },
+    "footnote": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 13.0,
+      "cjk_chars_per_100px": 7.2,
+      "latin_chars_per_100px": 14.9,
+      "longest_planned_line": null
+    },
+    "large_display": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 48.0,
+      "cjk_chars_per_100px": 2.0,
+      "latin_chars_per_100px": 4.0,
+      "longest_planned_line": null
+    },
+    "metric_display": {
+      "family": "'Microsoft YaHei, Aptos, Arial'",
+      "size": 40.0,
+      "cjk_chars_per_100px": 2.4,
+      "latin_chars_per_100px": 4.9,
+      "longest_planned_line": null
+    }
+  },
+  "source": "spec_lock.md",
+  "generated_at": "2026-08-31T16:22:23Z"
+}

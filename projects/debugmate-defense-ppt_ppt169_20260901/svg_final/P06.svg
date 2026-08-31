@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">02 · SYSTEM</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">06 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">技术路线：云端增强，本地闭环</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">不是二选一，而是把不稳定的外部能力隔离在可验证边界之外</text>
+<rect x="56" y="185" width="820" height="420" rx="20" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="900" y="185" width="324" height="420" rx="20" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="92" y="232" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="#0F9D8A">Dify Cloud · 增强层</text>
+<text x="92" y="265" font-family="Microsoft YaHei, Arial" font-size="15" fill="#708087">视觉模型 / 知识检索 / LLM 工作流</text>
+<text x="92" y="350" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="#F0784A">Local Python · 交付层</text>
+<text x="92" y="383" font-family="Microsoft YaHei, Arial" font-size="15" fill="#708087">脱敏 / Pydantic / Pillow / TTS fallback / Gradio</text>
+<rect x="92" y="290" width="150" height="48" rx="12" fill="#D9EEE8" stroke="none" stroke-width="1.5" opacity="1"/>
+<text x="167" y="320" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#0F9D8A">上传与检索</text>
+<rect x="269" y="290" width="150" height="48" rx="12" fill="#D9EEE8" stroke="none" stroke-width="1.5" opacity="1"/>
+<text x="344" y="320" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#0F9D8A">结构化 JSON</text>
+<rect x="446" y="425" width="150" height="48" rx="12" fill="#FBE5DB" stroke="none" stroke-width="1.5" opacity="1"/>
+<text x="521" y="455" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">本地严格校验</text>
+<rect x="623" y="425" width="150" height="48" rx="12" fill="#FBE5DB" stroke="none" stroke-width="1.5" opacity="1"/>
+<text x="698" y="455" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">报告与多媒体</text>
+<line x1="245" y1="338" x2="233" y2="414" stroke="#F0784A" stroke-width="2" stroke-linecap="round"/>
+<path d="M 230 407 L 245 414 L 230 421" fill="none" stroke="#F0784A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="600" y1="338" x2="588" y2="414" stroke="#F0784A" stroke-width="2" stroke-linecap="round"/>
+<path d="M 585 407 L 600 414 L 585 421" fill="none" stroke="#F0784A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="934" y="245" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="700" fill="#FFFFFF">Git · 事实源</text>
+<text x="934" y="295" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#D8E5E1">知识源与 manifest</text>
+<text x="934" y="337" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#D8E5E1">提示词 V1–V4</text>
+<text x="934" y="379" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#D8E5E1">Dify DSL</text>
+<text x="934" y="421" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#D8E5E1">运行证据与哈希</text>
+<text x="934" y="463" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#D8E5E1">课程材料与脚本</text>
+<line x1="934" y1="520" x2="1188" y2="520" stroke="#4D666A"/>
+<text x="934" y="555" font-family="Microsoft YaHei, Arial" font-size="16" fill="#BCE5DB">可重建 · 可复核 · 可交接</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

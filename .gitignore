@@ -4,6 +4,10 @@
 .artifacts/
 .debugmate-runtime/
 .playwright-mcp/
+/.playwright-cli/
+output/playwright/debugmate-*
+projects/*/backup/
+projects/*/live_preview/
 /.superpowers/sdd/
 evidence/*
 !evidence/.gitkeep

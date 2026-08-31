@@ -1,0 +1,556 @@
+
+=== 2026-08-31T16:11:20.589Z NOTE id=75e1a66a3a11 ===
+Project initialized: profile=default; canvas=ppt169; path=X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901
+
+=== 2026-08-31T16:11:31.716Z PYTHON run=dbeb48b5e863 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "import-sources", "projects\\debugmate-defense-ppt_ppt169_20260901", "deliverables\\DebugMate-V0.1.pptx", "docs\\course\\presentation-outline.md", "docs\\course\\README.md"]
+stdout:
+  [OK] Imported sources into: projects\debugmate-defense-ppt_ppt169_20260901
+    - deliverables\DebugMate-V0.1.pptx: presentation conversion failed ([ERROR] File not found: projects\debugmate-defense-ppt_ppt169_20260901\sources\DebugMate-V0.1.pptx)
+=== 2026-08-31T16:11:32.964Z END run=dbeb48b5e863 elapsed_ms=1248 output_lines=12 retained=2 omitted=10 ===
+
+=== 2026-08-31T16:11:45.824Z PYTHON run=bd5cda3a1f0e ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "scaffold-spec", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [OK] Design spec scaffold created: projects\debugmate-defense-ppt_ppt169_20260901\design_spec.md
+=== 2026-08-31T16:11:46.192Z END run=bd5cda3a1f0e elapsed_ms=368 output_lines=1 retained=1 omitted=0 ===
+
+=== 2026-08-31T16:11:46.342Z PYTHON run=87e4ca4c4e44 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "scaffold-lock", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [OK] Execution lock scaffold created: projects\debugmate-defense-ppt_ppt169_20260901\spec_lock.md
+=== 2026-08-31T16:11:46.793Z END run=87e4ca4c4e44 elapsed_ms=450 output_lines=1 retained=1 omitted=0 ===
+
+=== 2026-08-31T16:13:39.025Z PYTHON run=a393c79b6ff4 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "validate", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [ERROR]
+    - design_spec.md schema: contains 1 unresolved placeholder(s) matching '(?i)\[fill(?:[^\]]*)\]'
+    - design_spec.md schema: 'Slide 01 - 从报错到复盘：DebugMate' is missing field 'Relationships'
+    - design_spec.md schema: 'Slide 02 - 从一个真实报错开始' is missing field 'Relationships'
+    - design_spec.md schema: 'Slide 03 - 普通问答为什么不够' is missing field 'Relationships'
+  [WARN]
+  [ERROR] Project structure is invalid.
+=== 2026-08-31T16:13:39.540Z END run=a393c79b6ff4 elapsed_ms=515 output_lines=37 retained=7 omitted=30 ===
+
+=== 2026-08-31T16:14:25.114Z PYTHON run=485aed0835c6 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "validate", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [WARN]
+  [OK] Project structure is valid, with warnings.
+=== 2026-08-31T16:14:25.535Z END run=485aed0835c6 elapsed_ms=421 output_lines=5 retained=2 omitted=3 ===
+
+=== 2026-08-31T16:19:02.834Z PYTHON run=74f68a6cdacf ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "early", "--format", "ppt169", "--json"]
+stdout:
+  [ERROR] P01.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [ERROR] spec_lock typography-size recurrence: undeclared font-size 25 (3 occurrences) exceeds the sparse-display limit of 2 occurrences. Structural text must return to its declared role band; a genuinely recurring display treatment needs a justified named role in the Design Spec and spec_lock.
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (13 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 18 ungrouped top-level Slide-local element(s) in svg_output (<image> #3, <rect> #4, <text> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P02.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (14 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 23 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P03.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [ERROR] spec_lock typography-size recurrence: undeclared font-size 25 (3 occurrences), 52 (3 occurrences) exceeds the sparse-display limit of 2 occurrences. Structural text must return to its declared role band; a genuinely recurring display treatment needs a justified named role in the Design Spec and spec_lock.
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (15 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 24 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P04.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 38 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P05.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (18 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 51 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P06.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (20 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 30 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P07.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 34 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P08.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (26 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 50 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P09.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [ERROR] spec_lock typography-size recurrence: undeclared font-size 28 (4 occurrences) exceeds the sparse-display limit of 2 occurrences. Structural text must return to its declared role band; a genuinely recurring display treatment needs a justified named role in the Design Spec and spec_lock.
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (16 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 30 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P10.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (18 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 35 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <line> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P11.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (11 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 19 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P12.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (15 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 27 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P13.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (13 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 23 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P14.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [ERROR] spec_lock typography-size recurrence: undeclared font-size 43 (4 occurrences) exceeds the sparse-display limit of 2 occurrences. Structural text must return to its declared role band; a genuinely recurring display treatment needs a justified named role in the Design Spec and spec_lock.
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (16 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 33 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <rect> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [ERROR] P15.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] Detected 1 visible root-level <g> module(s) without explicit data-pptx-bounds (<g id="page-chrome">); every final-page/template root <g> other than a compact authored-preset atom declares its root-coordinate layout subcanvas even when it also carries native coordinates
+     [WARN] Noncanonical compact authoring: Visible text requires one direct root font-family default; semantic groups and text elements keep only real overrides (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (18 change(s)); examples: svg[1]:font-family None -> 'Microsoft YaHei, Arial'; text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[7]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] 31 ungrouped top-level Slide-local element(s) in svg_output (<text> #3, <text> #4, <circle> #5, ...); group only logical content units in a top-level <g id="...">. Keep genuine static page framing as a root primitive and declare a supported data-pptx-role such as "background" or "decoration"
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 0 (0%)
+    [ERROR] With errors: 15 (100%)
+  Provenance categories:
+    blocking: 19         hard findings; gate also requires exit 0
+    introduced: 60       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_early_report.json
+=== 2026-08-31T16:19:05.091Z END run=74f68a6cdacf elapsed_ms=2257 output_lines=189 retained=123 omitted=66 ===
+
+=== 2026-08-31T16:21:29.831Z PYTHON run=b05ef88ab2ab ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "early", "--format", "ppt169", "--json"]
+stdout:
+  [ERROR] P01.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='Defense deck · 2026.…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(214.0, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P02.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (13 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P03.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (14 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] Detected 3 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=84.0, y=382.0..410.0, 2 lines; <g id="slide-content"> x=472.0, y=382.0..410.0, 2 lines; <g id="slide-content"> x=860.0, y=382.0..410.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P04.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (16 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P05.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P06.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (19 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P07.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (16 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P08.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (25 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P09.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (15 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P10.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] <text> (x=110, y=458; text='类别 / 原因 / 步骤') exceeds <g id="slide-content"> data-pptx-bounds on the horizontal axis: content (44.3, 445.2)-(175.7, 463.2), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 1.0%, vertical 0.0%; expand the root module bounds into available non-overlapping space; otherwise reflow the text; ≈16.4 px per mixed char at 15px incl. headroom; ≈71 chars fit in 1168 px
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P11.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (10 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] <text> (x=1066, y=444; text='报告 / 卡 / 音频 / ZIP') exceeds <g id="slide-content"> data-pptx-bounds on the horizontal axis: content (1066.0, 430.4)-(1242.5, 449.6), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 1.6%, vertical 0.0%; expand the root module bounds into available non-overlapping space; otherwise reflow the text; ≈16.0 px per mixed char at 16px incl. headroom; ≈72 chars fit in 1168 px
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P12.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (14 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P13.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P14.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · V0.1 · 可…') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(304.6, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (15 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+  [SCAN] Checking 1 SVG file(s)...
+  [ERROR] P15.svg - Failed
+     viewBox: 0 0 1280 720
+     [ERROR] <g id="page-chrome"> data-pptx-bounds overlaps <g id="slide-content"> data-pptx-bounds by 1168.0px x 600.0px; keep ordinary direct-root module zones disjoint beyond the 1px tolerance
+     [ERROR] <text> (x=56, y=699; text='DebugMate · 课程答辩收束') exceeds <g id="slide-content"> data-pptx-bounds on the vertical axis: content (56.0, 688.0)-(228.5, 703.5), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 0.0%, vertical 7.3%; expand the root module bounds into available non-overlapping space; otherwise reflow the text
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace
+     [WARN] <text> (x=92, y=405; text='真实或可复现') exceeds <g id="slide-content"> data-pptx-bounds on the horizontal axis: content (44.5, 392.2)-(139.5, 410.2), container (56.0, 60.0)-(1224.0, 660.0), overflow horizontal 1.0%, vertical 0.0%; expand the root module bounds into available non-overlapping space; otherwise reflow the text; ≈15.8 px per CJK char at 15px incl. headroom; ≈73 chars fit in 1168 px
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 0 (0%)
+    [ERROR] With errors: 15 (100%)
+  Provenance categories:
+    blocking: 30         hard findings; gate also requires exit 0
+    introduced: 35       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+    Effects: inline emphasis 0 (pages 0) | gradients 0 (pages 0) | filters 0 (pages 0) | text effects 0 (pages 0)
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_early_report.json
+=== 2026-08-31T16:21:32.210Z END run=b05ef88ab2ab elapsed_ms=2379 output_lines=168 retained=124 omitted=44 ===
+
+=== 2026-08-31T16:22:06.798Z PYTHON run=1942dbf3970d ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "early", "--format", "ppt169", "--json"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 0 (0%)
+  Provenance categories:
+    blocking: 0          hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_early_report.json
+=== 2026-08-31T16:22:09.217Z END run=1942dbf3970d elapsed_ms=2418 output_lines=127 retained=18 omitted=109 ===
+
+=== 2026-08-31T16:22:23.694Z PYTHON run=f7143c6c3428 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\text_measure.py", "calibrate", "projects\\debugmate-defense-ppt_ppt169_20260901", "--outline"]
+=== 2026-08-31T16:22:23.880Z END run=f7143c6c3428 elapsed_ms=186 output_lines=12 retained=0 omitted=12 ===
+
+=== 2026-08-31T16:22:57.226Z PYTHON run=ec7c759d1a8e ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_editor\\server.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--live", "--daemon"]
+stderr:
+  [00:23:12] [ERROR] svg_editor: live preview did not become ready at http://127.0.0.1:6060/api/health within 15s (last error: health response belongs to another service or project)
+  [00:23:12] [ERROR] svg_editor: live preview failed to become reachable: http://127.0.0.1:6060 (log: X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901\live_preview\server.log)
+=== 2026-08-31T16:23:12.505Z END run=ec7c759d1a8e elapsed_ms=15278 output_lines=2 retained=2 omitted=0 ===
+
+=== 2026-08-31T16:23:37.243Z PYTHON run=d18801dc1704 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "final", "--format", "ppt169", "--json"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 13 (86%)
+  Provenance categories:
+    blocking: 13         hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_report.json
+=== 2026-08-31T16:23:39.382Z END run=d18801dc1704 elapsed_ms=2138 output_lines=132 retained=18 omitted=114 ===
+
+=== 2026-08-31T16:24:27.688Z PYTHON run=a11f3be0a273 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "final", "--format", "ppt169", "--json"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 7 (46%)
+  Provenance categories:
+    blocking: 7          hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_report.json
+=== 2026-08-31T16:24:29.069Z END run=a11f3be0a273 elapsed_ms=1380 output_lines=125 retained=18 omitted=107 ===
+
+=== 2026-08-31T16:24:53.724Z PYTHON run=411ef21b9073 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "final", "--format", "ppt169", "--json"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 6 (40%)
+  Provenance categories:
+    blocking: 6          hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_report.json
+=== 2026-08-31T16:24:54.960Z END run=411ef21b9073 elapsed_ms=1235 output_lines=123 retained=18 omitted=105 ===
+
+=== 2026-08-31T16:25:29.604Z PYTHON run=15983587f98b ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "final", "--format", "ppt169", "--json"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 1 (6%)
+  Provenance categories:
+    blocking: 1          hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 5 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_report.json
+=== 2026-08-31T16:25:30.790Z END run=15983587f98b elapsed_ms=1185 output_lines=118 retained=18 omitted=100 ===
+
+=== 2026-08-31T16:26:14.966Z PYTHON run=c5738cba57c6 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "final", "--format", "ppt169", "--json"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 0 (0%)
+  Provenance categories:
+    blocking: 0          hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 6 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+  [REPORT] JSON quality report exported: projects\debugmate-defense-ppt_ppt169_20260901\validation\svg_quality_report.json
+=== 2026-08-31T16:26:16.304Z END run=c5738cba57c6 elapsed_ms=1337 output_lines=113 retained=18 omitted=95 ===
+
+=== 2026-08-31T16:26:28.961Z PYTHON run=e89e93df84ef ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\finalize_svg.py", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [OK] Done!
+=== 2026-08-31T16:26:31.341Z END run=e89e93df84ef elapsed_ms=2380 output_lines=12 retained=1 omitted=11 ===
+
+=== 2026-08-31T16:26:42.513Z PYTHON run=8279dd86b319 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_to_pptx.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--no-notes"]
+stdout:
+  [Done] Saved: projects\debugmate-defense-ppt_ppt169_20260901\exports\debugmate-defense-ppt_20260901_002644.pptx
+    [POSTFLIGHT] status=passed-with-warnings quality_gate=passed slides=15 warning_categories=2
+    [POSTFLIGHT][WARNING] quality_introduced_warnings=26
+    [POSTFLIGHT][WARNING] unsafe_exported_font_faces=1
+    [PPTX] projects\debugmate-defense-ppt_ppt169_20260901\exports\debugmate-defense-ppt_20260901_002644.pptx
+    [REPORT] projects\debugmate-defense-ppt_ppt169_20260901\validation\debugmate-defense-ppt_20260901_002644.report.json
+=== 2026-08-31T16:26:46.024Z END run=8279dd86b319 elapsed_ms=3511 output_lines=54 retained=6 omitted=48 ===
+
+=== 2026-08-31T16:31:15.142Z PYTHON run=b370e5fb9edc ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_editor\\server.py", "projects\\debugmate-defense-ppt_ppt169_20260901", "--live"]
+stderr:
+  [00:31:15] [INFO] svg_editor: running at http://127.0.0.1:6060 (live preview (auto-startup))
+  [00:31:15] [INFO] svg_editor: project: X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901
+  [00:31:15] [INFO] svg_editor: svg_output: X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901\svg_output (15 slides)
+  [00:31:15] [INFO] svg_editor: idle timeout: 7200s (0 = disabled)
+  [00:31:15] [INFO] svg_editor: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+   * Running on http://127.0.0.1:6060
+  [00:31:15] [INFO] svg_editor: [33mPress CTRL+C to quit[0m
+  [00:31:24] [INFO] svg_editor: 127.0.0.1 - - [01/Sep/2026 00:31:24] "GET / HTTP/1.1" 200 -
+
+=== 2026-08-31T16:41:06.553Z PYTHON run=7e818313f60a ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_quality_checker.py", "X:\\PROJECT\\校外实训\\projects\\debugmate-defense-ppt_ppt169_20260901", "--canonical-authoring", "--stage", "final", "--format", "ppt169"]
+stdout:
+  [WARN] P01.svg - Passed (with warnings)
+     [WARN] Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)
+     [WARN] Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id="slide-content"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy="0". Keep semantically independent text frames separate.
+  [WARN] P02.svg - Passed (with warnings)
+  [SUMMARY] Check Summary
+  Total files: 15
+    [OK] Fully passed: 0 (0%)
+    [WARN] With warnings: 15 (100%)
+    [ERROR] With errors: 0 (0%)
+  Provenance categories:
+    blocking: 0          hard findings; gate also requires exit 0
+    introduced: 26       advisory; new or changed
+    inherited: 0         informational; prototype-identical
+    source-import: 0     informational; source-conversion loss
+  [CARRIERS] Actual-use receipt (informational; not a quota)
+    Pages: 15 | text: 317 | images: 6 | icons: 0
+    Geometry: SVG elements 204 | native presets 0 | page-frame elements 15 | marker uses 0
+=== 2026-08-31T16:41:08.192Z END run=7e818313f60a elapsed_ms=1638 output_lines=112 retained=17 omitted=95 ===
+
+=== 2026-08-31T16:41:08.385Z PYTHON run=df9346760c2d ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\finalize_svg.py", "X:\\PROJECT\\校外实训\\projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [OK] Done!
+=== 2026-08-31T16:41:10.807Z END run=df9346760c2d elapsed_ms=2421 output_lines=12 retained=1 omitted=11 ===
+
+=== 2026-08-31T16:41:11.067Z PYTHON run=0cbbabeabc0e ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\svg_to_pptx.py", "X:\\PROJECT\\校外实训\\projects\\debugmate-defense-ppt_ppt169_20260901", "--no-notes"]
+stdout:
+  [Done] Saved: X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901\exports\debugmate-defense-ppt_20260901_004112.pptx
+    [POSTFLIGHT] status=passed-with-warnings quality_gate=passed slides=15 warning_categories=2
+    [POSTFLIGHT][WARNING] quality_introduced_warnings=26
+    [POSTFLIGHT][WARNING] unsafe_exported_font_faces=1
+    [PPTX] X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901\exports\debugmate-defense-ppt_20260901_004112.pptx
+    [REPORT] X:\PROJECT\校外实训\projects\debugmate-defense-ppt_ppt169_20260901\validation\debugmate-defense-ppt_20260901_004112.report.json
+=== 2026-08-31T16:41:14.252Z END run=0cbbabeabc0e elapsed_ms=3185 output_lines=54 retained=6 omitted=48 ===
+
+=== 2026-08-31T16:46:18.929Z PYTHON run=4cccc973740d ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "validate", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [ERROR]
+    - design_spec.md schema: condition 'ai-image-strategy' requires subheading 'AI Image Strategy' in section 'visual_theme'
+  [WARN]
+    - Non-standard SVG file naming: P01.svg
+    - Non-standard SVG file naming: P02.svg
+  [ERROR] Project structure is invalid.
+=== 2026-08-31T16:46:19.891Z END run=4cccc973740d elapsed_ms=962 output_lines=21 retained=6 omitted=15 ===
+
+=== 2026-08-31T16:46:45.095Z PYTHON run=db8097a6cc87 ===
+cwd: X:\PROJECT\校外实训
+argv: ["X:\\PROJECT\\校外实训\\.venv\\Scripts\\python.exe", "C:\\Users\\20795\\.codex\\skills\\ppt-master\\scripts\\project_manager.py", "validate", "projects\\debugmate-defense-ppt_ppt169_20260901"]
+stdout:
+  [WARN]
+  [OK] Project structure is valid, with warnings.
+=== 2026-08-31T16:46:46.045Z END run=db8097a6cc87 elapsed_ms=949 output_lines=19 retained=2 omitted=17 ===

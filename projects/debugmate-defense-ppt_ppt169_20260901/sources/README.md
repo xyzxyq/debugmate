@@ -53,7 +53,6 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 - 字幕：`deliverables/DebugMate-V0.1-subtitles.srt`
 - 演示讲解稿：`docs/course/video-script.md`
 - PPT 结构：`docs/course/presentation-outline.md`
-- PPT 可复现构建：`scripts/build-defense-ppt.py`；设计规格与 SVG 源文件位于 `projects/debugmate-defense-ppt_ppt169_20260901/`
 - 案例说明：`docs/course/v0.1-demo-cases.md`
 - 提示词对比：`docs/course/prompt-iteration.md`
 - 真实截图与清单：`evidence/course-v0.1/`

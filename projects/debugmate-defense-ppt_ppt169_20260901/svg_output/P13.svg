@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">03 · HONESTY</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">13 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">失败也要诚实</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">外部节点失败时保留真实失败记录，只重试失败的产物</text>
+<rect x="56" y="180" width="440" height="410" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<image href="../images/02-tts-partial.png" x="70" y="194" width="412" height="310" preserveAspectRatio="xMidYMid meet"/>
+<rect x="82" y="522" width="164" height="30" rx="15" fill="#FBE5DB" stroke="#FBE5DB" stroke-width="1.5" opacity="1"/>
+<text x="164.0" y="542" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">TTS failed → 重试语音</text>
+<rect x="840" y="180" width="384" height="410" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<image href="../images/03-card-partial.png" x="854" y="194" width="356" height="310" preserveAspectRatio="xMidYMid meet"/>
+<rect x="866" y="522" width="188" height="30" rx="15" fill="#E1F1EC" stroke="#E1F1EC" stroke-width="1.5" opacity="1"/>
+<text x="960.0" y="542" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#0F9D8A">PNG failed → 重试诊断卡</text>
+<rect x="540" y="240" width="230" height="300" rx="18" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="655" y="284" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="19" font-weight="700" fill="#BCE5DB">最小重试</text>
+<text x="576" y="340" font-family="Microsoft YaHei, Arial" font-size="16" font-weight="400" fill="#FFFFFF">保留已完成结果</text>
+<text x="576" y="382" font-family="Microsoft YaHei, Arial" font-size="16" font-weight="400" fill="#FFFFFF">记录失败节点</text>
+<text x="576" y="424" font-family="Microsoft YaHei, Arial" font-size="16" font-weight="400" fill="#FFFFFF">给出可重试范围</text>
+<text x="576" y="466" font-family="Microsoft YaHei, Arial" font-size="16" font-weight="400" fill="#FFFFFF">不伪装 cloud success</text>
+<line x1="502" y1="382" x2="520" y2="382" stroke="#F0784A" stroke-width="2" stroke-linecap="round"/>
+<path d="M 517 375 L 532 382 L 517 389" fill="none" stroke="#F0784A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="778" y1="382" x2="820" y2="382" stroke="#0F9D8A" stroke-width="2" stroke-linecap="round"/>
+<path d="M 817 375 L 832 382 L 817 389" fill="none" stroke="#0F9D8A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="56" y="628" font-family="Microsoft YaHei, Arial" font-size="16" fill="#708087">当前边界：Dify 浏览器端曾出现 timeout / 旧契约响应；正式材料保留限制，并明确使用 local fallback 或 replay。</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">03 · PROMPT</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">10 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">V1–V4：从能回答到可派生</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">提示词优化的终点不是更长，而是证据、结构和多模态输出保持一致</text>
+<line x1="100" y1="360" x2="1180" y2="360" stroke="#C5D2CC" stroke-width="4"/>
+<circle cx="120" cy="360" r="24" fill="#F0784A"/>
+<text x="120" y="368" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="14" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="110" y="290" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="24" font-weight="700" fill="#F0784A">V1</text>
+<text x="110" y="426" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="20" font-weight="700" fill="#14212B">基础诊断</text>
+<text x="110" y="458" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">类别 / 原因 / 步骤</text>
+<rect x="61" y="500" width="118" height="30" rx="15" fill="#FBE5DB" stroke="#FBE5DB" stroke-width="1.5" opacity="1"/>
+<text x="120.0" y="520" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">能回答</text>
+<circle cx="400" cy="360" r="24" fill="#0F9D8A"/>
+<text x="400" y="368" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="14" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="390" y="290" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="24" font-weight="700" fill="#0F9D8A">V2</text>
+<text x="390" y="426" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="20" font-weight="700" fill="#14212B">引用约束</text>
+<text x="390" y="458" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">事实 / 推断 / 缺失信息</text>
+<rect x="341" y="500" width="118" height="30" rx="15" fill="#E1F1EC" stroke="#E1F1EC" stroke-width="1.5" opacity="1"/>
+<text x="400.0" y="520" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#0F9D8A">有依据</text>
+<circle cx="680" cy="360" r="24" fill="#6D7BB8"/>
+<text x="680" y="368" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="14" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="670" y="290" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="24" font-weight="700" fill="#6D7BB8">V3</text>
+<text x="670" y="426" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="20" font-weight="700" fill="#14212B">结构可靠</text>
+<text x="670" y="458" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">命令影响 / 预期 / 回退</text>
+<rect x="621" y="500" width="118" height="30" rx="15" fill="#FBE5DB" stroke="#FBE5DB" stroke-width="1.5" opacity="1"/>
+<text x="680.0" y="520" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">可校验</text>
+<circle cx="960" cy="360" r="24" fill="#F0784A"/>
+<text x="960" y="368" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="14" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="950" y="290" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="24" font-weight="700" fill="#F0784A">V4</text>
+<text x="950" y="426" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="20" font-weight="700" fill="#14212B">课程定稿</text>
+<text x="950" y="458" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">recap → 报告 / PNG / MP3</text>
+<rect x="901" y="500" width="118" height="30" rx="15" fill="#FBE5DB" stroke="#FBE5DB" stroke-width="1.5" opacity="1"/>
+<text x="960.0" y="520" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">可派生</text>
+<rect x="56" y="570" width="1168" height="46" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<text x="640" y="599" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#708087">V1 有固定案例 manifest；V2–V4 的采用、限制与未验证范围保留在版本化账本中。</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

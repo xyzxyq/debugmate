@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">03 · PROOF</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">11 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">一次完整诊断的真实结果</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">真实 Microsoft Edge 截图：输入、证据、诊断和下载处在同一个工作台</text>
+<rect x="56" y="172" width="920" height="430" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<image href="../images/01-completed-overview.png" x="70" y="186" width="892" height="402" preserveAspectRatio="xMidYMid meet"/>
+<rect x="1010" y="190" width="214" height="370" rx="18" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="1038" y="235" font-family="Microsoft YaHei, Arial" font-size="20" font-weight="700" fill="#BCE5DB">三处关键证据</text>
+<circle cx="1042" cy="287" r="12" fill="#0F9D8A"/>
+<text x="1042" y="292" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">1</text>
+<text x="1066" y="294" font-family="Microsoft YaHei, Arial" font-size="16" fill="#FFFFFF">脱敏输入</text>
+<circle cx="1042" cy="362" r="12" fill="#0F9D8A"/>
+<text x="1042" y="367" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">2</text>
+<text x="1066" y="369" font-family="Microsoft YaHei, Arial" font-size="16" fill="#FFFFFF">事实与引用</text>
+<circle cx="1042" cy="437" r="12" fill="#F0784A"/>
+<text x="1042" y="442" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">3</text>
+<text x="1066" y="444" font-family="Microsoft YaHei, Arial" font-size="16" fill="#FFFFFF">报告 / 卡 / 音频 / ZIP</text>
+<text x="1038" y="492" font-family="Microsoft YaHei, Arial" font-size="14" fill="#F6C2AF">截图标记：离线回放</text>
+<text x="1038" y="520" font-family="Microsoft YaHei, Arial" font-size="14" fill="#D8E5E1">不把回放称为实时云端</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

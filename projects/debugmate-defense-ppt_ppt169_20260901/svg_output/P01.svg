@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="cover" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">DEFENSE DECK</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">01 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<image href="../images/cover-concept.png" x="530" y="0" width="750" height="720" preserveAspectRatio="xMidYMid slice"/>
+<rect x="0" y="0" width="690" height="720" fill="#F7F5EF" opacity="0.96"/>
+<text x="66" y="150" font-family="Microsoft YaHei, Arial" font-size="68" font-weight="700" fill="#14212B">DebugMate</text>
+<text x="69" y="204" font-family="Microsoft YaHei, Arial" font-size="24" fill="#0F9D8A">从报错到复盘</text>
+<text x="69" y="275" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="400" fill="#33424D">面向 AI 专业学习场景的</text>
+<text x="69" y="317" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="400" fill="#33424D">多模态报错诊断与复盘智能体</text>
+<line x1="69" y1="370" x2="355" y2="370" stroke="#F0784A" stroke-width="5"/>
+<text x="69" y="422" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="#14212B">有依据</text>
+<text x="69" y="464" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="#14212B">可执行</text>
+<text x="69" y="506" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="#14212B">说明不确定性</text>
+<rect x="69" y="575" width="144" height="30" rx="15" fill="#D9EEE8" stroke="#D9EEE8" stroke-width="1.5" opacity="1"/>
+<text x="141.0" y="595" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#0F9D8A">《校外实训》</text>
+<rect x="225" y="575" width="102" height="30" rx="15" fill="#D9EEE8" stroke="#D9EEE8" stroke-width="1.5" opacity="1"/>
+<text x="276.0" y="595" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#0F9D8A">V0.1</text>
+<rect x="339" y="575" width="138" height="30" rx="15" fill="#FBE5DB" stroke="#FBE5DB" stroke-width="1.5" opacity="1"/>
+<text x="408.0" y="595" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="#F0784A">本地演示版</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">Defense deck · 2026.09</text>
+</g>
+</svg>

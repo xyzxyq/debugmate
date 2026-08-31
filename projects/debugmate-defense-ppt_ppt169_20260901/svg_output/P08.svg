@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">02 · EVIDENCE</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">08 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">专属知识库：17 个官方来源</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">检索不是装饰：来源、版本范围、内容哈希和构建 ID 都进入证据链</text>
+<rect x="56" y="188" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="56" y="188" width="7" height="64" rx="3" fill="#0F9D8A"/>
+<text x="80" y="215" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">Python 异常</text>
+<text x="80" y="237" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">导入 / Traceback</text>
+<rect x="366" y="188" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="366" y="188" width="7" height="64" rx="3" fill="#F0784A"/>
+<text x="390" y="215" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">pip / venv</text>
+<text x="390" y="237" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">环境 / 依赖</text>
+<rect x="56" y="274" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="56" y="274" width="7" height="64" rx="3" fill="#6D7BB8"/>
+<text x="80" y="301" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">PyTorch</text>
+<text x="80" y="323" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">张量 / 序列化</text>
+<rect x="366" y="274" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="366" y="274" width="7" height="64" rx="3" fill="#0F9D8A"/>
+<text x="390" y="301" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">CUDA</text>
+<text x="390" y="323" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">显存 / 设备</text>
+<rect x="56" y="360" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="56" y="360" width="7" height="64" rx="3" fill="#F0784A"/>
+<text x="80" y="387" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">Hugging Face</text>
+<text x="80" y="409" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">模型 / Hub</text>
+<rect x="366" y="360" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="366" y="360" width="7" height="64" rx="3" fill="#6D7BB8"/>
+<text x="390" y="387" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">Ultralytics</text>
+<text x="390" y="409" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">训练 / 预测</text>
+<rect x="56" y="446" width="280" height="64" rx="14" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<rect x="56" y="446" width="7" height="64" rx="3" fill="#0F9D8A"/>
+<text x="80" y="473" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">Windows</text>
+<text x="80" y="495" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">PATH / PowerShell</text>
+<rect x="730" y="188" width="494" height="330" rx="20" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="766" y="236" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#BCE5DB">一次命中，至少回答四个问题</text>
+<circle cx="774" cy="279" r="10" fill="#0F9D8A"/>
+<text x="774" y="283" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">✓</text>
+<text x="798" y="286" font-family="Microsoft YaHei, Arial" font-size="17" fill="#FFFFFF">来源 URL 是什么？</text>
+<circle cx="774" cy="327" r="10" fill="#0F9D8A"/>
+<text x="774" y="331" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">✓</text>
+<text x="798" y="334" font-family="Microsoft YaHei, Arial" font-size="17" fill="#FFFFFF">适用的版本范围是什么？</text>
+<circle cx="774" cy="375" r="10" fill="#0F9D8A"/>
+<text x="774" y="379" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">✓</text>
+<text x="798" y="382" font-family="Microsoft YaHei, Arial" font-size="17" fill="#FFFFFF">命中的 chunk / locator 在哪里？</text>
+<circle cx="774" cy="423" r="10" fill="#0F9D8A"/>
+<text x="774" y="427" text-anchor="middle" font-family="Arial" font-size="12" fill="#FFFFFF">✓</text>
+<text x="798" y="430" font-family="Microsoft YaHei, Arial" font-size="17" fill="#FFFFFF">是否绑定当前 knowledge_build_id？</text>
+<text x="766" y="478" font-family="Cascadia Mono, Consolas, monospace" font-size="14" fill="#F6C2AF">knowledge_build_id: e8e065…71ff</text>
+<rect x="56" y="492" width="590" height="74" rx="16" fill="#FBE5DB" stroke="#F0C4B4" stroke-width="1.5" opacity="1"/>
+<text x="84" y="524" font-family="Microsoft YaHei, Arial" font-size="16" font-weight="700" fill="#F0784A">无命中 ≠ 可以猜</text>
+<text x="84" y="549" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">证据不足时，诊断必须明确记录缺失信息。</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

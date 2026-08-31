@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">01 · SCOPE</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">04 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">V0.1 做什么，也不做什么</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">课程交付优先：闭环真实可演示，边界明确不夸大</text>
+<rect x="56" y="190" width="540" height="410" rx="20" fill="#E1F1EC" stroke="#B9DDD3" stroke-width="1.5" opacity="1"/>
+<rect x="644" y="190" width="580" height="410" rx="20" fill="#FBEAE3" stroke="#F0C4B4" stroke-width="1.5" opacity="1"/>
+<text x="92" y="240" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="700" fill="#0F9D8A">本版本交付</text>
+<text x="680" y="240" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="700" fill="#F0784A">明确延后</text>
+<circle cx="96" cy="285" r="12" fill="#0F9D8A"/>
+<text x="96" y="290" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="122" y="292" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">Windows 本地浏览器真实演示</text>
+<circle cx="96" cy="339" r="12" fill="#0F9D8A"/>
+<text x="96" y="344" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="122" y="346" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">17 个官方知识来源与检索证据</text>
+<circle cx="96" cy="393" r="12" fill="#0F9D8A"/>
+<text x="96" y="398" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="122" y="400" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">上传前脱敏 + 用户预览确认</text>
+<circle cx="96" cy="447" r="12" fill="#0F9D8A"/>
+<text x="96" y="452" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="122" y="454" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">同源报告 / PNG / MP3 / ZIP</text>
+<circle cx="96" cy="501" r="12" fill="#0F9D8A"/>
+<text x="96" y="506" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">✓</text>
+<text x="122" y="508" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">4 个代表性案例与提示词账本</text>
+<circle cx="684" cy="285" r="12" fill="#F0784A"/>
+<text x="684" y="290" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">–</text>
+<text x="710" y="292" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">公网部署、账户、权限与 SLA</text>
+<circle cx="684" cy="339" r="12" fill="#F0784A"/>
+<text x="684" y="344" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">–</text>
+<text x="710" y="346" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">跨平台并发和生产监控</text>
+<circle cx="684" cy="393" r="12" fill="#F0784A"/>
+<text x="684" y="398" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">–</text>
+<text x="710" y="400" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">稳定的 Dify 浏览器端全链路</text>
+<circle cx="684" cy="447" r="12" fill="#F0784A"/>
+<text x="684" y="452" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">–</text>
+<text x="710" y="454" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">自动执行修复命令</text>
+<circle cx="684" cy="501" r="12" fill="#F0784A"/>
+<text x="684" y="506" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#FFFFFF">–</text>
+<text x="710" y="508" font-family="Microsoft YaHei, Arial" font-size="17" fill="#14212B">把未验证输出扩写成成功率</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">03 · PROOF</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">12 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">三种输出，共享一个身份</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">同一份 DiagnosisRecord 派生出文字、图像、语音与证据包</text>
+<rect x="56" y="222" width="300" height="260" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<text x="88" y="270" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#0F9D8A">文字报告</text>
+<text x="88" y="314" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">事实 / 推断</text>
+<text x="88" y="348" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">缺失信息</text>
+<text x="88" y="382" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">检查与验证</text>
+<text x="88" y="416" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">置信度与局限</text>
+<rect x="490" y="182" width="300" height="340" rx="24" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="640" y="242" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="20" font-weight="700" fill="#BCE5DB">shared identity</text>
+<text x="535" y="302" font-family="Cascadia Mono, Consolas, monospace" font-size="17" font-weight="400" fill="#FFFFFF">case_id</text>
+<text x="535" y="348" font-family="Cascadia Mono, Consolas, monospace" font-size="17" font-weight="400" fill="#FFFFFF">source_run_id</text>
+<text x="535" y="394" font-family="Cascadia Mono, Consolas, monospace" font-size="17" font-weight="400" fill="#FFFFFF">diagnosis_hash</text>
+<text x="535" y="440" font-family="Cascadia Mono, Consolas, monospace" font-size="17" font-weight="400" fill="#FFFFFF">schema_version</text>
+<rect x="924" y="222" width="300" height="260" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<text x="956" y="270" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#F0784A">PNG / MP3 / ZIP</text>
+<text x="956" y="314" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">Pillow 确定性诊断卡</text>
+<text x="956" y="352" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">同一 recap_text 生成语音</text>
+<text x="956" y="390" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="400" fill="#33424D">manifest + SHA-256 校验</text>
+<image href="../images/card.png" x="956" y="424" width="230" height="76" preserveAspectRatio="xMidYMid meet"/>
+<line x1="365" y1="350" x2="462" y2="350" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 459 343 L 474 350 L 459 357" fill="none" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="806" y1="350" x2="903" y2="350" stroke="#F0784A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 900 343 L 915 350 L 900 357" fill="none" stroke="#F0784A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="56" y="560" width="1168" height="48" rx="14" fill="#D9EEE8" stroke="#D9EEE8" stroke-width="1.5" opacity="1"/>
+<text x="640" y="591" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#0F9D8A">同源 ≠ 同格式；同源 = 同一身份、同一事实、同一限制。</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

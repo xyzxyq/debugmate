@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="ending" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">05 · CLOSE</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">15 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">总结：把“修好一次”变成“理解一次”</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">DebugMate V0.1 已形成课程可提交的多模态诊断闭环</text>
+<circle cx="92" cy="330" r="34" fill="#F0784A"/>
+<text x="92" y="338" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#FFFFFF">报错</text>
+<text x="92" y="405" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">真实或可复现</text>
+<line x1="134" y1="330" x2="272" y2="330" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 269 323 L 284 330 L 269 337" fill="none" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="314" cy="330" r="34" fill="#0F9D8A"/>
+<text x="314" y="338" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#FFFFFF">隐私</text>
+<text x="314" y="405" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">先预览再确认</text>
+<line x1="356" y1="330" x2="494" y2="330" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 491 323 L 506 330 L 491 337" fill="none" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="536" cy="330" r="34" fill="#6D7BB8"/>
+<text x="536" y="338" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#FFFFFF">知识</text>
+<text x="536" y="405" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">官方来源可追溯</text>
+<line x1="578" y1="330" x2="716" y2="330" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 713 323 L 728 330 L 713 337" fill="none" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="758" cy="330" r="34" fill="#F0784A"/>
+<text x="758" y="338" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#FFFFFF">诊断</text>
+<text x="758" y="405" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">结构化且有边界</text>
+<line x1="800" y1="330" x2="938" y2="330" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 935 323 L 950 330 L 935 337" fill="none" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="980" cy="330" r="34" fill="#0F9D8A"/>
+<text x="980" y="338" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#FFFFFF">复盘</text>
+<text x="980" y="405" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="15" fill="#33424D">报告 / PNG / MP3 / ZIP</text>
+<rect x="56" y="500" width="1168" height="88" rx="18" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="88" y="538" font-family="Microsoft YaHei, Arial" font-size="17" fill="#D8E5E1">现场演示顺序</text>
+<text x="88" y="566" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="700" fill="#FFFFFF">脱敏预览 → 用户确认 → 诊断与引用 → 三模态产物 → 失败降级说明</text>
+<text x="56" y="635" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">云端 live、本地 fallback、固定 replay：三者都可以演示，但必须被准确命名。</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · 课程答辩收束</text>
+</g>
+</svg>

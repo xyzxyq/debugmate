@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">02 · SYSTEM</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">07 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">系统架构：DiagnosisRecord 是单一事实源</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">三种媒体不是三个答案，而是一个结构化对象的不同投影</text>
+<rect x="56" y="214" width="280" height="290" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<text x="86" y="255" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#0F9D8A">输入与证据</text>
+<text x="86" y="305" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">error_text</text>
+<text x="86" y="344" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">code / environment</text>
+<text x="86" y="383" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">observed_facts</text>
+<text x="86" y="422" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">knowledge chunks</text>
+<text x="86" y="461" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">support_links</text>
+<rect x="400" y="170" width="480" height="380" rx="24" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="440" y="232" font-family="Cascadia Mono, Consolas, monospace" font-size="23" font-weight="700" fill="#BCE5DB">DiagnosisRecord</text>
+<text x="440" y="270" font-family="Microsoft YaHei, Arial" font-size="20" font-weight="700" fill="#FFFFFF">schema_version 1.1.0</text>
+<rect x="440" y="302" width="370" height="28" rx="8" fill="#263841"/>
+<text x="458" y="322" font-family="Cascadia Mono, Consolas, monospace" font-size="15" fill="#D8E5E1">case_id</text>
+<rect x="440" y="340" width="370" height="28" rx="8" fill="#263841"/>
+<text x="458" y="360" font-family="Cascadia Mono, Consolas, monospace" font-size="15" fill="#D8E5E1">root_cause_candidates</text>
+<rect x="440" y="378" width="370" height="28" rx="8" fill="#263841"/>
+<text x="458" y="398" font-family="Cascadia Mono, Consolas, monospace" font-size="15" fill="#D8E5E1">checks</text>
+<rect x="440" y="416" width="370" height="28" rx="8" fill="#263841"/>
+<text x="458" y="436" font-family="Cascadia Mono, Consolas, monospace" font-size="15" fill="#D8E5E1">verification_steps</text>
+<rect x="440" y="454" width="370" height="28" rx="8" fill="#263841"/>
+<text x="458" y="474" font-family="Cascadia Mono, Consolas, monospace" font-size="15" fill="#D8E5E1">limitations</text>
+<rect x="944" y="214" width="280" height="290" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<text x="974" y="255" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#F0784A">派生结果</text>
+<text x="974" y="305" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">Markdown report</text>
+<text x="974" y="350" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">Pillow diagnostic card</text>
+<text x="974" y="395" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">MP3 recap</text>
+<text x="974" y="440" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="400" fill="#33424D">ZIP + manifest</text>
+<line x1="342" y1="360" x2="378" y2="360" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 375 353 L 390 360 L 375 367" fill="none" stroke="#0F9D8A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="888" y1="360" x2="924" y2="360" stroke="#F0784A" stroke-width="3" stroke-linecap="round"/>
+<path d="M 921 353 L 936 360 L 921 367" fill="none" stroke="#F0784A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

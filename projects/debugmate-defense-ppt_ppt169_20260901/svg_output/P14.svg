@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" data-pptx-page-role="content" font-family="Microsoft YaHei, Arial">
+<rect id="page-background" data-pptx-role="background" x="0" y="0" width="1280" height="720" fill="#F7F5EF"/>
+<g id="page-chrome" data-pptx-bounds="56 20 1168 40">
+<text x="56" y="39" font-family="Microsoft YaHei, Arial" font-size="13" letter-spacing="2" fill="#0F9D8A">04 · EVALUATION</text>
+<text x="1170" y="39" font-family="Consolas, Courier New, monospace" font-size="13" fill="#708087">14 / 15</text>
+<rect x="56" y="54" width="32" height="4" rx="2" fill="#F0784A"/>
+</g>
+<g id="slide-content" data-pptx-bounds="56 60 1168 650">
+<text x="56" y="105" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="700" fill="#14212B">评测与自动验证</text>
+<text x="58" y="137" font-family="Microsoft YaHei, Arial" font-size="17" fill="#708087">以可复算证据作为完成标准，而不是以虚构成功率作为完成标准</text>
+<rect x="56" y="180" width="600" height="400" rx="18" fill="#FFFFFF" stroke="#C5D2CC" stroke-width="1.5" opacity="1"/>
+<text x="86" y="226" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#0F9D8A">Phase 9 · 4 个代表性案例</text>
+<text x="88" y="280" font-family="Cascadia Mono, Consolas, monospace" font-size="16" font-weight="700" fill="#F0784A">C01</text>
+<text x="150" y="280" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">依赖缺失</text>
+<text x="350" y="280" font-family="Cascadia Mono, Consolas, monospace" font-size="14" fill="#708087">blocked / real_live</text>
+<line x1="88" y1="298" x2="602" y2="298" stroke="#C5D2CC"/>
+<text x="88" y="343" font-family="Cascadia Mono, Consolas, monospace" font-size="16" font-weight="700" fill="#6D7BB8">C02</text>
+<text x="150" y="343" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">信息不足</text>
+<text x="350" y="343" font-family="Cascadia Mono, Consolas, monospace" font-size="14" fill="#708087">insufficient_data</text>
+<line x1="88" y1="361" x2="602" y2="361" stroke="#C5D2CC"/>
+<text x="88" y="406" font-family="Cascadia Mono, Consolas, monospace" font-size="16" font-weight="700" fill="#0F9D8A">C03</text>
+<text x="150" y="406" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">长文本 replay</text>
+<text x="350" y="406" font-family="Cascadia Mono, Consolas, monospace" font-size="14" fill="#708087">blocked / replay</text>
+<line x1="88" y1="424" x2="602" y2="424" stroke="#C5D2CC"/>
+<text x="88" y="469" font-family="Cascadia Mono, Consolas, monospace" font-size="16" font-weight="700" fill="#F0784A">C04</text>
+<text x="150" y="469" font-family="Microsoft YaHei, Arial" font-size="17" font-weight="700" fill="#14212B">fallback partial</text>
+<text x="350" y="469" font-family="Cascadia Mono, Consolas, monospace" font-size="14" fill="#708087">partial</text>
+<line x1="88" y1="487" x2="602" y2="487" stroke="#C5D2CC"/>
+<rect x="704" y="180" width="520" height="400" rx="18" fill="#14212B" stroke="#14212B" stroke-width="1.5" opacity="1"/>
+<text x="740" y="226" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#BCE5DB">自动验证结果</text>
+<text x="756" y="300" font-family="Consolas, Courier New, monospace" font-size="40" font-weight="700" fill="#BCE5DB">1177</text>
+<text x="756" y="330" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="400" fill="#FFFFFF">offline regression passed</text>
+<text x="976" y="300" font-family="Consolas, Courier New, monospace" font-size="40" font-weight="700" fill="#BCE5DB">113</text>
+<text x="976" y="330" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="400" fill="#FFFFFF">privacy tests passed</text>
+<text x="756" y="425" font-family="Consolas, Courier New, monospace" font-size="40" font-weight="700" fill="#F6C2AF">1</text>
+<text x="756" y="455" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="400" fill="#FFFFFF">cloud contract test passed</text>
+<text x="976" y="425" font-family="Consolas, Courier New, monospace" font-size="40" font-weight="700" fill="#F6C2AF">0</text>
+<text x="976" y="455" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="400" fill="#FFFFFF">Phase 10 eligible source</text>
+<text x="740" y="550" font-family="Microsoft YaHei, Arial" font-size="14" fill="#F6C2AF">0 eligible 表示保持诚实，不把阻塞案例扩写进课程证据。</text>
+<line x1="56" y1="675" x2="1224" y2="675" stroke="#C5D2CC" stroke-width="1"/>
+<text x="56" y="699" font-family="Microsoft YaHei, Arial" font-size="13" fill="#708087">DebugMate · V0.1 · 可追溯诊断工作流</text>
+</g>
+</svg>

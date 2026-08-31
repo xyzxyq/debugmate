@@ -1,0 +1,368 @@
+{
+  "schema": "ppt-master.pptx-postflight-report.v1",
+  "status": "passed-with-warnings",
+  "output": {
+    "path": "X:\\PROJECT\\校外实训\\projects\\debugmate-defense-ppt_ppt169_20260901\\exports\\debugmate-defense-ppt_20260901_002644.pptx",
+    "bytes": 3154488
+  },
+  "source": {
+    "svg_slide_count": 15,
+    "layout_definition_count": 0,
+    "fingerprint": {
+      "algorithm": "sha256",
+      "digest": "4c896a49054896201d855635031f3868410566ebc19c32ecd2f22874fa35042b",
+      "file_count": 15,
+      "files": [
+        {
+          "file": "P01.svg",
+          "sha256": "4af43a85cb5cd04442e7f4ce40748b300de753e3c179f7e93ec37b9730dfd1ca"
+        },
+        {
+          "file": "P02.svg",
+          "sha256": "f0564d04da8b586f23cc14694a28402034a4ccfeeef279b7e683b08bbf7b2eca"
+        },
+        {
+          "file": "P03.svg",
+          "sha256": "56b46480f81029312ccf185195a32bf18e06f466952f25bdb3bf0f216dbb98eb"
+        },
+        {
+          "file": "P04.svg",
+          "sha256": "4ce03646c0823507698aa80fb7a8f14b145c158563a35abd8f1eb431002ce5bf"
+        },
+        {
+          "file": "P05.svg",
+          "sha256": "9c77a2e995c200471202c073f25ea211f43cf7c0168a0df465e6257ab8912619"
+        },
+        {
+          "file": "P06.svg",
+          "sha256": "c0dd48e8714d534d024189237e67bd8697846bd31a8c90be84b7b7d1c7f1ee6e"
+        },
+        {
+          "file": "P07.svg",
+          "sha256": "cde7e936e198cb2a59ecb1f26a186ae730cb1ae1e6d1bc675390e6afd3f2fd81"
+        },
+        {
+          "file": "P08.svg",
+          "sha256": "4b852d3d2a1938134b5938328b8847b0b8e6dfc92d71aca77fdd04e64c052407"
+        },
+        {
+          "file": "P09.svg",
+          "sha256": "5d3a647fd1c50bfe7fbd0e2b99106a298ccaf25f34adf77a4722d95eb6272acf"
+        },
+        {
+          "file": "P10.svg",
+          "sha256": "5373a40f820c9ca63b34bb18c85670826e7c8dff3861cbd9167cbeec5b585f46"
+        },
+        {
+          "file": "P11.svg",
+          "sha256": "3cc126b8f1ae383dd6fad27b34bd098660ac2663e65f670463723a242ce3e161"
+        },
+        {
+          "file": "P12.svg",
+          "sha256": "d2c304add54d88f89f598fdb319f1a1f62f74b925722d716de058eee3925a092"
+        },
+        {
+          "file": "P13.svg",
+          "sha256": "282d4ad77bd54e7d4e59db35372e6a18456fbe1c20eb474cbe80c1555772b009"
+        },
+        {
+          "file": "P14.svg",
+          "sha256": "e6a3c47cfede9f898719694439b1f94db04d9f89b6650233cbb5dfc24a238ef4"
+        },
+        {
+          "file": "P15.svg",
+          "sha256": "6e0ad855f9c69f5f5ed288f7d2330ae27b1a11e8caac48dc2aa2a253144c5715"
+        }
+      ]
+    },
+    "authoring_roundtrip": null
+  },
+  "package": {
+    "zip_integrity": "passed",
+    "corrupt_member": null,
+    "slides": 15,
+    "notes": 0,
+    "masters": 1,
+    "layouts": 1
+  },
+  "checks": {
+    "zip_integrity": "passed",
+    "slide_count": "passed",
+    "internal_relationships": "enforced-at-build",
+    "structured_package": "not-applicable",
+    "transitions": "enforced-at-build",
+    "animations": "enforced-at-build",
+    "project_svg_contract": "enforced-at-build",
+    "compatibility_normalization": "not-applicable",
+    "authoring_roundtrip": "not-applicable",
+    "quality_gate": "passed",
+    "quality_warnings": "warning",
+    "template_tokens": "passed",
+    "external_images": "passed",
+    "font_portability": "warning"
+  },
+  "quality": {
+    "status": "loaded",
+    "path": "projects\\debugmate-defense-ppt_ppt169_20260901\\validation\\svg_quality_report.json",
+    "schema": "ppt-master.svg-quality-report.v1",
+    "stage": "final",
+    "source_match": "passed",
+    "source_fingerprint": {
+      "algorithm": "sha256",
+      "digest": "4c896a49054896201d855635031f3868410566ebc19c32ecd2f22874fa35042b",
+      "file_count": 15,
+      "files": [
+        {
+          "file": "P01.svg",
+          "sha256": "4af43a85cb5cd04442e7f4ce40748b300de753e3c179f7e93ec37b9730dfd1ca"
+        },
+        {
+          "file": "P02.svg",
+          "sha256": "f0564d04da8b586f23cc14694a28402034a4ccfeeef279b7e683b08bbf7b2eca"
+        },
+        {
+          "file": "P03.svg",
+          "sha256": "56b46480f81029312ccf185195a32bf18e06f466952f25bdb3bf0f216dbb98eb"
+        },
+        {
+          "file": "P04.svg",
+          "sha256": "4ce03646c0823507698aa80fb7a8f14b145c158563a35abd8f1eb431002ce5bf"
+        },
+        {
+          "file": "P05.svg",
+          "sha256": "9c77a2e995c200471202c073f25ea211f43cf7c0168a0df465e6257ab8912619"
+        },
+        {
+          "file": "P06.svg",
+          "sha256": "c0dd48e8714d534d024189237e67bd8697846bd31a8c90be84b7b7d1c7f1ee6e"
+        },
+        {
+          "file": "P07.svg",
+          "sha256": "cde7e936e198cb2a59ecb1f26a186ae730cb1ae1e6d1bc675390e6afd3f2fd81"
+        },
+        {
+          "file": "P08.svg",
+          "sha256": "4b852d3d2a1938134b5938328b8847b0b8e6dfc92d71aca77fdd04e64c052407"
+        },
+        {
+          "file": "P09.svg",
+          "sha256": "5d3a647fd1c50bfe7fbd0e2b99106a298ccaf25f34adf77a4722d95eb6272acf"
+        },
+        {
+          "file": "P10.svg",
+          "sha256": "5373a40f820c9ca63b34bb18c85670826e7c8dff3861cbd9167cbeec5b585f46"
+        },
+        {
+          "file": "P11.svg",
+          "sha256": "3cc126b8f1ae383dd6fad27b34bd098660ac2663e65f670463723a242ce3e161"
+        },
+        {
+          "file": "P12.svg",
+          "sha256": "d2c304add54d88f89f598fdb319f1a1f62f74b925722d716de058eee3925a092"
+        },
+        {
+          "file": "P13.svg",
+          "sha256": "282d4ad77bd54e7d4e59db35372e6a18456fbe1c20eb474cbe80c1555772b009"
+        },
+        {
+          "file": "P14.svg",
+          "sha256": "e6a3c47cfede9f898719694439b1f94db04d9f89b6650233cbb5dfc24a238ef4"
+        },
+        {
+          "file": "P15.svg",
+          "sha256": "6e0ad855f9c69f5f5ed288f7d2330ae27b1a11e8caac48dc2aa2a253144c5715"
+        }
+      ]
+    },
+    "summary": {
+      "total": 15,
+      "passed": 0,
+      "warnings": 15,
+      "errors": 0
+    },
+    "categories": {
+      "blocking": {
+        "count": 0,
+        "issues": []
+      },
+      "introduced": {
+        "count": 26,
+        "issues": [
+          {
+            "file": "P01.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[10]:font-family 'Microsoft YaHei, Arial' -> None; text[11]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P01.svg",
+            "message": "Detected 1 paragraph-like line run(s) split across sibling <text> elements (<g id=\"slide-content\"> x=69.0, y=275.0..317.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy=\"0\". Keep semantically independent text frames separate."
+          },
+          {
+            "file": "P02.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (13 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P03.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (14 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P03.svg",
+            "message": "Detected 3 paragraph-like line run(s) split across sibling <text> elements (<g id=\"slide-content\"> x=84.0, y=382.0..410.0, 2 lines; <g id=\"slide-content\"> x=472.0, y=382.0..410.0, 2 lines; <g id=\"slide-content\"> x=860.0, y=382.0..410.0, 2 lines). If each run is one prose paragraph, combine it into one <text>: keep its first line as direct text and use direct <tspan> children with the parent x and positive relative dy values for later lines. An all-<tspan> form may start with dy=\"0\". Keep semantically independent text frames separate."
+          },
+          {
+            "file": "P04.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (16 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P05.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P05.svg",
+            "message": "Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace"
+          },
+          {
+            "file": "P06.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (19 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P07.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (16 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P07.svg",
+            "message": "Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace"
+          },
+          {
+            "file": "P08.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (25 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P08.svg",
+            "message": "Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace"
+          },
+          {
+            "file": "P09.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (15 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P10.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P10.svg",
+            "message": "Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace"
+          },
+          {
+            "file": "P10.svg",
+            "message": "<text> (x=110, y=458; text='类别 / 原因 / 步骤') exceeds <g id=\"slide-content\"> data-pptx-bounds on the horizontal axis: content (44.3, 445.2)-(175.7, 463.2), container (56.0, 60.0)-(1224.0, 710.0), overflow horizontal 1.0%, vertical 0.0%; expand the root module bounds into available non-overlapping space; otherwise reflow the text; ≈16.4 px per mixed char at 15px incl. headroom; ≈71 chars fit in 1168 px"
+          },
+          {
+            "file": "P11.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (10 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P11.svg",
+            "message": "<text> (x=1066, y=444; text='报告 / 卡 / 音频 / ZIP') exceeds <g id=\"slide-content\"> data-pptx-bounds on the horizontal axis: content (1066.0, 430.4)-(1242.5, 449.6), container (56.0, 60.0)-(1224.0, 710.0), overflow horizontal 1.6%, vertical 0.0%; expand the root module bounds into available non-overlapping space; otherwise reflow the text; ≈16.0 px per mixed char at 16px incl. headroom; ≈72 chars fit in 1168 px"
+          },
+          {
+            "file": "P12.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (14 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P12.svg",
+            "message": "Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace"
+          },
+          {
+            "file": "P13.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (12 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P14.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (15 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P14.svg",
+            "message": "Font stack exports non-PPT-safe typeface(s) to PPTX (latin=Cascadia Mono): Cascadia Mono, Consolas, monospace"
+          },
+          {
+            "file": "P15.svg",
+            "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (17 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          },
+          {
+            "file": "P15.svg",
+            "message": "<text> (x=92, y=405; text='真实或可复现') exceeds <g id=\"slide-content\"> data-pptx-bounds on the horizontal axis: content (44.5, 392.2)-(139.5, 410.2), container (56.0, 60.0)-(1224.0, 710.0), overflow horizontal 1.0%, vertical 0.0%; expand the root module bounds into available non-overlapping space; otherwise reflow the text; ≈15.8 px per CJK char at 15px incl. headroom; ≈73 chars fit in 1168 px"
+          }
+        ]
+      },
+      "inherited": {
+        "count": 0,
+        "issues": []
+      },
+      "source-import": {
+        "count": 0,
+        "summary": {
+          "warning_count": 0,
+          "by_code": {}
+        }
+      }
+    }
+  },
+  "resources": {
+    "unresolved_template_tokens": [],
+    "fonts": {
+      "stacks": [
+        "Arial",
+        "Cascadia Mono, Consolas, monospace",
+        "Consolas, Courier New, monospace",
+        "Microsoft YaHei, Arial"
+      ],
+      "generic_only_stacks": [],
+      "unsafe_exported_faces": [
+        {
+          "stack": "Cascadia Mono, Consolas, monospace",
+          "role": "latin",
+          "typeface": "Cascadia Mono"
+        }
+      ]
+    },
+    "images": {
+      "data_uri": 0,
+      "local": 6,
+      "external": 0,
+      "external_references": []
+    }
+  },
+  "export_policy": {
+    "project_svg_contract": "strict",
+    "dangerous_normalization_count": 0
+  },
+  "deck_motion": {
+    "transition": {
+      "effect": "fade",
+      "effect_options": {},
+      "duration": 0.4,
+      "auto_advance": null,
+      "sound": null
+    },
+    "animation": {
+      "effect": "none",
+      "effect_request": null,
+      "duration": 0.4,
+      "stagger": 0.5,
+      "trigger": "after-previous"
+    },
+    "cli_overrides": {
+      "transition": false,
+      "transition_duration": false,
+      "auto_advance": false,
+      "transition_sound": false,
+      "animation": false,
+      "animation_duration": false,
+      "animation_stagger": false,
+      "animation_trigger": false
+    },
+    "narration_timings": false
+  },
+  "backup_path": "X:\\PROJECT\\校外实训\\projects\\debugmate-defense-ppt_ppt169_20260901\\backup\\20260901_002644\\svg_output",
+  "conversion_trace_path": null
+}
