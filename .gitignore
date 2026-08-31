@@ -3,6 +3,7 @@
 .env
 .artifacts/
 .debugmate-runtime/
+.playwright-mcp/
 /.superpowers/sdd/
 evidence/*
 !evidence/.gitkeep

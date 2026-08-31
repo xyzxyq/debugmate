@@ -4,11 +4,10 @@
 
 ## 设置顺序
 
-1. 在 Dify Cloud 创建最小 Workflow 应用，输入变量为 `error_text`、`error_image`、`code`、`environment`。
+1. 在 Dify Cloud 创建最小 Workflow 应用，输入变量为 `error_text`、`image_input`、`code`、`environment`。
 2. 配置视觉模型节点，只使用仓库内虚构 `ModuleNotFoundError` 案例。
 3. 创建最小知识库与 Knowledge Retrieval 节点，保留命中 chunk 的标题和来源元数据。
-4. 让最终节点在 `outputs.diagnosis` 中只输出符合
-   `contracts/diagnosis-record-v1.1.schema.json` 的 JSON 候选；平台成功不等于本地发布成功。
+4. 让最终节点在 `outputs.run_envelope` 中输出包含直接检索 trace 与严格诊断候选的同次运行信封；平台成功不等于本地发布成功。
 5. 在 API Access 中取得应用密钥，并仅通过本机环境变量 `DIFY_API_KEY` 提供；知识库管理 API 如需单独密钥，使用 `DIFY_DATASET_API_KEY`。
 6. 默认端点为 `DIFY_BASE_URL=https://api.dify.ai/v1`，调用身份为 `DIFY_USER=debugmate-local`。
 7. 导出真实 DSL 到本目录，重新导入为新应用，并把导入结果截图/日志放入对应 evidence bundle 后，C06 才能为 `pass`。
@@ -64,6 +63,18 @@ DiagnosisRecord 1.1.0 候选及版本身份封装为唯一 End 输出 `run_envel
 3. 用一份当前已批准脱敏 PNG 验证上传和 singular `image_input`；
 4. 运行一次 blocking workflow，严格校验同一 `run_envelope` 的 extraction、direct retrieval、diagnosis 和合同身份；
 5. 只保存安全指纹、allowlisted usage 和本地验证结果，不保存任何远端原始标识或 provider body。
+
+## Phase 08 当前验收状态（2026-08-31）
+
+- 本地 17 源知识构建与 Dify 真实 readback 已完成，严格回读保存在
+  [`knowledge-readback.json`](../../evidence/dify-live/phase8/knowledge-readback.json)。
+- 仓库 DSL 已绑定当前知识构建 `e8e065b4...`，并新增零跳过 cloud/Edge runner 与安全范围闸门：
+  [`run-phase8-live-qa.ps1`](../../scripts/run-phase8-live-qa.ps1)、
+  [`verify-phase8-security-scope.ps1`](../../scripts/verify-phase8-security-scope.ps1)。
+- 当前真实 cloud smoke 已能完成知识同步、图片上传和 Workflow 调用，但远端已发布应用仍返回旧版
+  `diagnosis` 输出，尚未返回仓库要求的 `run_envelope`；本地适配器按设计拒绝伪造信封。
+- 继续验收前必须在 Dify 控制台导入本文件、重新绑定当前知识库并发布；随后执行：
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-phase8-live-qa.ps1`
 
 ## 版本化现场证据复验
 
