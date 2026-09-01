@@ -71,6 +71,18 @@ python -m venv .venv
 
 打开命令输出中的本地地址即可使用。2026-08-08 的验证记录来自当时已核验的 Python 3.13 环境；它说明该次验证条件，不代表每位读者本机已经存在同一路径或同一虚拟环境。
 
+### 交付源码包
+
+仓库内的 [`deliverables/DebugMate-V0.1-source.zip`](deliverables/DebugMate-V0.1-source.zip) 是本项目的提交包，包含源码、运行契约、知识库源文件、Dify DSL、提示词、测试、课程材料和 README。包内 `PACKAGE_MANIFEST.json` 提供文件清单与 SHA-256 校验值；包外 [`source-package-manifest.json`](deliverables/source-package-manifest.json) 记录压缩包自身校验值。
+
+如需重新生成并验证提交包：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/package-submission.py
+```
+
+包内不包含 `.env`、API Key、虚拟环境、Git 元数据、缓存、临时预览或本机 Agent/GSD 内部文件。复制 `.env.example` 为 `.env` 后，只有实时 Dify 调用才需要填写 `DIFY_API_KEY`；本地回放和离线测试不需要密钥。
+
 ## 测试
 
 普通 UI 合同测试：
