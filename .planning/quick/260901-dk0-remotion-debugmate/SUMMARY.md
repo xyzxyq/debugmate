@@ -42,4 +42,4 @@ DebugMate V0.1 课程介绍视频已使用 Remotion 4.0.506 重制完成。视�
 
 Remotion 视觉 Composition 在当前环境会产生静音音轨，因此渲染脚本会检测音轨均值，并在静音时只进行一次外部安全混音；最终交付不包含重复旁白。Dify live、local fallback 和 fixed replay 仍在视频中明确区分。
 
-Implementation commit: pending
+Implementation commit: `e9395d7`
