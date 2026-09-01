@@ -189,23 +189,40 @@ def p05() -> str:
 
 def p06() -> str:
     p = svg_open("content", 6, "02 · System")
-    title(p, "技术路线：云端增强，本地闭环", "不是二选一，而是把不稳定的外部能力隔离在可验证边界之外")
-    rounded(p, 56, 185, 820, 420, WHITE, LINE, 20)
-    rounded(p, 900, 185, 324, 420, INK, INK, 20)
-    p.append(f'<text x="92" y="232" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="{TEAL}">Dify Cloud · 增强层</text>')
-    p.append(f'<text x="92" y="265" font-family="Microsoft YaHei, Arial" font-size="15" fill="{MUTED}">视觉模型 / 知识检索 / LLM 工作流</text>')
-    p.append(f'<text x="92" y="350" font-family="Microsoft YaHei, Arial" font-size="22" font-weight="700" fill="{CORAL}">Local Python · 交付层</text>')
-    p.append(f'<text x="92" y="383" font-family="Microsoft YaHei, Arial" font-size="15" fill="{MUTED}">脱敏 / Pydantic / Pillow / TTS fallback / Gradio</text>')
-    for i, label in enumerate(["上传与检索", "结构化 JSON", "本地严格校验", "报告与多媒体"]):
-        x = 92 + i * 177
-        rounded(p, x, 290 if i < 2 else 425, 150, 48, MINT if i < 2 else "#FBE5DB", "none", 12)
-        p.append(f'<text x="{x + 75}" y="{320 if i < 2 else 455}" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="14" font-weight="700" fill="{TEAL if i < 2 else CORAL}">{esc(label)}</text>')
-    arrow(p, 245, 338, 245, 414, CORAL, 2)
-    arrow(p, 600, 338, 600, 414, CORAL, 2)
-    p.append(f'<text x="934" y="245" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="700" fill="{WHITE}">Git · 事实源</text>')
-    text_lines(p, 934, 295, ["知识源与 manifest", "提示词 V1–V4", "Dify DSL", "运行证据与哈希", "课程材料与脚本"], 18, "#D8E5E1", leading=42)
-    p.append(f'<line x1="934" y1="520" x2="1188" y2="520" stroke="#4D666A"/>')
-    p.append(f'<text x="934" y="555" font-family="Microsoft YaHei, Arial" font-size="16" fill="#BCE5DB">可重建 · 可复核 · 可交接</text>')
+    title(p, "技术路线：云端增强，本地闭环", "云端负责模型能力，本地负责安全与交付；两条链路最终回到同一事实源")
+
+    # Lane 1: Dify owns model orchestration, not the final evidence contract.
+    rounded(p, 56, 180, 1168, 132, "#E1F1EC", "#B9DDD3", 18)
+    p.append(f'<text x="88" y="224" font-family="Microsoft YaHei, Arial" font-size="23" font-weight="700" fill="{TEAL}">01  Dify Cloud · 增强层</text>')
+    p.append(f'<text x="88" y="252" font-family="Microsoft YaHei, Arial" font-size="15" fill="{MUTED}">视觉理解 / 知识检索 / LLM 工作流</text>')
+    cloud = [("视觉模型", "读取文本与截图"), ("知识检索", "返回 chunk + URL"), ("LLM 工作流", "输出结构化 JSON")]
+    for i, (head, sub) in enumerate(cloud):
+        x = 440 + i * 238
+        rounded(p, x, 204, 196, 68, WHITE, "#B9DDD3", 12)
+        p.append(f'<text x="{x + 98}" y="231" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="700" fill="{INK}">{esc(head)}</text>')
+        p.append(f'<text x="{x + 98}" y="253" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="13" fill="{MUTED}">{esc(sub)}</text>')
+        if i < len(cloud) - 1:
+            arrow(p, x + 202, 238, x + 230, 238, TEAL, 2)
+
+    # Lane 2: local Python is the stable, inspectable delivery path.
+    rounded(p, 56, 330, 1168, 172, "#FBEAE3", "#F0C4B4", 18)
+    p.append(f'<text x="88" y="374" font-family="Microsoft YaHei, Arial" font-size="23" font-weight="700" fill="{CORAL}">02  Local Python · 交付层</text>')
+    p.append(f'<text x="88" y="402" font-family="Microsoft YaHei, Arial" font-size="15" fill="{MUTED}">脱敏、严格校验、确定性媒体和统一结果页</text>')
+    local = [("脱敏与预览", "OCR / 正则"), ("Pydantic", "严格契约"), ("Pillow + TTS", "PNG / MP3 fallback"), ("Gradio", "结果与下载")]
+    for i, (head, sub) in enumerate(local):
+        x = 350 + i * 214
+        rounded(p, x, 430, 174, 54, WHITE, "#F0C4B4", 12)
+        p.append(f'<text x="{x + 87}" y="453" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="16" font-weight="700" fill="{INK}">{esc(head)}</text>')
+        p.append(f'<text x="{x + 87}" y="473" text-anchor="middle" font-family="Microsoft YaHei, Arial" font-size="12" fill="{MUTED}">{esc(sub)}</text>')
+        if i < len(local) - 1:
+            arrow(p, x + 180, 457, x + 206, 457, CORAL, 2)
+
+    # Shared source of truth: both lanes are recorded, rebuildable, and handoff-ready.
+    rounded(p, 56, 532, 1168, 76, INK, INK, 18)
+    p.append(f'<text x="88" y="563" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="{WHITE}">Git · 可复现事实源</text>')
+    p.append(f'<text x="88" y="588" font-family="Microsoft YaHei, Arial" font-size="14" fill="#BCE5DB">知识源 + manifest　·　Prompt V1–V4　·　Dify DSL　·　运行证据 + 哈希　·　课程材料</text>')
+    p.append(f'<text x="1075" y="563" font-family="Microsoft YaHei, Arial" font-size="15" font-weight="700" fill="#F6C2AF">可重建</text>')
+    p.append(f'<text x="1075" y="588" font-family="Microsoft YaHei, Arial" font-size="15" font-weight="700" fill="#BCE5DB">可复核 · 可交接</text>')
     footer(p)
     return svg_close(p)
 

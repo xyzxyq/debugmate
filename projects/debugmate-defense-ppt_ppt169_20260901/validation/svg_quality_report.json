@@ -4,7 +4,7 @@
   "target": "X:\\PROJECT\\校外实训\\projects\\debugmate-defense-ppt_ppt169_20260901",
   "source_fingerprint": {
     "algorithm": "sha256",
-    "digest": "4c896a49054896201d855635031f3868410566ebc19c32ecd2f22874fa35042b",
+    "digest": "72b951d6684bcf4ce6ff4e22b17f317e5962b74ea7f8f180e7ccf189db4eb818",
     "file_count": 15,
     "files": [
       {
@@ -29,7 +29,7 @@
       },
       {
         "file": "P06.svg",
-        "sha256": "c0dd48e8714d534d024189237e67bd8697846bd31a8c90be84b7b7d1c7f1ee6e"
+        "sha256": "31d1fce554e113d800f7a023c321a3b58894e20ed7c4e7a407e246b28975f884"
       },
       {
         "file": "P07.svg",
@@ -118,7 +118,7 @@
         },
         {
           "file": "P06.svg",
-          "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (19 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+          "message": "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (26 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
         },
         {
           "file": "P07.svg",
@@ -259,9 +259,6 @@
         "P12.svg",
         "P15.svg"
       ],
-      "#4D666A": [
-        "P06.svg"
-      ],
       "#6D7BB8": [
         "P03.svg",
         "P05.svg",
@@ -289,7 +286,8 @@
         "P15.svg"
       ],
       "#B9DDD3": [
-        "P04.svg"
+        "P04.svg",
+        "P06.svg"
       ],
       "#BCE5DB": [
         "P02.svg",
@@ -321,18 +319,17 @@
         "P15.svg"
       ],
       "#D8E5E1": [
-        "P06.svg",
         "P07.svg",
         "P11.svg",
         "P15.svg"
       ],
       "#D9EEE8": [
         "P01.svg",
-        "P06.svg",
         "P12.svg"
       ],
       "#E1F1EC": [
         "P04.svg",
+        "P06.svg",
         "P10.svg",
         "P13.svg"
       ],
@@ -355,9 +352,11 @@
       ],
       "#F0C4B4": [
         "P04.svg",
+        "P06.svg",
         "P08.svg"
       ],
       "#F6C2AF": [
+        "P06.svg",
         "P08.svg",
         "P09.svg",
         "P11.svg",
@@ -382,13 +381,13 @@
       ],
       "#FBE5DB": [
         "P01.svg",
-        "P06.svg",
         "P08.svg",
         "P10.svg",
         "P13.svg"
       ],
       "#FBEAE3": [
-        "P04.svg"
+        "P04.svg",
+        "P06.svg"
       ],
       "#FFFFFF": [
         "P02.svg",
@@ -447,10 +446,10 @@
     "scope": "informational-not-a-quota",
     "pages": 15,
     "totals": {
-      "text_elements": 317,
+      "text_elements": 324,
       "image_placements": 6,
       "icons": 0,
-      "svg_geometry_elements": 204,
+      "svg_geometry_elements": 213,
       "preset_shapes": 0,
       "page_frame_elements": 15,
       "marker_uses": 0,
@@ -474,11 +473,11 @@
     "geometry_elements": {
       "circle": 35,
       "ellipse": 0,
-      "line": 42,
-      "path": 20,
+      "line": 44,
+      "path": 23,
       "polygon": 0,
       "polyline": 0,
-      "rect": 107
+      "rect": 111
     },
     "preset_names": {},
     "native_objects": {
@@ -911,12 +910,12 @@
       "exists": true,
       "errors": [],
       "warnings": [
-        "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (19 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
+        "Noncanonical compact authoring: Authoring SVG contains noncanonical or redundant inherited style declarations (26 change(s)); examples: text[4]:font-family 'Microsoft YaHei, Arial' -> None; text[8]:font-family 'Microsoft YaHei, Arial' -> None; text[9]:font-family 'Microsoft YaHei, Arial' -> None (advisory; normalize with `python3 scripts/compact_svg_styles.py <svg_output> --inplace` and rerun the final gate, or leave the explicit form)"
       ],
       "info": {
         "viewbox": "0 0 1280 720",
         "carrier_receipt": {
-          "text_elements": 20,
+          "text_elements": 27,
           "images": {
             "placements": 0,
             "files": [],
@@ -931,13 +930,13 @@
           },
           "geometry": {
             "svg_elements": {
-              "rect": 8,
+              "rect": 12,
               "circle": 0,
               "ellipse": 0,
-              "line": 4,
+              "line": 6,
               "polyline": 0,
               "polygon": 0,
-              "path": 2
+              "path": 5
             },
             "preset_shapes": 0,
             "preset_names": {},
@@ -960,21 +959,22 @@
           "Consolas, Courier New, monospace",
           "Microsoft YaHei, Arial"
         ],
-        "text_elements": 20,
+        "text_elements": 27,
         "tspan_elements": 0,
         "contextual_values": {
           "colors": [
             "#0F9D8A",
             "#14212B",
-            "#4D666A",
             "#708087",
+            "#B9DDD3",
             "#BCE5DB",
             "#C5D2CC",
-            "#D8E5E1",
-            "#D9EEE8",
+            "#E1F1EC",
             "#F0784A",
+            "#F0C4B4",
+            "#F6C2AF",
             "#F7F5EF",
-            "#FBE5DB",
+            "#FBEAE3",
             "#FFFFFF"
           ],
           "font_families": [
@@ -983,7 +983,7 @@
         }
       },
       "passed": true,
-      "source_sha256": "c0dd48e8714d534d024189237e67bd8697846bd31a8c90be84b7b7d1c7f1ee6e"
+      "source_sha256": "31d1fce554e113d800f7a023c321a3b58894e20ed7c4e7a407e246b28975f884"
     },
     {
       "file": "P07.svg",
