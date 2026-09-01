@@ -92,4 +92,4 @@ Phase 10 已完成材料刷新；媒体中的 Dify live、local fallback、固�
 | 260831-tuz | Stabilize Dify Knowledge Retrieval query | 2026-08-31 | 7bdb4b0 | Needs Review | [260831-tuz-dify](./quick/260831-tuz-dify/) |
 | 260831-u18 | Bind Dify evidence to the current knowledge build and close unsafe install advice | 2026-08-31 | f255464 | Needs Review | [260831-u18-dify](./quick/260831-u18-dify/) |
 | 260901-cuw | Clarify the DebugMate defense deck technology route on slide 6 | 2026-09-01 | 0e48ea3 | Verified | [260901-cuw-debugmate-ppt](./quick/260901-cuw-debugmate-ppt/) |
-| 260901-d3z | Build and verify the DebugMate V0.1 source submission package | 2026-09-01 | Pending | In Progress | [260901-d3z-debugmate](./quick/260901-d3z-debugmate/) |
+| 260901-d3z | Build and verify the DebugMate V0.1 source submission package | 2026-09-01 | 9f26a2f | Verified | [260901-d3z-debugmate](./quick/260901-d3z-debugmate/) |

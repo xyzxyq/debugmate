@@ -29,3 +29,7 @@
 ## 交付校验值
 
 - Archive SHA-256: `a6bf440d221df52ee88faa98cf10a067289bf655b63571153859dbba6267d825`
+
+## Git
+
+- Commit: `9f26a2f` (`chore: add DebugMate V0.1 source submission package`)
