@@ -2,7 +2,7 @@
   "package_schema": "debugmate-source-package-1.0",
   "project": "DebugMate",
   "version": "V0.1",
-  "created_on": "2026-09-01T01:36:11.579648Z",
+  "created_on": "2026-09-01T02:45:56.030506Z",
   "source_root": "Git-tracked project assets plus scripts/package-submission.py",
   "entrypoints": {
     "install": "python -m pip install -e \".[dev]\"",
@@ -59,8 +59,8 @@
     },
     {
       "path": ".gitignore",
-      "bytes": 376,
-      "sha256": "6a2029148666e0a6770a8e0dbb7ff6f057d2e68773bc941444c82399cf0edf29"
+      "bytes": 404,
+      "sha256": "91fbca5e04cb5ee86e6e780b32471ad2aa55521d2cc18e82e1e6ebfaa38b7b37"
     },
     {
       "path": "contracts/diagnosis-record-v1.1.schema.json",
@@ -79,13 +79,13 @@
     },
     {
       "path": "deliverables/DebugMate-V0.1-demo.mp4",
-      "bytes": 10388444,
-      "sha256": "4390945c1865b81a1295a9bc9ec70356b956d5742d9389f8162a09d17cc01271"
+      "bytes": 40557365,
+      "sha256": "61c03349478735a13e6858e9b62fb4e8ad5e1157f091c8ef16af25e8e82119fb"
     },
     {
       "path": "deliverables/DebugMate-V0.1-subtitles.srt",
-      "bytes": 5472,
-      "sha256": "7af651c54170f518d99185697ea848bcbf329043493822c3e2bd937d272089f9"
+      "bytes": 6688,
+      "sha256": "be27105087119e015b8907e0b3f7cdd0c46c9965859ccd41bcc996f723b07fec"
     },
     {
       "path": "deliverables/DebugMate-V0.1.pptx",
@@ -94,8 +94,8 @@
     },
     {
       "path": "deliverables/video-manifest.json",
-      "bytes": 862,
-      "sha256": "c597a45bb5a369d580634cb0d4fef77d4c568938cfbe3ff7ecc2b90705bc9b71"
+      "bytes": 1262,
+      "sha256": "b6667837bd182061752a6ad84d3528218853d4152094690fe80626998af6cde7"
     },
     {
       "path": "docs/course/current-evaluation.md",
@@ -119,8 +119,8 @@
     },
     {
       "path": "docs/course/README.md",
-      "bytes": 3925,
-      "sha256": "14fc47d41209290c342034f424e6320f2b35cffd4a0bccc10e00010ec041d028"
+      "bytes": 4159,
+      "sha256": "9a83986aa4213379e3d4e8bf7c6aac380985360bab4e63ad6d63c44e2ec21376"
     },
     {
       "path": "docs/course/v0.1-demo-cases.md",
@@ -779,8 +779,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 12974,
-      "sha256": "653d15609c6dd2071eac9e62bdc24515e1d44a3c55658a8749ad51a6af265484"
+      "bytes": 13116,
+      "sha256": "8ea596c7f26c0c7b83591adbb4e3a76e559a6e89aa2da06f08838805657ec6b4"
     },
     {
       "path": "scripts/assert-phase7-frozen-scope.ps1",
@@ -811,6 +811,11 @@
       "path": "scripts/build-defense-ppt.py",
       "bytes": 3293,
       "sha256": "a70876902dcbc6767e0dfe4b4c417875974409a50fb9b761d7facab5830ceb90"
+    },
+    {
+      "path": "scripts/build-remotion-video.py",
+      "bytes": 9539,
+      "sha256": "7d26aad30e4c0a8544511cc87b9e4dcf02f0d6726800513832bcdb9279ebc8b3"
     },
     {
       "path": "scripts/build_knowledge.ps1",
@@ -846,6 +851,11 @@
       "path": "scripts/package-submission.py",
       "bytes": 12704,
       "sha256": "0111fa688d0819f8f21ee6c357222625a72c5204e6fcad5820077e0525212989"
+    },
+    {
+      "path": "scripts/render-remotion-video.py",
+      "bytes": 9376,
+      "sha256": "4dcc28a1f3a7638fa52a24e970206885415bb805b1998a0aafedba7549fff055"
     },
     {
       "path": "scripts/run-phase4-browser-layout-qa.ps1",
@@ -1751,12 +1761,132 @@
       "path": "video/DESIGN.md",
       "bytes": 1594,
       "sha256": "84ad6e7ff45c96eb67e409ae6cef1c948a8dd801aa45c9ed3ab14c1a0461748d"
+    },
+    {
+      "path": "video/remotion/package-lock.json",
+      "bytes": 144895,
+      "sha256": "e5a01434ee4b5f13bbcaa8c3b388dee14221f35ef30fc2b09504e98cf7b48bb2"
+    },
+    {
+      "path": "video/remotion/package.json",
+      "bytes": 646,
+      "sha256": "b32244742b33a24de1fca16e4460dca37250905045cf3cc7fb55f77c2227c4a0"
+    },
+    {
+      "path": "video/remotion/public/assets/01-completed-overview.png",
+      "bytes": 178634,
+      "sha256": "2c826b40123418f95eab0cd7a7d0075cd306666973007d80a0ac04b85249b49d"
+    },
+    {
+      "path": "video/remotion/public/assets/02-tts-partial.png",
+      "bytes": 246866,
+      "sha256": "ba24d724188073f9f03e30f2017188c12cc3c9cd2d8ff1def4a427e8c76297de"
+    },
+    {
+      "path": "video/remotion/public/assets/03-card-partial.png",
+      "bytes": 256247,
+      "sha256": "801cc5765744eee1aad63508a282dabc767f4b0939a114b840715fab169ba75e"
+    },
+    {
+      "path": "video/remotion/public/assets/card.png",
+      "bytes": 375276,
+      "sha256": "c0d929f03eecfee40348ad5b3acde3e4792711f25a5dfa4852e7cc5fcb0c76e7"
+    },
+    {
+      "path": "video/remotion/public/assets/terminal-module-not-found-redacted.png",
+      "bytes": 46120,
+      "sha256": "3989af7ccc015c3652397f4dddff2de8b88fc6bbc51163159f1ae25bca7e4047"
+    },
+    {
+      "path": "video/remotion/public/audio/ambient-bed.mp3",
+      "bytes": 4443885,
+      "sha256": "da10b56ff02d7a222383016778b889263cd13d7dcd871712703b0a756b0aa0c4"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-01.mp3",
+      "bytes": 196272,
+      "sha256": "75e52dd0c75af3144847807f4658dd35e9d3b07d467be0f5d34de7a59c17d0dd"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-02.mp3",
+      "bytes": 221904,
+      "sha256": "08ab4acd522c9765d1dec7c0c23f4a27c7e31e30106b39f08d7c31bc428207a6"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-03.mp3",
+      "bytes": 299088,
+      "sha256": "890ff7fe7fe9a89afd5276eb2b5cc25aa7c973eb3b5f05551346c360fb89aa0b"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-04.mp3",
+      "bytes": 251424,
+      "sha256": "16bd99c0b06bd292968721f7532605aae9ff6ec96bc2cb0e8976fa6e3636ace9"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-05.mp3",
+      "bytes": 546912,
+      "sha256": "20254533fa8ae5f27dad63415cb687c99210e04c55816dad647d0e61dd7cafc6"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-06.mp3",
+      "bytes": 224784,
+      "sha256": "47fdadceb540848800dabdac523fe8dd4ad38b26c6ba6ad8438a22973be7ae13"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-07.mp3",
+      "bytes": 240624,
+      "sha256": "62567a6dcd55c4e0f185066280ec1eeadd44dc7c7564b72fdc17404dd412845c"
+    },
+    {
+      "path": "video/remotion/public/audio/scene-08.mp3",
+      "bytes": 177264,
+      "sha256": "3ed450d22b77a6a6e10658f103ee6cd3cd9f82d9e1f62440c2a86bd36d10ab11"
+    },
+    {
+      "path": "video/remotion/public/captions.json",
+      "bytes": 10502,
+      "sha256": "be8c3a5b4348b4f3fefbb5ac6ca5869a5687aa2c3441d2088c8b26b76380789a"
+    },
+    {
+      "path": "video/remotion/remotion.config.ts",
+      "bytes": 221,
+      "sha256": "528567276abb7c589ae6a583226c7ec95f41ee4ed8e42c68be85ff178d7f0891"
+    },
+    {
+      "path": "video/remotion/src/content.ts",
+      "bytes": 1799,
+      "sha256": "3a3f14167c304b0e796b80d2255369e4f7cae1d614010ced37e1e2007abb110f"
+    },
+    {
+      "path": "video/remotion/src/DebugMateVideo.tsx",
+      "bytes": 27213,
+      "sha256": "bada04372602325ed6fbb1471b020c1af2eeec257c3b1b120e79ff74529cf985"
+    },
+    {
+      "path": "video/remotion/src/index.tsx",
+      "bytes": 89,
+      "sha256": "6b83f700a1c9bf9bcb582b06d2a7a614de28faee7ed30c805b6bfe0fad3b710b"
+    },
+    {
+      "path": "video/remotion/src/Root.tsx",
+      "bytes": 645,
+      "sha256": "8ed61c91280cc3f3b47a9df6362f6907e765ea41fcb5e3e81633aaa2b57c294e"
+    },
+    {
+      "path": "video/remotion/src/timing.ts",
+      "bytes": 846,
+      "sha256": "71b57a39c924b50f90152054b59c3fa73520893e0faac4f6ba14be6136218a01"
+    },
+    {
+      "path": "video/remotion/tsconfig.json",
+      "bytes": 339,
+      "sha256": "8e04654ad81912a1ec721b6b4c072eb0abffe2ac7eaa8fb02a215ac399d004db"
     }
   ],
   "archive": {
     "path": "deliverables/DebugMate-V0.1-source.zip",
-    "bytes": 27568948,
-    "sha256": "a6bf440d221df52ee88faa98cf10a067289bf655b63571153859dbba6267d825"
+    "bytes": 62880350,
+    "sha256": "53e1312381b60b8b3760474bce8955c98d68edfa887cd99bf23ecc624618b43f"
   },
   "internal_manifest": "DebugMate-V0.1-source/PACKAGE_MANIFEST.json"
 }

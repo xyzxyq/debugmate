@@ -1,25 +1,33 @@
 {
-  "schema_version": "debugmate-course-video-1.0",
-  "generated_on": "2026-08-31",
+  "schema_version": "debugmate-course-video-2.0",
+  "generated_on": "2026-09-01",
+  "renderer": "Remotion 4.0.506 composition with embedded audio layers",
+  "composition": "DebugMateV01Visual",
   "video": {
     "path": "deliverables/DebugMate-V0.1-demo.mp4",
-    "bytes": 10388444,
-    "sha256": "4390945c1865b81a1295a9bc9ec70356b956d5742d9389f8162a09d17cc01271",
-    "duration_seconds": 355.39,
+    "bytes": 40557365,
+    "sha256": "61c03349478735a13e6858e9b62fb4e8ad5e1157f091c8ef16af25e8e82119fb",
+    "duration_seconds": 366.267,
     "resolution": "1920x1080",
     "fps": 30,
     "video_codec": "h264",
     "audio_codec": "aac",
-    "tts_backend": "Windows SAPI",
-    "voice": "Microsoft Huihui Desktop"
+    "audio_sample_rate": "48000",
+    "audio_channels": 2,
+    "audio_mean_volume_db": -22.4,
+    "tts_backend": "edge-tts",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "voice_rate": "+5%",
+    "background_audio": "original low-volume ambient bed"
   },
   "subtitles": {
     "path": "deliverables/DebugMate-V0.1-subtitles.srt",
-    "bytes": 5472,
-    "sha256": "7af651c54170f518d99185697ea848bcbf329043493822c3e2bd937d272089f9"
+    "bytes": 6688,
+    "sha256": "be27105087119e015b8907e0b3f7cdd0c46c9965859ccd41bcc996f723b07fec"
   },
   "scenes": 8,
   "source_script": "docs/course/video-script.md",
   "visual_identity": "video/DESIGN.md",
-  "hyperframes_attempt": "timed_out_during_doctor; deterministic local fallback used"
+  "audio_source": "video/remotion/public/audio/scene-01.mp3 ... scene-08.mp3 + ambient-bed.mp3",
+  "truth_boundary": "Dify live, local fallback, and fixed replay remain explicitly distinguished"
 }

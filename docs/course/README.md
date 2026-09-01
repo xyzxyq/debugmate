@@ -49,7 +49,7 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 ## 提交材料
 
 - PPT：`deliverables/DebugMate-V0.1.pptx`
-- 最终讲解视频：`deliverables/DebugMate-V0.1-demo.mp4`（约 5 分 59 秒）
+- 最终讲解视频：`deliverables/DebugMate-V0.1-demo.mp4`（Remotion 制作，约 6 分钟，含中文旁白、环境音和字幕）
 - 字幕：`deliverables/DebugMate-V0.1-subtitles.srt`
 - 演示讲解稿：`docs/course/video-script.md`
 - PPT 结构：`docs/course/presentation-outline.md`
@@ -57,11 +57,11 @@ V0.1 是 Windows 本机课程演示版，不是公网部署或生产服务。
 - 案例说明：`docs/course/v0.1-demo-cases.md`
 - 提示词对比：`docs/course/prompt-iteration.md`
 - 真实截图与清单：`evidence/course-v0.1/`
-- 视频生成脚本与视觉规范：`scripts/build-course-video.py`、`video/DESIGN.md`
+- 视频生成脚本与视觉规范：`scripts/build-remotion-video.py`、`scripts/render-remotion-video.py`、`video/remotion/`、`video/DESIGN.md`
 
 ## 已知限制
 
 - 当前只有少量代表性案例，不代表覆盖全部 Python/AI 故障。
 - Dify 检索和 envelope 已有真实证据，但浏览器端工作流曾出现 `ambiguous_timeout`/结构波动；本次最终媒体包使用明确标记的本地 fallback。
-- 本地 SAPI MP3 在正式录屏前仍需人工试听一次。
+- 旁白使用 `zh-CN-XiaoxiaoNeural` 生成并通过 FFprobe 检查音频流、音量和可解码性；若演示环境无法访问 Edge TTS，可保留已提交的音频源继续渲染。
 - 系统不会自动执行修复命令，建议由用户审阅后自行运行。

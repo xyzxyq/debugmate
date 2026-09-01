@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
 status: V0.1 rapid closeout complete with explicit Dify fallback limits
-last_updated: "2026-09-01T09:34:10+08:00"
+last_updated: "2026-09-01T10:41:46+08:00"
 progress:
   total_phases: 10
   completed_phases: 10
@@ -41,7 +41,9 @@ Phase 9 已完成：四案例严格合同、V1–V4 同案例绑定、当前证�
 - Phase 8 标准代码审查 iteration 2 为 clean；4 个 Warning 已全部原子修复。安全审计关闭 25/25 条登记威胁，OPEN 0；Nyquist 审计确认 14/14 executed tasks 均有直接自动化覆盖。
 - Phase 9 聚焦回归为 60 passed，scope/privacy gate passed；四案例账本明确记录 0 个 Phase 10 eligible source，不扩写未验证的云端输出。
 - Phase 10 已重新生成 PPTX、MP4、SRT、asset manifest 和 video manifest，并完成解压/播放/字幕/哈希/隐私自动检查。
-- 已生成可提交的 `deliverables/DebugMate-V0.1-source.zip`：包含 341 个源码与交付文件；ZIP 完整性、内部 SHA-256、解压编译和 `debugmate` 导入验证均通过。包内排除密钥、`.env`、虚拟环境、Git/GSD 内部状态和临时预览文件。
+- 本轮 Remotion 视频重制已完成：8 个场景、1920x1080、约 366.267 秒，使用真实项目素材、45 条动态字幕、`zh-CN-XiaoxiaoNeural` 中文旁白和低音量原创环境音；最终 MP4 为 H.264/AAC，音频均值 -22.4 dB，峰值 -4.7 dB，并通过完整解码检查。
+- Remotion 场景帧级复核已确认第 2–8 场景主体画面正常显示；曾发现并修复 `Sequence` 重复扣除全局帧造成的空白镜头问题，字幕重叠也已归一化。
+- 已生成可提交的 `deliverables/DebugMate-V0.1-source.zip`：包含 367 个源码与交付文件；ZIP 完整性、内部 SHA-256、解压编译和 `debugmate` 导入验证均通过。包内排除密钥、`.env`、虚拟环境、Git/GSD 内部状态、Remotion `node_modules` 和临时预览文件。
 - 本轮首次 GitHub 同步提交为 `98848fc`；全部回归完成后的最终收尾提交为 `b2bc610`，本地与 GitHub `master` 已校验一致。
 
 ## Remaining UAT Debt
@@ -93,3 +95,4 @@ Phase 10 已完成材料刷新；媒体中的 Dify live、local fallback、固�
 | 260831-u18 | Bind Dify evidence to the current knowledge build and close unsafe install advice | 2026-08-31 | f255464 | Needs Review | [260831-u18-dify](./quick/260831-u18-dify/) |
 | 260901-cuw | Clarify the DebugMate defense deck technology route on slide 6 | 2026-09-01 | 0e48ea3 | Verified | [260901-cuw-debugmate-ppt](./quick/260901-cuw-debugmate-ppt/) |
 | 260901-d3z | Build and verify the DebugMate V0.1 source submission package | 2026-09-01 | 9f26a2f | Verified | [260901-d3z-debugmate](./quick/260901-d3z-debugmate/) |
+| 260901-dk0 | Rebuild the DebugMate course video with Remotion and verified narration | 2026-09-01 | pending | In Progress | [260901-dk0-remotion-debugmate](./quick/260901-dk0-remotion-debugmate/) |

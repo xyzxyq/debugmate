@@ -1,0 +1,23 @@
+{
+  "name": "debugmate-v01-remotion-film",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio --no-open",
+    "render": "remotion render DebugMateV01 ../../deliverables/DebugMate-V0.1-demo.mp4",
+    "render:still": "remotion still DebugMateV01 ../../.artifacts/remotion-still.png"
+  },
+  "dependencies": {
+    "@remotion/captions": "4.0.506",
+    "@remotion/media": "4.0.506",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.506"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.506",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "typescript": "5.8.3"
+  }
+}
