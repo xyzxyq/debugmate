@@ -97,4 +97,4 @@ Phase 10 已完成材料刷新；媒体中的 Dify live、local fallback、固�
 | 260901-cuw | Clarify the DebugMate defense deck technology route on slide 6 | 2026-09-01 | 0e48ea3 | Verified | [260901-cuw-debugmate-ppt](./quick/260901-cuw-debugmate-ppt/) |
 | 260901-d3z | Build and verify the DebugMate V0.1 source submission package | 2026-09-01 | 9f26a2f | Verified | [260901-d3z-debugmate](./quick/260901-d3z-debugmate/) |
 | 260901-dk0 | Rebuild the DebugMate course video with Remotion and verified narration | 2026-09-01 | e9395d7 | Verified | [260901-dk0-remotion-debugmate](./quick/260901-dk0-remotion-debugmate/) |
-| 260901-fjw | Publish a low-concurrency public demo through Cloudflare Quick Tunnel | 2026-09-01 | pending | In Progress | [260901-fjw-debugmate](./quick/260901-fjw-debugmate/) |
+| 260901-fjw | Publish a low-concurrency public demo through Cloudflare Quick Tunnel | 2026-09-01 | 6e1ce25 | Verified | [260901-fjw-debugmate](./quick/260901-fjw-debugmate/) |

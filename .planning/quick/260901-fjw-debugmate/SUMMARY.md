@@ -32,4 +32,4 @@ DebugMate 已在当前 Windows 主机启动，并通过 Cloudflare Quick Tunnel 
 - 停止：`powershell -ExecutionPolicy Bypass -File scripts/stop-public-demo.ps1`
 - 访问地址会在每次 Quick Tunnel 启动时随机变化，不承诺永久域名、SLA 或生产可用性。
 
-Implementation commit: pending
+Implementation commit: `6e1ce25`
