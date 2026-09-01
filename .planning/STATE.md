@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
 status: V0.1 rapid closeout complete with explicit Dify fallback limits
-last_updated: "2026-09-01T10:41:46+08:00"
+last_updated: "2026-09-01T11:24:00+08:00"
 progress:
   total_phases: 10
   completed_phases: 10
@@ -43,6 +43,7 @@ Phase 9 已完成：四案例严格合同、V1–V4 同案例绑定、当前证�
 - Phase 10 已重新生成 PPTX、MP4、SRT、asset manifest 和 video manifest，并完成解压/播放/字幕/哈希/隐私自动检查。
 - 本轮 Remotion 视频重制已完成：8 个场景、1920x1080、约 366.267 秒，使用真实项目素材、45 条动态字幕、`zh-CN-XiaoxiaoNeural` 中文旁白和低音量原创环境音；最终 MP4 为 H.264/AAC，音频均值 -22.4 dB，峰值 -4.7 dB，并通过完整解码检查。
 - Remotion 场景帧级复核已确认第 2–8 场景主体画面正常显示；曾发现并修复 `Sequence` 重复扣除全局帧造成的空白镜头问题，字幕重叠也已归一化。
+- 已启动临时公网演示：DebugMate 继续监听 `127.0.0.1`，由 Cloudflare Quick Tunnel 提供 HTTPS 公网入口；本地和公网首页均返回 200。公网地址为临时地址，停止脚本执行后立即失效。
 - 已生成可提交的 `deliverables/DebugMate-V0.1-source.zip`：包含 367 个源码与交付文件；ZIP 完整性、内部 SHA-256、解压编译和 `debugmate` 导入验证均通过。包内排除密钥、`.env`、虚拟环境、Git/GSD 内部状态、Remotion `node_modules` 和临时预览文件。
 - 本轮首次 GitHub 同步提交为 `98848fc`；全部回归完成后的最终收尾提交为 `b2bc610`，本地与 GitHub `master` 已校验一致。
 
@@ -96,3 +97,4 @@ Phase 10 已完成材料刷新；媒体中的 Dify live、local fallback、固�
 | 260901-cuw | Clarify the DebugMate defense deck technology route on slide 6 | 2026-09-01 | 0e48ea3 | Verified | [260901-cuw-debugmate-ppt](./quick/260901-cuw-debugmate-ppt/) |
 | 260901-d3z | Build and verify the DebugMate V0.1 source submission package | 2026-09-01 | 9f26a2f | Verified | [260901-d3z-debugmate](./quick/260901-d3z-debugmate/) |
 | 260901-dk0 | Rebuild the DebugMate course video with Remotion and verified narration | 2026-09-01 | e9395d7 | Verified | [260901-dk0-remotion-debugmate](./quick/260901-dk0-remotion-debugmate/) |
+| 260901-fjw | Publish a low-concurrency public demo through Cloudflare Quick Tunnel | 2026-09-01 | pending | In Progress | [260901-fjw-debugmate](./quick/260901-fjw-debugmate/) |

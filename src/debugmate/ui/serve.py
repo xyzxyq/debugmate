@@ -482,7 +482,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     approval_key = dependencies.approval_key
     app = build_app(
         dependencies.service,
-        content_origin=f"http://{args.host}:{args.port}",
+        content_origin=os.environ.get("DEBUGMATE_PUBLIC_ORIGIN")
+        or f"http://{args.host}:{args.port}",
+        request_origin=f"http://{args.host}:{args.port}",
         approval_key=approval_key,
         preview_builder=dependencies.build_preview,
         upload_root=cache_root,

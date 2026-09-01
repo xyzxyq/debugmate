@@ -481,6 +481,40 @@ def _loopback_origin(value: object, *, origin_only: bool) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+def _configured_content_origin(value: object) -> str:
+    """Validate an explicit loopback or HTTPS reverse-proxy origin."""
+
+    if isinstance(value, URL):
+        value = str(value)
+    elif not isinstance(value, str):
+        raise ResultServiceError("download_invalid")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise ResultServiceError("download_invalid") from None
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ResultServiceError("download_invalid")
+    if parsed.scheme == "http" and parsed.hostname == "127.0.0.1":
+        if port is None or not 1024 <= port <= 65535 or parsed.path not in {"", "/"}:
+            raise ResultServiceError("download_invalid")
+        return f"http://127.0.0.1:{port}"
+    if parsed.scheme != "https" or not parsed.hostname or parsed.path not in {"", "/"}:
+        raise ResultServiceError("download_invalid")
+    hostname = parsed.hostname.lower().rstrip(".")
+    if hostname in {"localhost", "127.0.0.1", "::1"} or "." not in hostname:
+        raise ResultServiceError("download_invalid")
+    if port is not None and port != 443 and not 1024 <= port <= 65535:
+        raise ResultServiceError("download_invalid")
+    suffix = "" if port in {None, 443} else f":{port}"
+    return f"https://{hostname}{suffix}"
+
+
 @dataclass(frozen=True, slots=True)
 class UiContent:
     """In-memory verified bytes issued to a native component through a token URL."""
@@ -503,7 +537,7 @@ class _UiContentStore:
     """Bounded server-owned content registry with no caller-visible server path."""
 
     def __init__(self, content_origin: str) -> None:
-        self._content_origin = _loopback_origin(content_origin, origin_only=True)
+        self._content_origin = _configured_content_origin(content_origin)
         self._lock = threading.RLock()
         self._values: dict[str, UiContent] = {}
 
@@ -834,6 +868,7 @@ class UiCallbacks:
         service: ResultApplicationService,
         *,
         content_origin: str = _DEFAULT_CONTENT_ORIGIN,
+        request_origin: str | None = None,
         execution_backend: ExecutionBackend = ExecutionBackend.LOCAL_FALLBACK,
     ) -> None:
         if execution_backend not in {
@@ -843,6 +878,10 @@ class UiCallbacks:
             raise ValueError("ordinary callbacks require a live execution backend")
         self._service = service
         self._content = _UiContentStore(content_origin)
+        self._request_origin = _loopback_origin(
+            request_origin or content_origin,
+            origin_only=True,
+        )
         self._sessions = _UiSessionStateStore()
         self._execution_backend = execution_backend
 
@@ -855,7 +894,7 @@ class UiCallbacks:
         if request is None:
             return
         observed = _loopback_origin(getattr(request, "url", None), origin_only=False)
-        if observed != self._content.content_origin:
+        if observed != self._request_origin:
             raise ResultServiceError("download_invalid")
 
     @staticmethod
@@ -1501,6 +1540,7 @@ def build_app(
     service: ResultApplicationService,
     *,
     content_origin: str = _DEFAULT_CONTENT_ORIGIN,
+    request_origin: str | None = None,
     preview_store: LocalPreviewStore | None = None,
     approval_key: bytes | None = None,
     preview_builder: Callable[[InputEnvelope], PreviewBundle] | None = None,
@@ -1529,6 +1569,7 @@ def build_app(
         callbacks = UiCallbacks(
             service,
             content_origin=content_origin,
+            request_origin=request_origin,
             execution_backend=configured_backend,
         )
         current_state = gr.State(_idle_view(configured_backend))

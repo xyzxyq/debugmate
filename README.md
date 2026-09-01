@@ -72,6 +72,22 @@ python -m venv .venv
 
 打开命令输出中的本地地址即可使用。2026-08-08 的验证记录来自当时已核验的 Python 3.13 环境；它说明该次验证条件，不代表每位读者本机已经存在同一路径或同一虚拟环境。
 
+### 临时公网演示
+
+当前仓库提供低并发、临时有效的 Cloudflare Quick Tunnel 启动方式：
+
+```powershell
+.\scripts\start-public-demo.ps1
+```
+
+脚本让 DebugMate 继续只监听 `127.0.0.1`，再由 `cloudflared` 生成临时 `https://*.trycloudflare.com` 地址，并将该地址注入下载内容 origin。启动后按脚本输出的公网地址访问；停止时执行：
+
+```powershell
+.\scripts\stop-public-demo.ps1
+```
+
+该方式适合课程展示和少量访问，不提供账号体系、SLA、持久化公网存储或高并发保证。公网演示仍保留 Dify live、local fallback 和 fixed replay 的真实状态标记；`DIFY_API_KEY` 只存在于运行服务端的环境变量中。
+
 ### 交付源码包
 
 仓库内的 [`deliverables/DebugMate-V0.1-source.zip`](deliverables/DebugMate-V0.1-source.zip) 是本项目的提交包，包含源码、运行契约、知识库源文件、Dify DSL、提示词、测试、课程材料和 README。包内 `PACKAGE_MANIFEST.json` 提供文件清单与 SHA-256 校验值；包外 [`source-package-manifest.json`](deliverables/source-package-manifest.json) 记录压缩包自身校验值。

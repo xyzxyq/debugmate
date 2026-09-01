@@ -23,6 +23,7 @@ from debugmate.results.verifier import VerifiedDownload
 from debugmate.ui.app import (
     UiCallbacks,
     _component_updates,
+    _configured_content_origin,
     _loopback_origin,
     correction_draft_from_fields,
     mount_content_endpoint,
@@ -37,6 +38,17 @@ def test_loopback_origin_accepts_only_string_or_real_starlette_url() -> None:
     ) == expected
     with pytest.raises(ResultServiceError):
         _loopback_origin(object(), origin_only=False)
+
+
+def test_configured_content_origin_allows_explicit_https_proxy() -> None:
+    assert (
+        _configured_content_origin("https://demo.trycloudflare.com/")
+        == "https://demo.trycloudflare.com"
+    )
+    with pytest.raises(ResultServiceError):
+        _configured_content_origin("http://public.example.com")
+    with pytest.raises(ResultServiceError):
+        _configured_content_origin("https://localhost:7860")
 
 
 def _state() -> ResultViewState:

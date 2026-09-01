@@ -1,6 +1,7 @@
 .worktrees/
 .venv/
 /video/remotion/node_modules/
+deliverables/DebugMate-V0.1-source/
 .env
 .artifacts/
 .debugmate-runtime/
