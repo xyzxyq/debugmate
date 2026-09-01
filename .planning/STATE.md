@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
 status: V0.1 rapid closeout complete with explicit Dify fallback limits
-last_updated: "2026-08-31T23:20:00+08:00"
+last_updated: "2026-09-01T09:25:00+08:00"
 progress:
   total_phases: 10
   completed_phases: 10
@@ -90,3 +90,4 @@ Phase 10 已完成材料刷新；媒体中的 Dify live、local fallback、固�
 | 260831-tnv | Support Dify Knowledge Retrieval result wrapper | 2026-08-31 | 0f81361 | Needs Review | [260831-tnv-dify-knowledge-retrieval-result](./quick/260831-tnv-dify-knowledge-retrieval-result/) |
 | 260831-tuz | Stabilize Dify Knowledge Retrieval query | 2026-08-31 | 7bdb4b0 | Needs Review | [260831-tuz-dify](./quick/260831-tuz-dify/) |
 | 260831-u18 | Bind Dify evidence to the current knowledge build and close unsafe install advice | 2026-08-31 | f255464 | Needs Review | [260831-u18-dify](./quick/260831-u18-dify/) |
+| 260901-cuw | Clarify the DebugMate defense deck technology route on slide 6 | 2026-09-01 | 0e48ea3 | Verified | [260901-cuw-debugmate-ppt](./quick/260901-cuw-debugmate-ppt/) |
